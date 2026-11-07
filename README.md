@@ -10,6 +10,8 @@ Tarvia es una empresa ficticia. Su SOC necesita investigar alertas y mantener co
 
 ## Instalar Vigía
 
+[Descargar los instaladores verificados de Vigía 0.8.1](https://github.com/marcmarti9/Hack-2026-27/actions/runs/42424325479)
+
 | Sistema | Paquete |
 | --- | --- |
 | Linux x86-64 | `Vigia-0.8.1-linux-amd64.deb` para Debian/Ubuntu y derivados. Instala con `sudo apt install ./Vigia-0.8.1-linux-amd64.deb`. |
@@ -36,6 +38,8 @@ El inicio de sesión protege la mesa dentro del perfil del usuario del sistema. 
 - Cada expediente visual reúne hechos, consultas con resultados y límites, veredicto, criterio de severidad, contraste, evidencia original, cronología, acciones e historial. Las correcciones humanas guardan el motivo; los autocierres conservan el criterio y el evento que los respaldan.
 - El motor local cubre patrones comprobables de SCCM, LSASS, WAF, intentos de credenciales, phishing con inicio de sesión correlacionado, VPN de proveedor, minería, Vela y tráfico OT autorizado. Si faltan hechos, muestra **Sin veredicto**. Las críticas se escalan en ambos turnos, con destino a N2 de guardia, responsable SOC y CISO y plazo visible. Los avisos se preparan en el expediente.
 - La agrupación actual enumera alertas relacionadas por entidad tipada y tiempo. Los grupos de incidentes y los informes N2 del archivo son referencias históricas.
+
+Para ensayar la presentación, abre **Vigía · Práctica**, selecciona **Guardia** y carga el [lote de ensayo](eval/lote-ensayo.jsonl). Abre el cierre de SCCM para enseñar el cambio y el evento que lo respaldan. Luego abre el caso crítico de LSASS para enseñar los hechos, las dudas y la decisión que queda en manos de N2. **Relevo de guardia** reúne los escalados y plazos guardados. Cuando el jurado entregue sus alertas, carga su archivo como un lote nuevo.
 
 Para ensayar desde terminal con el índice configurado en `VIGIA_OUT_DIR`, ejecuta `python -m apps.desktop.defense lote.jsonl --mode guardia`. Añade `--remote` únicamente al ensayo que deba usar OpenAI. La salida de ensayo incluye un ticket por alerta, con confianza vacía si no hubo estimación.
 
