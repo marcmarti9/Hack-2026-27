@@ -13,6 +13,7 @@ Entregar Vigía como aplicación de escritorio para el SOC de Tarvia. La mesa re
 | [Aplicación de escritorio](apps/desktop), [README](README.md) y [PR #2](https://github.com/marcmarti9/Hack-2026-27/pull/2) | Aplicación Qt e instaladores para Linux, Windows y macOS. |
 | [PR #1](https://github.com/marcmarti9/Hack-2026-27/pull/1) y el ZIP en `main` | Prototipo previo y contexto técnico del equipo. |
 | [Repositorio de Deloitte](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/5d7569232756eaf0a8723b22c428b70e8f67824f) | Dataset, política del SOC y diez runbooks oficiales. |
+| [Contexto compartido](docs/contexto-vigia.md) | Cifras medidas, los 12 incidentes y las trampas autorizadas del dataset, decisiones de diseño, brief visual y lo pendiente. Léelo antes de empezar. |
 | [Boceto original de escritorio](docs/diseno-escritorio.pdf), guías y archivos de diseño en `main` | Referencias para triaje, puntuación y copias de seguridad. El estado de cada función se comprueba en el código y sus pruebas. |
 
 ## Protocolo entre máquinas
@@ -34,3 +35,4 @@ La última entrada de cada sesión indica su estado actual.
 | 2026-11-07 | Codex · Copias y apariencia | En curso | Gestor de copias, temas claro y oscuro, espaciado y microanimaciones. Cambios en el escritorio y su empaquetado. | Rama `codex/vigia-desktop`. |
 | 2026-11-07 | Codex · Copias y apariencia | Entregado | Vigía 0.7.0 en main con los dos temas, microanimaciones, cola compacta y copias locales, USB y S3. Cinco subagentes trabajaron por vista y un revisor verificó el escritorio integrado. | [PR #2](https://github.com/marcmarti9/Hack-2026-27/pull/2), [instaladores](https://github.com/marcmarti9/Hack-2026-27/actions/runs/42417426562), recorrido Qt con 11.061 alertas, Fedora y recuperación de una copia SQLite. S3 comprobado con un doble de AWS CLI; queda por comprobar contra un bucket real. |
 | 2026-11-07 | Codex · Defensa del reto | En curso | Revisión adversarial del reto y del escritorio, expedientes visuales, triaje y guardia con límites de autorización. | Auditoría inicial y matriz de aceptación en `docs/`. Se validará con el dataset y el simulador oficiales. |
+| 2026-11-07 | Claude · Contexto | Entregado | Contexto compartido del reto en `docs/contexto-vigia.md` y `CLAUDE.md` que remite a AGENTS.md y al contexto. Solo documentación: no toca `apps/`. | Cifras comprobadas sobre el dataset oficial con el prototipo web local (13/13 comprobaciones). Siguiente paso: validar los casos estrella con un modelo real y etiquetar la muestra de desarrollo. |
