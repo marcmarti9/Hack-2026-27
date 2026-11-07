@@ -1,5 +1,7 @@
 # Hack-2026-27 | Agentic SOC para Tarvia Group
 
+[Épico y registro de coordinación](EPIC.md) · [Instrucciones para agentes](AGENTS.md)
+
 > **UAB Hackathon 2026 · Reto Deloitte: IA para ciberseguridad**  
 > **Estado del proyecto:** especificación inicial. La aplicación todavía no está implementada.
 
