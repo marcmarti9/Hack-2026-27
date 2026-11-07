@@ -134,6 +134,14 @@ def changes(q: str = "") -> list[dict]:
                  "ORDER BY inicio, id", [q.lower()])
 
 
+def active_changes(local_time: str) -> list[dict]:
+    return _rows("""
+        SELECT * FROM changes
+        WHERE CAST(? AS TIMESTAMP) BETWEEN try_cast(inicio AS TIMESTAMP) AND try_cast(fin AS TIMESTAMP)
+        ORDER BY inicio DESC, id LIMIT 16
+    """, [local_time])
+
+
 def intel(indicator: str) -> dict:
     indicator = indicator.strip().lower()
     tip = _rows("SELECT * FROM ti WHERE lower(value) = ?", [indicator])
@@ -152,6 +160,44 @@ def alerts_for_entity(value: str, limit: int = 50) -> list[dict]:
         WHERE alert_id IN (SELECT alert_id FROM alert_entities WHERE value = ?)
         ORDER BY ts, alert_id LIMIT ?
     """, [_normalize(value), _limit(limit)])]
+
+
+def related_activity(keys: list[tuple[str, str]], alert_id: str, around: str) -> tuple[list[dict], list[dict]]:
+    """Candidatos próximos por tipo y valor exactos, sin inferir que son el mismo incidente."""
+    if not keys:
+        return [], []
+    stamp = _date(around)
+    delta = timedelta(hours=24)
+    types, values = zip(*keys)
+    common = [list(types), list(values), stamp - delta, stamp + delta]
+    events = _rows("""
+        WITH keys AS (
+            SELECT unnest(?::VARCHAR[]) AS etype, unnest(?::VARCHAR[]) AS value
+        ), candidates AS (
+            SELECT DISTINCT x.event_id, x.ts FROM event_entities x
+            JOIN keys k ON x.etype = k.etype AND x.value = entity_value(k.etype, k.value)
+            WHERE x.ts BETWEEN ? AND ?
+            ORDER BY abs(epoch(x.ts - ?::TIMESTAMPTZ)), x.event_id LIMIT 24
+        )
+        SELECT e.source, e.raw FROM candidates c JOIN events e USING (event_id)
+        ORDER BY abs(epoch(c.ts - ?::TIMESTAMPTZ)), e.event_id
+    """, [*common, stamp, stamp])
+    alerts = _rows("""
+        WITH keys AS (
+            SELECT unnest(?::VARCHAR[]) AS etype, unnest(?::VARCHAR[]) AS value
+        )
+        SELECT DISTINCT a.alert_id, strftime(a.ts AT TIME ZONE 'UTC', '%Y-%m-%dT%H:%M:%SZ') AS timestamp,
+                        a.rule_id, a.severity,
+                        abs(epoch(a.ts - ?::TIMESTAMPTZ)) AS distance
+        FROM alert_entities x JOIN keys k ON x.etype = k.etype AND x.value = entity_value(k.etype, k.value)
+        JOIN alerts a USING (alert_id)
+        WHERE a.ts BETWEEN ? AND ? AND a.alert_id <> ?
+        ORDER BY distance, a.alert_id LIMIT 12
+    """, [*common[:2], stamp, *common[2:], alert_id])
+    return [_event(row) for row in events], [
+        {"alert_id": row["alert_id"], "timestamp": row["timestamp"],
+         "rule_id": row["rule_id"], "severity": row["severity"]} for row in alerts
+    ]
 
 
 def network_zones(zone: str) -> list[dict]:

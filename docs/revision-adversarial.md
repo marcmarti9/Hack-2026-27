@@ -59,3 +59,9 @@ La diferenciación que se puede defender en dos minutos es enseñar, con dos ale
 3. Abrir un caso inédito en Qt y revisar consulta, evidencia, contraste, entidades, línea de tiempo, acciones e historial. Mantener el expediente archivado identificado.
 4. Probar cita inexistente y cita auténtica que no basta para cerrar, falta de registros y guardia crítica. Ninguna aprobación se deduce de una hora, confianza o texto del modelo.
 5. Cerrar con pruebas locales y registrar los límites en GitHub. Quedan fuera del alcance mínimo el acabado visual integral, OSINT externo, recuperación automática y acreditación del nivel 4.
+
+## Primer ciclo de mejoras
+
+El ensayo offline repitió una selección determinista de diez alertas, una por runbook, con prioridad a una crítica cuando la familia la contiene. Produjo diez expedientes sin leer el archivo de referencia. Tras añadir comprobaciones de WAF, identidad, Vela y OT, obtuvo tres verdaderos positivos, un falso positivo, un positivo benigno y cinco abstenciones. Tres casos se marcaron para escalado. Estos recuentos describen lo que devolvió el motor, sin etiquetado de referencia ni estimación de precisión. La alerta externa produjo un expediente y quedó fuera del cierre automático. [Ensayo reproducible](../scripts/check_defense.py)
+
+La revisión Qt contrastó LSASS archivado, LSASS analizado en guardia y el autocierre de SCCM con un cambio aprobado. El expediente de lote abre el análisis de esa ejecución aunque el perfil ya contenga una revisión del mismo ID. La contención de nivel 4, la medición de OpenAI con una clave válida y la defensa con las diez entradas del jurado siguen sin acreditarse.

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from PySide6.QtCore import QDate, QSignalBlocker, QSize, Qt, QTimer
-from PySide6.QtGui import QBrush, QColor, QFontDatabase
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QBoxLayout, QButtonGroup, QCheckBox, QComboBox, QDateEdit, QDialog, QFileDialog, QGridLayout,
     QHBoxLayout, QHeaderView, QLineEdit, QMenu, QMessageBox, QProgressBar, QSlider,
@@ -19,11 +19,14 @@ from apps.backend.tools import db
 from apps.desktop.assistant import available_model, context_for, local_answer, openai_answer
 from apps.desktop.backup_page import BackupPage
 from apps.desktop.brand_widgets import Mark, navigation_icon
-from apps.desktop.case_data import SECTION_NAMES, case_sections, demo_process, fraction, pretty, soc_status
+from apps.desktop.case_data import (
+    SECTION_NAMES, case_panels, demo_process, evidence_sections, fraction, pretty, soc_status,
+)
 from apps.desktop.demo import DEMO_ALERT, archive, for_alert
+from apps.desktop.defense import load_alerts
 from apps.desktop.operations import Operations
 from apps.desktop.reports import imported_summary, read_report
-from apps.desktop.review import CLASSIFICATIONS, PLAYBOOKS, VERDICTS, investigate, replay_demo
+from apps.desktop.review import CLASSIFICATIONS, PLAYBOOKS, VERDICTS, investigate, replay_demo, reviewed_proposal
 from apps.desktop.widgets import Article, button, fade_in, label, palette_for, set_primary, text_area
 
 PAGE_SIZE = 50
@@ -337,8 +340,7 @@ class Workbench(QWidget):
         self.query.setAccessibleName("Buscar alertas")
         self.search = button("Buscar", self._search)
         self.prepare = button("Preparar 5", self._prepare_queue, primary=True,
-                              tip="Envía a OpenAI hasta cinco alertas visibles para análisis y contraste")
-        self.prepare.setVisible(bool(self._remote_model()))
+                              tip="Investiga hasta cinco alertas visibles con datos locales")
         self.query.returnPressed.connect(self.search.click)
         filters.addWidget(self.query, 1)
         filters.addWidget(self.search)
@@ -348,6 +350,27 @@ class Workbench(QWidget):
             filters.addWidget(demo_case)
             self.operations.append(demo_case)
         layout.addLayout(filters)
+
+        shift = QHBoxLayout()
+        self.triage_mode = QComboBox()
+        self.triage_mode.setAccessibleName("Modo de triaje")
+        self.triage_mode.addItem("Con analista", "diurno")
+        self.triage_mode.addItem("Guardia", "guardia")
+        self.triage_mode.setCurrentIndex(int(soc_status() == "SOC cerrado"))
+        self.triage_mode.setToolTip("Selecciona el escenario para el siguiente lote. Las críticas se escalan en ambos modos.")
+        self.defense_button = button("Cargar lote de defensa", self._defense_batch)
+        self.monitor = QTimer(self)
+        self.monitor.setInterval(2000)
+        self.monitor.timeout.connect(self._monitor_tick)
+        self.monitor_failures = set()
+        self.monitor_button = button("Vigilar índice", self._toggle_monitor,
+                                     tip="Investiga el índice en segundo plano, de mayor a menor prioridad")
+        self.operations.extend((self.triage_mode, self.defense_button))
+        shift.addWidget(self.triage_mode)
+        shift.addWidget(self.defense_button)
+        shift.addWidget(self.monitor_button)
+        shift.addStretch()
+        layout.addLayout(shift)
 
         options = QHBoxLayout()
         options.setSpacing(9)
@@ -497,49 +520,155 @@ class Workbench(QWidget):
 
     @staticmethod
     def _can_accept(item: dict) -> bool:
-        return not item.get("decision") and (item.get("analysis") or {}).get("verdict") in CLASSIFICATIONS
+        return not item.get("decision") and reviewed_proposal(item.get("analysis") or {})
 
     def _queue_candidates(self):
         return [
             alert for alert in self.rows
             if not self.reviews.get(alert["alert_id"], {}).get("decision")
-            and not (self.reviews.get(alert["alert_id"], {}).get("analysis") or {}).get("proposal")
-            and alert.get("related_events")
+            and not (self.reviews.get(alert["alert_id"], {}).get("analysis") or {}).get("routing")
         ][:5]
 
     def _prepare_queue(self):
         batch = self._queue_candidates()
-        if not batch or not self._remote_model():
+        if not batch:
             return
+        self._triage_batch(batch)
+
+    def _defense_batch(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Cargar alertas de defensa", "", "Alertas JSONL (*.jsonl)")
+        if not path:
+            return
+        remote = False
+        if self._remote_model():
+            selected = QMessageBox.question(
+                self, "Motor para el lote", "¿Enviar las evidencias a OpenAI para propuesta y contraste?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.No,
+            )
+            if selected == QMessageBox.StandardButton.Cancel:
+                return
+            remote = selected == QMessageBox.StandardButton.Yes
+        self._triage_batch(lambda: load_alerts(Path(path)), remote=remote, present=True)
+
+    def _toggle_monitor(self):
+        if self.monitor.isActive():
+            self._stop_monitor("Vigilancia detenida.")
+            return
+        self.monitor_failures.clear()
+        self.monitor.start()
+        self.monitor_button.setText("Detener vigilancia")
+        self._monitor_tick()
+
+    def _stop_monitor(self, message):
+        self.monitor.stop()
+        self.monitor_button.setText("Vigilar índice")
+        self.status.setText(message)
+
+    def _monitor_tick(self):
+        if self.window.job:
+            return
+        completed = {key for key, item in self.reviews.items()
+                     if item.get("decision") or (item.get("analysis") or {}).get("routing")}
+        exclusions = completed | self.monitor_failures
+        mode = "guardia" if soc_status() == "SOC cerrado" else "diurno"
+        self._triage_batch(lambda: db.alert_page("", 0, 10, sort="severity", exclude_ids=list(exclusions))[0],
+                           monitor=True, mode=mode)
+
+    def _triage_batch(self, source, *, remote=False, present=False, monitor=False, mode=None):
+        mode = mode or self.triage_mode.currentData()
 
         def operation():
-            documents = {key: self.store.guidance(key) for key in {item["runbook"] for item in batch}}
-            processed, failures = 0, []
+            batch = source() if callable(source) else source
+            documents = {key: self.store.guidance(key) for key in {item["runbook"] for item in batch}} if remote else {}
+            results = {}
             with ThreadPoolExecutor(max_workers=2) as pool:
-                pending = {pool.submit(investigate, item, True, documents[item["runbook"]]): item["alert_id"]
+                pending = {pool.submit(investigate, item, remote, documents.get(item["runbook"]),
+                                       triage=True, mode=mode): item["alert_id"]
                            for item in batch}
                 for task in as_completed(pending):
                     alert_id = pending[task]
                     try:
-                        self.store.save_analysis(alert_id, task.result())
-                        processed += 1
-                    except (ValueError, OSError) as error:
-                        failures.append(f"{alert_id} · {error}")
-            return processed, "\n".join(failures)
+                        result = task.result()
+                        self.store.save_analysis(alert_id, result)
+                        results[alert_id] = (result, "")
+                    except Exception as error:
+                        results[alert_id] = (None, str(error))
+            return [(item, *results[item["alert_id"]]) for item in batch]
 
         def done(result, error):
             self.reviews = self.store.all()
             self._render_rows()
             if error:
+                if monitor:
+                    self._stop_monitor("Vigilancia interrumpida. Vuelve a intentarlo.")
                 self._error("Se interrumpió el análisis de la cola.", error)
                 return
-            processed, message = result
             self.stats_loaded = False
-            self.status.setText(f"{processed}/{len(batch)} analizadas")
-            if message:
-                self._error("Algunas alertas no pudieron analizarse.", message)
+            if monitor:
+                self.monitor_failures.update(item["alert_id"] for item, _, failure in result if failure)
+                if not result:
+                    failure_count = len(self.monitor_failures)
+                    self._stop_monitor(f"Vigilancia al día · {failure_count} alertas con error por revisar.")
+                    return
+            processed = sum(bool(analysis) for _, analysis, _ in result)
+            self.status.setText(f"{processed}/{len(result)} investigadas · {len(result) - processed} errores")
+            if present:
+                self._batch_results(result)
+            elif not monitor and (failures := [f"{item['alert_id']} · {message}" for item, _, message in result if message]):
+                self._error("Algunas alertas no pudieron analizarse.", "\n".join(failures))
 
-        self._run(operation, done, f"Analizando {len(batch)} alertas con OpenAI…")
+        self._run(operation, done, "Investigando el lote con OpenAI…" if remote else "Investigando el lote con datos locales…")
+
+    def _batch_results(self, results):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Lote de defensa")
+        dialog.resize(910, 620)
+        body = QVBoxLayout(dialog)
+        body.setContentsMargins(26, 23, 26, 24)
+        body.addWidget(label("Lote de defensa", "title"))
+        body.addWidget(label("Abre un expediente para comprobar cómo se llegó a la recomendación.", "muted"))
+        grid = table(["Alerta", "Severidad", "Resultado", "Siguiente paso", "Tiempo"])
+        grid.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        routes = {"close": "Cerrar", "review": "Revisar", "escalate": "Escalar"}
+        for alert, analysis, error in results:
+            if error:
+                values = (alert["alert_id"], "—", "Error", error, "—")
+            else:
+                routing = analysis["routing"]
+                disposition = routes[routing["recommendation"]]
+                saved = self.reviews.get(alert["alert_id"], {})
+                if saved.get("decision") == "automatic":
+                    disposition = "Cierre automático"
+                values = (alert["alert_id"], SEVERITY[analysis["severity"]][0], VERDICTS[analysis["verdict"]][0],
+                          disposition, f"{analysis['timing']['total_ms']} ms")
+            row = grid.rowCount()
+            grid.insertRow(row)
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                item.setToolTip(value)
+                grid.setItem(row, column, item)
+        grid.selectRow(0)
+        body.addWidget(grid, 1)
+        controls = QHBoxLayout()
+        controls.addStretch()
+        def show_case(row):
+            if 0 <= row < len(results):
+                alert, analysis, _ = results[row]
+                if analysis:
+                    self._detail(alert, defense_result=analysis)
+
+        open_case = button("Ver expediente", lambda: show_case(grid.currentRow()), primary=True)
+        def enable_case(row, *_):
+            open_case.setEnabled(0 <= row < len(results) and bool(results[row][1]))
+
+        enable_case(grid.currentRow())
+        grid.currentCellChanged.connect(enable_case)
+        controls.addWidget(open_case)
+        controls.addWidget(button("Cerrar", dialog.reject))
+        body.addLayout(controls)
+        grid.cellActivated.connect(lambda row, _: show_case(row))
+        dialog.exec()
 
     def _render_rows(self):
         selected = self.selected["alert_id"] if self.selected else ""
@@ -557,7 +686,9 @@ class Workbench(QWidget):
             verdict = VERDICTS[verdict_key][0]
             severity_key = analysis.get("severity", alert["severity"])
             level = SEVERITY.get(severity_key, SEVERITY["informational"])[0]
-            state = {"accepted": "Validada", "corrected": "Corregida"}.get(item.get("decision"))
+            state = {"accepted": "Validada", "corrected": "Corregida", "automatic": "Cierre automático"}.get(item.get("decision"))
+            if not state and analysis.get("routing", {}).get("recommendation") == "escalate":
+                state = "Escalada"
             state = state or ("Por decidir" if self._can_accept(item) else
                               "Sin consenso" if analysis.get("proposal") else "Pendiente")
             stamp = alert["created_at"]
@@ -666,19 +797,29 @@ class Workbench(QWidget):
             choices.addItem(VERDICTS[key][0], key)
         choices.setCurrentIndex(-1)
         layout.addWidget(choices)
+        reason = QLineEdit()
+        reason.setObjectName("decisionReason")
+        reason.setAccessibleName("Justificación de la decisión")
+        reason.setPlaceholderText("Indica el hecho o la evidencia que respalda tu decisión")
+        reason.setMaxLength(700)
+        layout.addWidget(reason)
         actions = QHBoxLayout()
         actions.addWidget(button("Cancelar", dialog.reject))
         save = button("Registrar decisión", dialog.accept, primary=True)
         save.setEnabled(False)
-        choices.currentIndexChanged.connect(lambda index: save.setEnabled(index >= 0))
+        def validate():
+            save.setEnabled(choices.currentIndex() >= 0 and bool(reason.text().strip()))
+
+        choices.currentIndexChanged.connect(validate)
+        reason.textChanged.connect(validate)
         actions.addWidget(save)
         layout.addLayout(actions)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self._save_decision(alert, choices.currentData(), "corrected")
+            self._save_decision(alert, choices.currentData(), "corrected", reason=reason.text())
 
-    def _save_decision(self, alert, verdict, decision, expected=None):
+    def _save_decision(self, alert, verdict, decision, expected=None, reason=""):
         try:
-            changed = self.store.decide(alert["alert_id"], verdict, decision, self.window.account.name(), expected)
+            changed = self.store.decide(alert["alert_id"], verdict, decision, self.window.account.name(), expected, reason)
             self.reviews = self.store.all()
         except Exception as error:
             self._error("No se pudo guardar la decisión.", error)
@@ -697,20 +838,23 @@ class Workbench(QWidget):
             else:
                 self._detail(alert)
 
-        self._run(lambda: db.get_alert(alert_id), done, "Buscando alerta…")
+        imported = (self.reviews.get(alert_id, {}).get("analysis") or {}).get("input_alert")
+        self._run(lambda: db.get_alert(alert_id) or imported, done, "Buscando alerta…")
 
-    def _detail(self, alert):
+    def _detail(self, alert, *, defense_result=None):
         if self.window.job:
             return
         alert_id = alert["alert_id"]
-        ticket, incident, closed = for_alert(alert_id)
+        inspection = defense_result is not None
+        hide_archive = inspection or bool(alert.get("external"))
+        ticket, incident, closed = ({}, {}, {}) if hide_archive else for_alert(alert_id)
         baseline = {}
         dialog = QDialog(self)
         dialog.setWindowTitle("Detalle · " + alert_id)
         dialog.resize(900, 735)
         layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(30, 23, 30, 24)
-        layout.setSpacing(14)
+        layout.setContentsMargins(24, 18, 24, 18)
+        layout.setSpacing(10)
         heading = QHBoxLayout()
         heading.addWidget(label(f"{alert_id}  ·  {alert['source_product']}  ·  {alert['runbook']}", "muted"), 1)
         heading.addWidget(button("Ver guías", lambda: self._view_guidance(dialog, alert["runbook"])))
@@ -732,7 +876,8 @@ class Workbench(QWidget):
             column.addWidget(values[title])
             metrics.addLayout(column, 2 if title == "Veredicto" else 1)
         layout.addWidget(facts)
-        feedback = label("", "muted")
+        feedback = label("", "accentText")
+        feedback.setAccessibleName("Estado de la revisión")
         layout.addWidget(feedback)
 
         tabs = QTabWidget()
@@ -749,11 +894,10 @@ class Workbench(QWidget):
         selector.addWidget(event_choice, 1)
         selector.addWidget(event_detail)
         data_layout.addLayout(selector)
-        evidence = text_area("Eventos y contexto consultados")
-        evidence.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        evidence = Article("Hallazgos y cobertura de las evidencias")
         data_layout.addWidget(evidence, 1)
         tabs.addTab(data_page, "Evidencias")
-        extra = {name: text_area(name) for name in SECTION_NAMES}
+        extra = {name: Article(name) for name in SECTION_NAMES}
         for name, widget in extra.items():
             tabs.addTab(widget, name)
         layout.addWidget(tabs, 1)
@@ -768,20 +912,31 @@ class Workbench(QWidget):
             remote = button("Analizar y contrastar con OpenAI", primary=True,
                             tip="Envía la alerta, sus eventos y las guías de triaje a OpenAI en dos pasadas")
             remote.setVisible(bool(self._remote_model()))
+        local = button("Triar con datos locales",
+                       tip="Consulta el índice sin red. La política puede cerrar actividad autorizada verificada.")
+        if inspection:
+            local.hide()
+            remote.hide()
         export = button("Exportar JSON")
+        footer.addWidget(local)
         footer.addWidget(remote)
         footer.addWidget(export)
         footer.addStretch()
         accept = button("Aceptar", primary=True)
+        accept.setAccessibleDescription("Registra el veredicto de la alerta.")
+        accept.setToolTip("Registra el veredicto de la alerta.")
         correct = button("Corregir")
+        if inspection:
+            accept.hide()
+            correct.hide()
         close = button("Cerrar", dialog.reject)
         for control in (accept, correct, close):
             footer.addWidget(control)
         layout.addLayout(footer)
 
         def render():
-            item = self.reviews.get(alert_id, {})
-            analysis = item.get("analysis") or baseline
+            item = {} if inspection else self.reviews.get(alert_id, {})
+            analysis = defense_result if inspection else (item.get("analysis") or baseline)
             verdict = item.get("verdict") or analysis.get("verdict", "needs_more_info")
             verdict_name = VERDICTS[verdict][0]
             verdict_color = self.verdict_color(verdict)
@@ -794,94 +949,140 @@ class Workbench(QWidget):
             values["Veredicto"].setStyleSheet(f"color: {verdict_color};")
             confidence = analysis.get("confidence")
             values["Confianza"].setText(f"{confidence} %" if confidence is not None else "—")
-            values["Eventos"].setText(str(len(analysis["events"])) if analysis else "—")
+            values["Confianza"].setToolTip("Estimación del expediente de referencia"
+                                           if analysis.get("origin") == "demo"
+                                           else "Estimación del análisis disponible")
+            events = analysis.get("events", [])
+            values["Eventos"].setText(str(len(events)) if analysis else "—")
 
-            sections = [("Qué detectó el SIEM", alert["description"])]
-            sources = []
-            event_ids = list(alert["related_events"])
+            sections = []
+            event_ids = list(alert.get("related_events", []))
+            routing = analysis.get("routing") or {}
+            automatic = item.get("decision") == "automatic"
+            if routing:
+                mode = {"guardia": "Guardia", "diurno": "Horario atendido"}.get(routing.get("mode"), "Modo sin registrar")
+                step = {"close": "Cierre recomendado", "escalate": "Escalar", "review": "Revisión humana"}.get(
+                    routing.get("recommendation"), "Paso por determinar")
+                if automatic:
+                    step = "Cierre automático registrado"
+                status = ("Automatizable según política" if routing.get("automatic")
+                          else "Requiere intervención humana")
+                recipients = routing.get("recipients") or []
+                deadline = routing.get("deadline_at")
+                sections.append(("Resultado de la política" if automatic else "Siguiente paso", "\n".join(filter(None, [
+                    f"{mode} · {step}" if automatic else f"{mode} · {step} · {status}", routing.get("reason"),
+                    f"Responsables: {', '.join(recipients)}" if recipients else "",
+                    f"Plazo desde la alerta: {madrid(deadline):%d/%m/%Y %H:%M %Z}" if deadline else "",
+                ]))))
             if analysis:
-                if analysis.get("origin") == "demo":
-                    feedback.setText("Análisis de referencia · propuesta y contraste archivados")
-                elif analysis.get("review_error") or analysis.get("proposal_error"):
-                    feedback.setText("Análisis pendiente de revisión")
-                elif self._can_accept(item):
-                    feedback.setText("El contraste coincide con la propuesta. Puedes aceptarla o corregirla.")
+                proposal = analysis.get("proposal")
+                challenge = analysis.get("challenge")
+                if challenge and proposal:
+                    contrast = ("Contraste de acuerdo" if proposal["verdict"] == challenge["verdict"]
+                                else "Contraste discrepante")
+                elif analysis.get("review_error") and "challenge_ms" in analysis.get("timing", {}):
+                    contrast = "Contraste interrumpido"
                 else:
-                    feedback.setText("Sin decisión registrada.")
+                    contrast = "Contraste sin ejecutar"
+                is_local = analysis.get("provider") == "Reglas locales"
+                if is_local:
+                    contrast = "Comprobación local" if challenge else "Evidencia local insuficiente"
+                if analysis.get("origin") == "demo":
+                    feedback.setText(f"Análisis de referencia · {contrast}")
+                elif is_local:
+                    feedback.setText(f"Triaje local · {contrast}")
+                elif not proposal and not challenge and not analysis.get("provider"):
+                    feedback.setText("Consulta de evidencias · Sin veredicto")
+                elif analysis.get("review_error") or analysis.get("proposal_error"):
+                    feedback.setText(f"Análisis pendiente de revisión · {contrast}")
+                elif self._can_accept(item):
+                    feedback.setText(f"{contrast} · Veredicto disponible para revisión")
+                else:
+                    feedback.setText(f"{contrast} · Sin decisión registrada")
                 sections.extend([
-                    ("Propuesta", self._result_text(analysis.get("proposal"), analysis.get("proposal_error", ""))),
-                    ("Revisión adversarial", self._result_text(analysis.get("challenge"), analysis.get("review_error", ""))),
+                    ("Propuesta", self._result_text(proposal, analysis.get("proposal_error", ""))),
+                    ("Comprobación local" if is_local else "Revisión adversarial",
+                     self._result_text(challenge, analysis.get("review_error", ""))),
                 ])
-                for event in analysis["events"]:
-                    sources.extend([f"{event['event_id']} · {event['source']}", pretty(event), ""])
-                    event_ids.append(event["event_id"])
-                missing = set(analysis["requested"]) - {x["event_id"] for x in analysis["events"]}
-                policy = [analysis["severity_rationale"], f"SLA: {analysis['sla']}",
-                          f"{len(analysis['events'])} eventos recuperados. Consulta la pestaña Evidencias."]
-                if alert["related_events"]:
-                    policy.append("Referencias de la alerta: " + ", ".join(alert["related_events"]))
-                if missing:
-                    policy.append("Eventos no encontrados: " + ", ".join(sorted(missing)))
-                sections.append(("Datos y criterio de severidad", "\n".join(policy)))
-                if "sent_events" in analysis:
-                    sources.extend(["Registros incluidos en la solicitud a OpenAI",
-                                    pretty(analysis["sent_events"]), ""])
-                for name, records in analysis.get("context", {}).items():
-                    if records:
-                        sources.extend([name.capitalize(), pretty(records), ""])
+                if not is_local and (finding := analysis.get("verified_finding")):
+                    sections.append(("Hallazgo verificado en el índice", self._result_text(finding)))
+                event_ids.extend(event["event_id"] for event in events)
+                sections.append(("Severidad y plazo", "\n".join([
+                    analysis.get("severity_rationale") or "Criterio no registrado",
+                    f"SLA: {analysis.get('sla') or 'No registrado'}",
+                ])))
+                for query in analysis.get("trace") or []:
+                    result = query.get("count")
+                    sections.append((f"Consulta · {query.get('tool') or 'Herramienta'}", "\n".join(filter(None, (
+                        str(query.get("query") or ""),
+                        f"Resultados: {result}" if result is not None else "",
+                        query.get("note"),
+                    )))))
                 timings = analysis.get("timing", {})
                 phases = {"evidence_ms": "Datos", "proposal_ms": "Propuesta",
                           "challenge_ms": "Contraste", "total_ms": "Total"}
                 trace = ["  ·  ".join(f"{title} {timings[key]} ms" for key, title in phases.items() if key in timings)]
                 if analysis.get("guidance"):
                     trace.append("Guías usadas: " + " · ".join(f"{key} v{rev}" for key, rev in analysis["guidance"].items()))
+                if analysis.get("review_provider"):
+                    trace.append(f"Contraste: {analysis['review_provider']} · {analysis['review_reason']}")
                 if confidence is not None:
-                    trace.append(f"Confianza estimada por {analysis['provider']}: {confidence}%")
+                    trace.append(f"Confianza estimada por {analysis.get('provider') or 'el análisis'}: {confidence}%")
                 sections.append(("Tiempos y guías", "\n".join(line for line in trace if line)))
             else:
                 feedback.setText("Cargando evidencias del índice…")
+            if inspection:
+                feedback.setText("Resultado del lote de defensa · " + feedback.text())
+            sections.append(("Qué detectó el SIEM", alert["description"]))
             if item.get("decision"):
-                feedback.setText(f"Decisión registrada · {verdict_name} · {item['reviewer']}")
-                sections.insert(1, ("Decisión humana", f"{verdict_name} · {item['reviewer']} · {item['reviewed_at']}"))
+                heading = "Cierre automático registrado" if automatic else "Decisión registrada"
+                feedback.setText(f"{heading} · {verdict_name} · {item['reviewer']}")
+                sections.insert(0, (heading, f"{verdict_name} · {item['reviewer']} · {item['reviewed_at']}"))
             if archived := demo_process(ticket, closed):
                 sections.append(("Expediente de referencia", "\n".join(archived).strip()))
             if ticket:
-                sources.extend(["Evidencias y hallazgos del expediente archivado", pretty(ticket.get("evidence", []))])
                 event_ids.extend(event["event_id"] for event in ticket.get("evidence", []))
             event_ids.extend(point["event_id"] for point in incident.get("timeline", []))
             detail.show_sections(sections)
-            evidence.setPlainText("\n".join(sources) or "No hay datos recuperados.")
+            evidence.show_sections(evidence_sections(alert, analysis, ticket))
             previous = event_choice.currentText()
             event_choice.clear()
             event_choice.addItems(list(dict.fromkeys(key for key in event_ids if key and key != "unknown")))
             if previous:
                 event_choice.setCurrentText(previous)
             event_detail.setEnabled(bool(event_choice.count()) and self.window.job is None)
-            history = self.store.history(alert_id)
-            if item.get("decision") and not any(entry["kind"] in {"Aceptada", "Corregida"} for entry in history):
-                history.append({"created_at": item["reviewed_at"], "kind": "Decisión humana",
+            history = [] if inspection else self.store.history(alert_id)
+            if item.get("decision") and not any(entry["kind"] in {"Aceptada", "Corregida", "Cierre automático"}
+                                                for entry in history):
+                history.append({"created_at": item["reviewed_at"],
+                                "kind": "Cierre automático" if automatic else "Decisión humana",
                                 "actor": item["reviewer"], "data": {"verdict": item["verdict"]}})
-            for name, content in case_sections(alert, analysis, history).items():
-                extra[name].setPlainText(content)
+            for name, content in case_panels(alert, analysis, history, hide_archive=hide_archive).items():
+                extra[name].show_sections(content)
             can_accept = self._can_accept(item)
             accept.setEnabled(can_accept)
-            set_primary(remote, not can_accept and not item.get("decision"))
-            for control in (remote, correct):
+            primary = not can_accept and not item.get("decision")
+            set_primary(remote, primary and not remote.isHidden())
+            set_primary(local, primary and remote.isHidden())
+            for control in (local, remote, correct):
                 control.setEnabled(not item.get("decision") and self.window.job is None)
 
-        def analyze(run_review):
-            if self.window.job or not dialog.isVisible():
+        def analyze(method):
+            if inspection or self.window.job or not dialog.isVisible():
                 return
-            for control in (remote, accept, correct, event_detail):
+            mode = self.triage_mode.currentData()
+            save = method != "evidence"
+            for control in (local, remote, accept, correct, event_detail):
                 control.setEnabled(False)
-            message = "Recuperando datos…"
-            if run_review:
-                message = ("Recuperando el expediente archivado…" if self.demo else
-                           "Consultando datos y ejecutando las dos pasadas…")
-            feedback.setText(message)
+            feedback.setText({
+                "evidence": "Recuperando datos…",
+                "local": "Triando con las reglas locales…",
+                "reference": "Recuperando el expediente archivado…",
+                "provider": "Consultando datos y ejecutando las dos pasadas…",
+            }[method])
 
             def finished(result, error):
-                if run_review:
+                if save:
                     self.reviews = self.store.all()
                     self.stats_loaded = False
                     self._render_rows()
@@ -893,12 +1094,13 @@ class Workbench(QWidget):
                         feedback.setText(f"Análisis interrumpido: {error}")
 
             def operation():
-                if run_review and self.demo:
+                if method == "reference":
                     analysis = replay_demo(alert, ticket)
                 else:
-                    guidance = self.store.guidance(alert["runbook"]) if run_review else None
-                    analysis = investigate(alert, run_review, guidance)
-                if run_review:
+                    guidance = self.store.guidance(alert["runbook"]) if method == "provider" else None
+                    analysis = investigate(alert, method == "provider", guidance,
+                                           triage=method == "local", mode=mode)
+                if save:
                     self.store.save_analysis(alert_id, analysis)
                 return analysis
 
@@ -925,27 +1127,44 @@ class Workbench(QWidget):
 
             self._run(lambda: db.get_event(event_id), done, "Consultando evento original…")
 
+        def run_remote():
+            if self.demo:
+                analyze("reference")
+                return
+            selected = QMessageBox.question(
+                dialog, "Enviar evidencias a OpenAI",
+                "¿Enviar la alerta, una selección de eventos, su contexto y las guías de triaje a OpenAI "
+                "para generar la propuesta y el contraste?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if selected == QMessageBox.StandardButton.Yes:
+                analyze("provider")
+
         def export_case():
             name, _ = QFileDialog.getSaveFileName(dialog, "Exportar expediente", f"{alert_id}.json", "JSON (*.json)")
             if not name:
                 return
             try:
-                record = self.reviews.get(alert_id, {})
-                Path(name).write_text(pretty({"alerta": alert, "revision_local": record, "contexto": baseline,
-                                             "historial": self.store.history(alert_id),
-                                             "demo": {"ticket": ticket, "n2": incident, "descarte": closed}}) + "\n",
-                                      encoding="utf-8")
+                if inspection:
+                    payload = {"alerta": alert, "resultado_lote": defense_result}
+                else:
+                    payload = {"alerta": alert, "revision_local": self.reviews.get(alert_id, {}), "contexto": baseline,
+                               "historial": self.store.history(alert_id),
+                               "demo": {"ticket": ticket, "n2": incident, "descarte": closed}}
+                Path(name).write_text(pretty(payload) + "\n", encoding="utf-8")
             except OSError as error:
                 self._error("No se pudo exportar el expediente.", error)
 
-        remote.clicked.connect(lambda: analyze(True))
+        local.clicked.connect(lambda: analyze("local"))
+        remote.clicked.connect(run_remote)
         accept.clicked.connect(lambda: (self._accept(alert), render()))
         correct.clicked.connect(lambda: (self._correct(alert), render()))
         event_detail.clicked.connect(view_event)
         export.clicked.connect(export_case)
         render()
-        if not self.reviews.get(alert_id, {}).get("analysis"):
-            QTimer.singleShot(0, lambda: analyze(False))
+        if not inspection and not self.reviews.get(alert_id, {}).get("analysis"):
+            QTimer.singleShot(0, lambda: analyze("evidence"))
         dialog.exec()
 
     def _view_guidance(self, parent, runbook):

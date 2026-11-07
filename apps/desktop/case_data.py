@@ -4,73 +4,199 @@ from datetime import datetime, timezone
 
 from apps.backend.rules.engine import fuera_de_horario
 from apps.desktop.demo import display_questions, for_alert
+from apps.desktop.review import VERDICTS
 
 SECTION_NAMES = ("Entidades", "Línea de tiempo", "Acciones", "Historial")
+
+_LABELS = {
+    "alert_id": "Alerta", "event_id": "Evento", "hostname": "Equipo", "hosts": "Equipos",
+    "ip": "IP", "ips": "Direcciones IP", "upn": "Cuenta", "users": "Identidades",
+    "display_name": "Nombre", "business_service": "Servicio de negocio",
+    "business_services": "Servicios de negocio", "business_impact": "Impacto en el negocio",
+    "criticality": "Criticidad", "zone": "Zona", "privileged": "Privilegios",
+    "account_type": "Tipo de cuenta", "indicator": "Indicador", "source": "Fuente",
+    "result": "Resultado", "reason": "Motivo", "to": "Destinatario",
+    "customers": "Clientes", "data": "Datos afectados", "target": "Objetivo",
+    "requires_approval": "Requiere autorización", "approver": "Responsable de autorizar",
+    "justification": "Justificación", "verdict": "Veredicto", "rule_id": "ID de regla",
+    "rule": "Regla", "closed": "Cierre registrado", "severity": "Severidad",
+    "created_at": "Fecha", "escalate": "Escalar", "citations": "Evidencias citadas",
+}
+
+_ACTION_LABELS = {
+    "isolate_host": "Aislar equipo", "disable_user": "Deshabilitar cuenta",
+    "revoke_sessions": "Revocar sesiones", "reset_password": "Restablecer contraseña",
+    "block_ioc": "Bloquear indicador", "purge_email": "Purgar correo",
+    "disable_access_key": "Desactivar clave cloud",
+}
 
 
 def pretty(data) -> str:
     return json.dumps(data, ensure_ascii=False, indent=2, default=str)
 
 
-def case_sections(alert: dict, analysis: dict, history: list[dict]) -> dict:
-    demo, incident, closed = for_alert(alert["alert_id"])
-    scope = incident.get("scope") or {}
-    entities = [
-        "Entidades de la alerta", pretty(alert.get("entities", {})),
-        "Contexto recuperado en Vigía", pretty(analysis.get("context", {})),
-    ]
+def _label(key: str) -> str:
+    return _LABELS.get(key, key.replace("_", " ").capitalize())
+
+
+def _display(value) -> str:
+    """Convierte campos a texto legible sin interpretar marcas ni URLs."""
+    if isinstance(value, dict):
+        rows = []
+        for key, item in value.items():
+            text = VERDICTS[item][0] if key == "verdict" and isinstance(item, str) and item in VERDICTS else _display(item)
+            rows.append(f"{_label(key)}\n{text}" if isinstance(item, (dict, list)) else f"{_label(key)}: {text}")
+        return "\n".join(rows) or "Sin datos"
+    if isinstance(value, list):
+        return "\n\n".join(_display(item) for item in value) or "Sin datos"
+    if isinstance(value, bool):
+        return "Sí" if value else "No"
+    return str(value) if value is not None and value != "" else "Sin datos"
+
+
+def _event_line(event: dict) -> str:
+    return " · ".join(filter(None, (event.get("timestamp"), event.get("source"), event.get("event_id"))))
+
+
+def evidence_sections(alert: dict, analysis: dict, ticket: dict) -> list[tuple[str, str]]:
+    events = analysis.get("events", [])
+    recovered = {event["event_id"] for event in events}
+    declared = list(dict.fromkeys(alert.get("related_events", [])))
+    requested = list(dict.fromkeys(analysis.get("requested", declared)))
+    sent = [event["event_id"] for event in analysis.get("sent_events", [])]
+    additional = [event["event_id"] for event in analysis.get("challenge_events", [])]
+    coverage = "Aún no se han consultado los registros del índice."
+    if analysis:
+        found = f"{len(events)} eventos recuperados" if len(events) != 1 else "1 evento recuperado"
+        declared_text = f"{len(declared)} referencias de la alerta" if len(declared) != 1 else "1 referencia de la alerta"
+        coverage = f"{found} · {declared_text}"
+        if "sent_events" in analysis:
+            coverage += f" · {len(sent)} registros para la propuesta"
+        if additional:
+            coverage += f" · {len(additional)} adicionales para el contraste"
+    sections = [("Cobertura de las evidencias", coverage)]
+    if declared:
+        sections.append(("Referencias de la alerta", ", ".join(declared)))
+    if analysis and (missing := [key for key in requested if key not in recovered]):
+        sections.append(("Referencias no recuperadas", ", ".join(missing)))
+    if ticket.get("evidence"):
+        sections.append(("Hallazgos del expediente de referencia",
+                         "\n\n".join(f"{row['event_id']} · {row['source']}\n{row['finding']}"
+                                      for row in ticket["evidence"])))
+    if events:
+        sections.append(("Registros recuperados del índice", "\n".join(_event_line(row) for row in events)))
+    elif analysis:
+        sections.append(("Registros del índice", "No se recuperaron eventos."))
+    if "sent_events" in analysis:
+        sections.append(("Registros incluidos en la propuesta al modelo", ", ".join(sent) or "Ninguno"))
+    if "challenge_events" in analysis:
+        sections.append(("Registros adicionales del contraste", ", ".join(additional) or "Ninguno"))
+    for key, title in (("proposal", "Citas de la propuesta"), ("challenge", "Citas del contraste")):
+        result = analysis.get(key)
+        if result:
+            sections.append((title, ", ".join(result.get("citations", [])) or "Ninguna cita registrada"))
+    return sections
+
+
+def case_panels(alert: dict, analysis: dict, history: list[dict], *,
+                hide_archive: bool = False) -> dict[str, list[tuple[str, str]]]:
+    demo, incident, closed = ({}, {}, {}) if hide_archive else for_alert(alert["alert_id"])
+    entities = [(f"{_label(key)} de la alerta", _display(value))
+                for key, value in alert.get("entities", {}).items() if value]
+    if not entities:
+        entities.append(("Entidades de la alerta", "La alerta no identifica entidades."))
+    for name, records in analysis.get("context", {}).items():
+        if records:
+            entities.append((f"{_label(name)} · índice local", _display(records)))
     if demo:
-        entities.extend(["Entidades y servicios del ticket archivado", pretty(demo.get("affected", {})),
-                         "Enriquecimiento", pretty(demo.get("enrichment", [])),
-                         "Alertas vinculadas", "\n".join(demo["alert_ids"]),
-                         "Técnicas MITRE", ", ".join(demo.get("mitre", []))])
-    if scope:
-        entities.extend(["Alcance e impacto (informe N2)", pretty(scope)])
+        entities.extend([
+            ("Entidades y servicios · ticket de referencia", _display(demo.get("affected", {}))),
+            ("Enriquecimiento · ticket de referencia", _display(demo.get("enrichment", []))),
+            ("Alertas vinculadas", "\n".join(demo["alert_ids"])),
+            ("Técnicas MITRE", ", ".join(demo.get("mitre", [])) or "Sin técnicas registradas"),
+        ])
+    if incident.get("scope"):
+        entities.append(("Alcance e impacto · informe N2", _display(incident["scope"])))
 
-    timeline = [
-        f"{event.get('timestamp', 'Fecha desconocida')} · {event['event_id']} · {event['source']}"
-        for event in sorted(analysis.get("events", []), key=lambda item: item.get("timestamp", ""))
-    ]
+    timeline = []
     if incident:
-        timeline.extend(["", f"Informe N2 archivado · {incident['incident_id']}",
-                         f"{incident.get('title', '')} · confianza del archivo {incident.get('confidence', 0):.0%}",
-                         f"Paciente cero: {incident.get('patient_zero', 'Sin determinar')}",
-                         f"Acceso inicial: {incident.get('initial_access', 'Sin determinar')}"])
-        timeline.extend(f"{point['timestamp']} · {point['event_id']} · {point.get('mitre', '')}\n{point['description']}"
-                        for point in incident.get("timeline", []))
-        timeline.extend(["", "Causa raíz", incident.get("root_cause", ""),
-                         "Notificaciones", "\n".join(incident.get("notifications", [])),
-                         "Límites y preguntas N2", "\n".join(display_questions(incident)),
-                         "Brechas de detección", "\n".join(incident.get("detection_gaps", [])),
-                         "Incidentes relacionados", ", ".join(incident.get("related_incidents", []))])
+        confidence = incident.get("confidence")
+        timeline.append((f"Informe N2 archivado · {incident['incident_id']}", "\n".join([
+            incident.get("title", ""),
+            f"Paciente cero: {incident.get('patient_zero') or 'Sin determinar'}",
+            f"Acceso inicial: {incident.get('initial_access') or 'Sin determinar'}",
+            f"Confianza del archivo: {confidence:.0%}" if confidence is not None else "Sin estimación",
+        ])))
+        points = sorted(incident.get("timeline", []), key=lambda item: item.get("timestamp") or "")
+        timeline.extend([
+            ("Cadena del incidente de referencia",
+             "\n\n".join(f"{_event_line(point)} · {point.get('mitre') or 'Sin técnica MITRE'}\n{point['description']}"
+                         for point in points) or "Sin pasos registrados."),
+            ("Causa raíz", incident.get("root_cause") or "Sin determinar"),
+            ("Notificaciones archivadas", "\n".join(incident.get("notifications", [])) or "Sin registros"),
+            ("Límites y preguntas N2", "\n".join(display_questions(incident)) or "Sin preguntas registradas"),
+            ("Brechas de detección", "\n".join(incident.get("detection_gaps", [])) or "Sin brechas registradas"),
+            ("Incidentes relacionados", ", ".join(incident.get("related_incidents", [])) or "Sin vínculos registrados"),
+        ])
+    else:
+        timeline.append(("Informe N2", "No hay un informe N2 asociado a esta alerta."))
+    events = sorted(analysis.get("events", []), key=lambda item: item.get("timestamp") or "")
+    timeline.append(("Eventos recuperados del índice",
+                     "\n".join(_event_line(event) for event in events)
+                     or "Todavía no hay eventos recuperados para esta alerta."))
 
+    actions = []
     proposal = analysis.get("proposal") or {}
     challenge = analysis.get("challenge") or {}
-    actions = ["Sugerencias de la propuesta", *proposal.get("actions", []),
-               "", "Sugerencias del contraste", *challenge.get("actions", [])]
+    if analysis.get("origin") != "demo" and proposal.get("actions"):
+        actions.append(("Sugerencias de la propuesta", "\n".join(proposal["actions"])))
+    if challenge.get("actions"):
+        actions.append(("Sugerencias del contraste", "\n".join(challenge["actions"])))
     if demo:
-        actions.extend(["", "Acciones propuestas en el expediente de referencia", pretty(demo.get("recommended_actions", [])),
-                        "Escalado", pretty(demo.get("escalation", {})),
-                        "Ejecuciones registradas en el expediente de referencia", pretty(demo.get("executed_actions", []))])
+        recommendations = []
+        for row in demo.get("recommended_actions", []):
+            action = _ACTION_LABELS.get(row.get("action"), _display(row.get("action")))
+            approval = ("Requiere autorización" if row.get("requires_approval")
+                        else "El archivo no indica autorización adicional")
+            recommendations.append(f"{action} · {row['target']}\n{row['justification']}\nPropuesta de referencia · {approval}")
+        actions.extend([
+            ("Escalado · ticket de referencia", _display(demo.get("escalation", {}))),
+            ("Propuestas del ticket de referencia", "\n\n".join(recommendations) or "Sin propuestas registradas"),
+            ("Ejecuciones en el ticket de referencia",
+             _display(demo["executed_actions"]) if demo.get("executed_actions") else "Sin ejecuciones registradas"),
+        ])
     if incident:
-        actions.extend(["", "Plan N2 de contención", pretty(incident.get("containment_plan", [])),
-                        "Erradicación y recuperación", "\n".join(incident.get("eradication_and_recovery", []))])
+        actions.extend([
+            ("Plan N2 de contención", _display(incident["containment_plan"])
+             if incident.get("containment_plan") else "El informe de referencia no registra un plan."),
+            ("Erradicación y recuperación", "\n".join(incident.get("eradication_and_recovery", []))
+             or "Sin pasos registrados"),
+        ])
 
-    activity = [
-        f"{entry['created_at']} · {entry['kind']} · {entry['actor']}\n" + (
-            (entry["data"].get("proposal") or {}).get("summary", "Consulta de datos") if entry["kind"] == "Análisis"
-            else pretty(entry["data"])
-        ) for entry in history
-    ]
+    activity = []
+    for entry in history:
+        data = entry["data"]
+        if entry["kind"] == "Análisis":
+            source = "Análisis de referencia" if data.get("origin") == "demo" else "Análisis registrado"
+            outcome = (data.get("proposal") or {}).get("summary", "Consulta de datos")
+            content = f"{source}\n{outcome}"
+        else:
+            content = _display(data)
+        activity.append((f"{entry['kind']} · {entry['actor']}", f"{entry['created_at']}\n{content}"))
     if closed:
-        activity.extend(["", "Descarte de referencia en el expediente de referencia", pretty(closed)])
+        activity.append(("Descarte · expediente de referencia", _display(closed)))
 
     return {
-        "Entidades": "\n\n".join(entities),
-        "Línea de tiempo": "\n\n".join(timeline).strip() or "Todavía no hay eventos recuperados para esta alerta.",
-        "Acciones": "\n".join(actions) if demo or proposal or challenge else "Todavía no hay acciones propuestas.",
-        "Historial": "\n\n".join(activity).strip() or "Todavía no hay actividad registrada para esta alerta.",
+        "Entidades": entities,
+        "Línea de tiempo": timeline,
+        "Acciones": actions or [("Acciones", "Todavía no hay acciones propuestas.")],
+        "Historial": activity or [("Actividad", "Todavía no hay actividad registrada para esta alerta.")],
     }
+
+
+def case_sections(alert: dict, analysis: dict, history: list[dict]) -> dict[str, str]:
+    return {name: "\n\n".join(f"{title}\n{body}" for title, body in sections)
+            for name, sections in case_panels(alert, analysis, history).items()}
 
 
 def demo_process(ticket: dict, closed: dict) -> list[str]:
@@ -94,7 +220,7 @@ def demo_process(ticket: dict, closed: dict) -> list[str]:
             if ticket.get("manipulation_detected", {}).get("detected") else "Sin señal registrada en el expediente de referencia"
         ),
         "", "Traza de investigación archivada",
-        *[f"{step.get('nombre', 'Resumen')} · {step.get('texto') or pretty(step.get('entrada', {}))}"
+        *[f"{step.get('nombre', 'Resumen')} · {step.get('texto') or _display(step.get('entrada', {}))}"
           + (f"\nResultado de herramienta: {step['resultado']}" if step.get("resultado") else "")
           for step in ticket.get("trace", [])],
         "", "Contraste archivado", fiscal.get("comment", "Sin contraste en este ticket."),

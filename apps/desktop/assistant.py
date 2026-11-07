@@ -45,24 +45,30 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
-DEFAULT_MODEL = "gpt-5.4-mini"
+DEFAULT_MODEL = "gpt-6-luna"
+DEFAULT_REVIEW_MODEL = "gpt-6.1-sol"
 
 
 def available_model() -> str:
     return (os.getenv("OPENAI_MODEL") or DEFAULT_MODEL) if os.getenv("OPENAI_API_KEY") else ""
 
 
-def openai_message(instructions: str, content: dict, *, schema: dict | None = None) -> str:
-    model = available_model()
-    if not model:
+def review_model() -> str:
+    return os.getenv("OPENAI_REVIEW_MODEL") or DEFAULT_REVIEW_MODEL
+
+
+def openai_message(instructions: str, content: dict, *, schema: dict | None = None, model: str = "") -> str:
+    primary = available_model()
+    if not primary:
         raise ValueError("Configura OPENAI_API_KEY para usar OpenAI.")
+    model = model or primary
     payload = {
         "model": model, "instructions": instructions,
         "input": json.dumps(content, ensure_ascii=False, default=str, separators=(",", ":")),
-        "max_output_tokens": 640 if schema else 600,
+        "max_output_tokens": 1200 if schema else 700,
         "store": False,
     }
-    if model == DEFAULT_MODEL or model.startswith(DEFAULT_MODEL + "-"):
+    if model.startswith(("gpt-6-", "gpt-6.1-", "gpt-5.4-mini")):
         payload["reasoning"] = {"effort": "low"}
     if schema:
         payload["text"] = {"format": {

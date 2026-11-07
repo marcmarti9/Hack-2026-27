@@ -9,7 +9,10 @@ from unittest.mock import patch
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QPlainTextEdit, QPushButton, QTabWidget, QTextBrowser, QLabel
+from PySide6.QtWidgets import (
+    QApplication, QComboBox, QDialog, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
+    QPushButton, QTableWidget, QTabWidget, QTextBrowser,
+)
 
 
 def wait_for(condition, description: str, timeout: float = 60) -> None:
@@ -161,7 +164,13 @@ def check(app, window, home, password, output):
                 assert isinstance(dialog, QDialog)
                 controls = {button.text(): button for button in dialog.findChildren(QPushButton)}
                 wait_for(lambda: window.job is None, "precarga de datos")
-                controls["Analizar y contrastar con OpenAI"].click()
+                assert controls["Triar con datos locales"].isEnabled()
+                with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.No) as decline:
+                    controls["Analizar y contrastar con OpenAI"].click()
+                    assert decline.call_args.args[-1] == QMessageBox.StandardButton.No
+                transport.assert_not_called()
+                with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes):
+                    controls["Analizar y contrastar con OpenAI"].click()
                 wait_for(lambda: window.job is None, "segunda pasada")
                 text = dialog.findChild(QTextBrowser, "reviewProcess").toPlainText()
                 assert "Confianza estimada por test-model: 77%" in text
@@ -172,6 +181,10 @@ def check(app, window, home, password, output):
                 assert [tabs.tabText(i) for i in range(tabs.count())] == [
                     "Resumen", "Evidencias", "Entidades", "Línea de tiempo", "Acciones", "Historial"
                 ]
+                assert not tabs.findChildren(QPlainTextEdit)
+                evidence = tabs.widget(1).findChild(QTextBrowser).toPlainText()
+                assert "Cobertura de las evidencias" in evidence and "EDR-0123412" in evidence
+                assert "Citas de la propuesta" in evidence and "Citas del contraste" in evidence
                 assert "INC-20261009-011790" in tabs.widget(3).toPlainText()
                 assert "Verificar el equipo con N2." in tabs.widget(4).toPlainText()
                 guidance_failures = []
@@ -299,17 +312,17 @@ def check(app, window, home, password, output):
     work.query.setText("ALR-20261005-000172")
     work.search.click()
     wait_for(lambda: work.total == 1, "lote filtrado")
-    proposal = {**response, "citations": ["WAF-0001840"]}
-    with patch("apps.desktop.review.openai_message", side_effect=[json.dumps(proposal)] * 2) as transport:
+    with patch("apps.desktop.review.openai_message") as transport:
         work.prepare.click()
         wait_for(lambda: window.job is None, "preparar lote")
-        assert transport.call_count == 2
-    assert work.table.item(0, 3).text() == "Por decidir"
+        transport.assert_not_called()
+    assert work.reviews["ALR-20261005-000172"]["analysis"]["routing"]["recommendation"] == "review"
 
     def correct():
         dialog = app.activeModalWidget()
         choice = dialog.findChild(QComboBox)
         choice.setCurrentIndex(choice.findData("false_positive"))
+        dialog.findChild(QLineEdit, "decisionReason").setText("Decisión de ensayo tras revisar el evento WAF-0001840.")
         next(control for control in dialog.findChildren(QPushButton)
              if control.text() == "Registrar decisión").click()
 
@@ -317,6 +330,46 @@ def check(app, window, home, password, output):
     work.queue_correct.click()
     assert work.table.item(0, 3).text() == "Corregida"
     assert work.table.item(0, 4).text() == "Falso positivo"
+    assert "WAF-0001840" in window.reviews.history("ALR-20261005-000172")[0]["data"]["reason"]
+
+    work._toggle_monitor()
+    work._toggle_monitor()
+    wait_for(lambda: window.job is None, "vigilancia priorizada")
+    assert not work.monitor.isActive()
+    escalations = [row["analysis"] for row in work.reviews.values() if row["analysis"] and
+                   row["analysis"].get("routing", {}).get("recommendation") == "escalate"]
+    assert len(escalations) > 1
+
+    inputs = ["ALR-20261005-000301", "ALR-20261010-011795", "ALR-20261021-011900"]
+    failures = []
+    finished = False
+
+    def verify_batch():
+        nonlocal finished
+        dialog = app.activeModalWidget()
+        if not isinstance(dialog, QDialog):
+            QTimer.singleShot(25, verify_batch)
+            return
+        try:
+            assert dialog.windowTitle() == "Lote de defensa"
+            grid = dialog.findChild(QTableWidget)
+            assert [grid.item(row, 0).text() for row in range(grid.rowCount())] == inputs
+            assert "Cierre automático" in grid.item(0, 3).text()
+            assert grid.item(1, 3).text() == "Escalar"
+            if output:
+                dialog.grab().save(str(output.with_name("vigia-lote-guardia.png")))
+        except BaseException as error:
+            failures.append(error)
+        finally:
+            finished = True
+            dialog.close()
+
+    work.triage_mode.setCurrentIndex(work.triage_mode.findData("guardia"))
+    work._triage_batch([db.get_alert(key) for key in inputs], present=True)
+    QTimer.singleShot(80, verify_batch)
+    wait_for(lambda: finished, "lote de defensa en la mesa")
+    if failures:
+        raise failures[0]
     window.close()
 
 
@@ -340,12 +393,15 @@ def check_demo(app, window, normal_profile, output):
             wait_for(lambda: window.job is None, "evidencias de la demo")
             controls = {control.text(): control for control in dialog.findChildren(QPushButton)}
             assert "Analizar y contrastar con OpenAI" not in controls
+            assert controls["Triar con datos locales"].isEnabled()
             assert window.workbench.model.findData(True) == -1
             assert not controls["Aceptar"].isEnabled()
             controls["Cargar análisis de referencia"].click()
             wait_for(lambda: window.job is None, "reproducción del expediente")
             text = dialog.findChild(QTextBrowser, "reviewProcess").toPlainText()
-            assert "85%" in text and "EDR-0123412" in text
+            tabs = dialog.findChild(QTabWidget)
+            evidence = tabs.widget(1).findChild(QTextBrowser).toPlainText()
+            assert "85%" in text and "EDR-0123412" in evidence
             assert any("Análisis de referencia" in node.text() for node in dialog.findChildren(QLabel))
             if output:
                 dialog.grab().save(str(output.with_name("vigia-demo-lsass.png")))

@@ -1,7 +1,7 @@
 # Contexto compartido de Vigía
 
 Resumen de lo que el equipo ha descubierto y decidido sobre el reto. Sirve para que cualquier persona o IA que trabaje en el
-repositorio parta del mismo punto. Las cifras se han medido sobre el dataset oficial de Deloitte. El código vigente está en
+repositorio parta del mismo punto. Las cifras de filtrado, grupos y caza de esta nota describen el prototipo del equipo y su archivo de referencia. Para el estado comprobado del escritorio, consulta la [revisión adversarial](revision-adversarial.md). El código vigente está en
 `apps/` y el estado de cada trabajo, en [EPIC.md](../EPIC.md).
 
 Guías de referencia en el repositorio: `VIGÍA guía completa del proyecto.pdf` (qué y por qué) y
@@ -13,7 +13,7 @@ Guías de referencia en el repositorio: `VIGÍA guía completa del proyecto.pdf`
 - El problema: unas 4.000 alertas al día, 3 analistas N1 y un SOC abierto de lunes a viernes de 8:00 a 20:00. Fuera de horario solo hay un N2 de guardia por teléfono.
 - Vigía es **el SOC que no se apaga**. De día entrega cada alerta ya investigada y de noche hace la guardia. Lema: **la IA investiga, la persona decide**.
 - Dato gancho: el **62,1 %** de las alertas que llegan a la IA (tras el filtro) saltó fuera de horario, frente al 31,7 % del total. Frase: "Los atacantes de Tarvia trabajan cuando el SOC duerme".
-- Formatos obligatorios: `01_contexto/ticket_salida.schema.json` (ticket N1) e `informe_incidente.schema.json` (informe N2, fase 2).
+- Formatos de referencia opcionales: `01_contexto/ticket_salida.schema.json` (ticket N1) e `informe_incidente.schema.json` (informe N2, fase 2).
 
 ## 2. Cifras medidas
 
