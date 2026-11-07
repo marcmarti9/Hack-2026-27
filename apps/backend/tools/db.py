@@ -130,3 +130,14 @@ def alerts_for_entity(value: str, limit: int = 50) -> list[dict]:
 
 def network_zones(zone: str) -> list[dict]:
     return _rows("SELECT * FROM zones WHERE zona = ?", [zone])
+
+
+def alert_page(query: str, offset: int, limit: int = 100) -> tuple[list[dict], int]:
+    pattern = query.strip().lower()
+    predicate = "WHERE contains(lower(alert_id || ' ' || rule_id || ' ' || raw::VARCHAR), ?)" if pattern else ""
+    params = [pattern] if pattern else []
+    rows = _rows(f"""
+        SELECT raw, count(*) OVER () AS total FROM alerts {predicate}
+        ORDER BY ts DESC, alert_id LIMIT ? OFFSET ?
+    """, [*params, _limit(limit), offset])
+    return [json.loads(row["raw"]) for row in rows], rows[0]["total"] if rows else 0

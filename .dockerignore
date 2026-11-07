@@ -6,3 +6,6 @@
 !scripts/
 !scripts/**
 **/__pycache__/
+!requirements-desktop.txt
+!packaging/
+!packaging/**

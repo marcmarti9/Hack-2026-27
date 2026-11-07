@@ -1,0 +1,23 @@
+"""Genera la aplicación congelada para el sistema operativo de compilación."""
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / "out" / "packaging"
+VERSION = "0.1.0"
+
+
+def main() -> None:
+    # https://pyinstaller.org/en/stable/usage.html
+    subprocess.run([
+        sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
+        "--name", "Vigia", "--onedir", "--windowed",
+        "--paths", str(ROOT), "--collect-data", "tzdata",
+        "--distpath", str(OUT / "dist"), "--workpath", str(OUT / "work"),
+        "--specpath", str(OUT), str(ROOT / "apps" / "desktop" / "entry.py"),
+    ], check=True, cwd=ROOT)
+
+
+if __name__ == "__main__":
+    main()

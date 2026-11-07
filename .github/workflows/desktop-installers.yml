@@ -1,0 +1,101 @@
+name: Instaladores de Vigía
+on:
+  pull_request:
+    paths:
+      - 'apps/**'
+      - 'packaging/**'
+      - 'requirements*.txt'
+      - '.dockerignore'
+      - '.github/workflows/desktop-installers.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build -f packaging/Dockerfile.linux -t vigia-desktop-builder .
+      - run: |
+          mkdir -p out
+          docker run --rm --network none --user "$(id -u):$(id -g)" \
+            -e HOME=/tmp -v "$PWD/out:/vigia/out" vigia-desktop-builder sh packaging/linux.sh
+          docker run --rm --network none -e QT_QPA_PLATFORM=offscreen -e HOME=/tmp/vigia-profile \
+            -v "$PWD/out/installers:/installers:ro" vigia-desktop-builder sh -ec '
+              dpkg -i /installers/Vigia-0.1.0-linux-amd64.deb
+              status=0; timeout 5s /usr/bin/vigia || status=$?
+              test "$status" -eq 124
+              test -f "$HOME/.local/share/Vigia/session.sqlite"
+              dpkg -r vigia
+              test ! -e /usr/bin/vigia
+            '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vigia-linux-x64
+          path: out/installers/*
+          if-no-files-found: error
+
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            artifact: vigia-windows-x64
+          - runner: macos-15
+            artifact: vigia-macos-arm64
+          - runner: macos-15-intel
+            artifact: vigia-macos-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt -r requirements-desktop.txt
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python packaging/build.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $compiler = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Inno Setup *\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (!$compiler) {
+            choco install innosetup -y --no-progress
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            $compiler = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Inno Setup *\ISCC.exe" | Select-Object -First 1
+          }
+          if (!$compiler) { throw "No se encontró ISCC.exe" }
+          & $compiler.FullName packaging/windows.iss
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $installPath = Join-Path $env:RUNNER_TEMP "vigia-installed"
+          $setup = Start-Process out/installers/Vigia-0.1.0-windows-x64.exe -ArgumentList @(
+            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$installPath`""
+          ) -Wait -PassThru
+          if ($setup.ExitCode) { exit $setup.ExitCode }
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $app = Start-Process (Join-Path $installPath "Vigia.exe") -PassThru
+          try {
+            Start-Sleep -Seconds 5
+            $app.Refresh()
+            if ($app.HasExited) { throw "Vigía terminó durante el arranque" }
+          } finally {
+            if (!$app.HasExited) { Stop-Process -Id $app.Id }
+          }
+      - if: runner.os == 'macOS'
+        run: |
+          sh packaging/macos.sh
+          hdiutil verify out/installers/*.dmg
+          QT_QPA_PLATFORM=offscreen out/packaging/dist/Vigia.app/Contents/MacOS/Vigia &
+          app=$!
+          trap 'kill "$app" 2>/dev/null || true' EXIT
+          sleep 5
+          kill -0 "$app"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: out/installers/*
+          if-no-files-found: error

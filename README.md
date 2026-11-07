@@ -2,13 +2,46 @@
 
 UAB The Hack 2026 · Reto Deloitte de IA para ciberseguridad · Marc's & Co.
 
-Vigía será una aplicación de escritorio en español con instaladores para Linux, Windows y macOS. El flujo confirmado empieza con el inicio de sesión, muestra el estado de carga y abre el área de trabajo con las alertas y el chat con la IA. El diseño detallado de las pantallas lo facilita el equipo.
+Vigía es una aplicación de escritorio en español. El flujo empieza con el inicio de sesión, muestra el estado de carga y abre la mesa de trabajo con alertas, expedientes y chat.
 
 Tarvia es una empresa ficticia. Su SOC necesita investigar alertas y mantener cobertura fuera de horario. Vigía prepara evidencias, un veredicto, una prioridad y una recomendación para el analista. El reto exige mostrar el triaje en directo con las alertas comunes de la defensa. [Enunciado, datos y presentación de Deloitte](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/5d7569232756eaf0a8723b22c428b70e8f67824f)
 
+## Instalar Vigía
+
+| Sistema | Paquete |
+| --- | --- |
+| Linux x86-64 | `Vigia-0.1.0-linux-amd64.deb` para Debian/Ubuntu y derivados. Instala con `sudo apt install ./Vigia-0.1.0-linux-amd64.deb`. |
+| Linux x86-64, instalación por usuario | Extrae `Vigia-0.1.0-linux-x86_64.tar.gz` y ejecuta `sh vigia/install.sh`. Crea una entrada en el menú. |
+| Windows x64 | Ejecuta `Vigia-0.1.0-windows-x64.exe`, generado por el workflow de instaladores. |
+| macOS Apple Silicon e Intel | Abre el `.dmg` de tu arquitectura y arrastra Vigía a Aplicaciones. Los builds de desarrollo carecen de firma de distribución y notarización. |
+
+En el primer inicio, crea la cuenta local y selecciona la carpeta raíz del [dataset de Tarvia](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/5d7569232756eaf0a8723b22c428b70e8f67824f). La importación corre en segundo plano y deja un índice reutilizable en el perfil del sistema operativo. El instalador lleva su runtime de Python y Qt. El dataset se descarga por separado.
+
+La mesa permite buscar y paginar alertas, leer sus expedientes y consultar la alerta activa o un ID de evento desde el chat. El modo local recupera datos sin conexión y presenta referencias de los logs. Para activar Claude, inicia Vigía con `ANTHROPIC_API_KEY` y `ANTHROPIC_MODEL` en el entorno. La opción es voluntaria y cada consulta marcada envía la pregunta, la alerta y hasta ocho eventos recuperados a Anthropic. La salida de Claude se muestra como sugerencia. La presencia de referencias válidas no certifica el contenido de la sugerencia.
+
+El inicio de sesión protege la mesa dentro del perfil del usuario del sistema. La cuenta se guarda con una derivación PBKDF2 y sal aleatoria. Quien controla los archivos del perfil también controla el acceso al índice. Esta versión tiene una cuenta local por perfil y carece de aprobación de contenciones desde la interfaz.
+
+### Desarrollo y empaquetado
+
+```bash
+python -m pip install -r requirements.txt -r requirements-desktop.txt
+python -m apps.desktop.entry
+```
+
+Para generar los paquetes de Linux en `out/installers`:
+
+```bash
+mkdir -p out
+docker build -f packaging/Dockerfile.linux -t vigia-desktop-builder .
+docker run --rm --network none --user "$(id -u):$(id -g)" -e HOME=/tmp \
+  -v "$PWD/out:/vigia/out" vigia-desktop-builder sh packaging/linux.sh
+```
+
+En Windows el flujo ejecuta `python packaging/build.py` y compila `packaging/windows.iss` con Inno Setup. En macOS ejecuta `sh packaging/macos.sh`. [Workflow de instaladores](https://github.com/marcmarti9/Hack-2026-27/actions)
+
 ## Motor disponible
 
-La primera entrega de esta rama contiene la ingesta del dataset oficial, las consultas de solo lectura y las funciones de severidad y aprobación. Aún no hay un ejecutable de escritorio ni un flujo N1 completo. Docker sirve para reproducir el entorno de desarrollo y sus pruebas.
+El motor contiene la ingesta del dataset oficial, las consultas de solo lectura y las funciones de severidad y aprobación. El flujo de investigación N1 completo y la ejecución contra el simulador están pendientes. Docker reproduce el entorno de desarrollo y compilación.
 
 1. Coloca el dataset oficial en `data/dataset`, con `01_contexto` a `06_herramientas` en ese nivel. Puedes usar otra carpeta con `VIGIA_DATA_DIR` o `--dataset`.
 2. Desde la raíz, con Python 3.11, ejecuta:
@@ -60,7 +93,7 @@ La guía técnica define la estructura y el orden de trabajo del motor. En caso 
 | N2 | Validar el informe y su línea temporal. Las fechas se recuperan del evento citado. La guía produce un informe incompleto sin campos obligatorios si el modelo agota sus turnos; la aplicación debe mostrar un estado pendiente en ese caso. |
 | Chat | Consultas de solo lectura, respuestas con referencias y distinción entre hechos y dudas. Mostrar herramientas y resultados observables como traza. |
 | Contención | El ejemplo de la guía acepta el nombre del aprobador en el cuerpo y construye una ruta con el ID del ticket. La aplicación debe verificar identidad, roles, acción y objetivo contra una propuesta registrada antes de pedir el token al simulador. Toda ejecución queda vinculada a la decisión humana. OT solo se escala. |
-| Escritorio | Login, carga y área de trabajo con alertas y chat. Los detalles de mapa, bandeja, caso, métricas y navegación se decidirán con las pantallas del equipo. Los scripts que abren un navegador en la guía se consideran herramientas de desarrollo. |
+| Escritorio | Inicio de sesión local, carga y área de trabajo con alertas, expediente y chat. Los detalles de mapa y métricas quedan pendientes del diseño del equipo. |
 | Métricas y defensa | Comparar con etiquetas revisadas y registrar tiempos medidos. Los 15 minutos de las diapositivas son una estimación del proceso manual. El contador de la demo debe distinguir una estimación de una medición. |
 
 La política de prioridad y los permisos se implementan con los apartados 2 a 5 de la política del SOC. El simulador ofrece un contrato propio de aprobación y contención. El código de esta rama aún carece de operaciones contra ese simulador. [Política del SOC](https://github.com/dttdfr/DTT-UAB-The-Hack/blob/5d7569232756eaf0a8723b22c428b70e8f67824f/01_contexto/politica_soc.md) · [API simulada](https://github.com/dttdfr/DTT-UAB-The-Hack/blob/5d7569232756eaf0a8723b22c428b70e8f67824f/06_herramientas/LEEME_herramientas.md)
