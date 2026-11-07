@@ -1,9 +1,10 @@
-# Hack-2026-27 | Agentic SOC para Tarvia Group
+# Vigía · SOC de Tarvia
 
 [Épico y registro de coordinación](EPIC.md) · [Instrucciones para agentes](AGENTS.md)
 
-> **UAB Hackathon 2026 · Reto Deloitte: IA para ciberseguridad**  
-> **Estado del proyecto:** especificación inicial. La aplicación todavía no está implementada.
+La aplicación de escritorio y sus instaladores se preparan en la rama de producto. [Aplicación de escritorio](https://github.com/marcmarti9/Hack-2026-27/tree/codex/vigia-desktop) · [PR #2](https://github.com/marcmarti9/Hack-2026-27/pull/2) · [Diseño de escritorio](docs/diseno-escritorio.pdf)
+
+El resto de este documento recoge la especificación inicial del SOC.
 
 ## TL;DR
 
@@ -102,7 +103,7 @@ Un resultado con pruebas insuficientes **no debe transformarse en una clasificac
 
 ## 5. Arquitectura propuesta
 
-Para la hackathon conviene construir un **orquestador central con herramientas especializadas**, no siete agentes independientes que intercambian mensajes sin control. Los siete pasos son responsabilidades lógicas; podemos ejecutarlos mediante funciones deterministas y llamadas al modelo solo donde aporten valor.
+Para el prototipo conviene construir un **orquestador central con herramientas especializadas**, no siete agentes independientes que intercambian mensajes sin control. Los siete pasos son responsabilidades lógicas; podemos ejecutarlos mediante funciones deterministas y llamadas al modelo solo donde aporten valor.
 
 ```mermaid
 flowchart TD
@@ -134,7 +135,7 @@ flowchart TD
 6. **Dashboard:** permite seguir la cola, abrir un expediente, revisar los pasos del agente y tomar decisiones humanas.
 7. **Acciones del SOC:** crea tickets y ejecuta **únicamente** las operaciones simuladas permitidas, respetando el token de aprobación humana.
 
-La elección de lenguaje, framework, base de datos, proveedor LLM y despliegue sigue **pendiente**. Antes de escogerlos debemos ver el contrato de la API y los recursos disponibles en la hackathon.
+La elección de lenguaje, framework, base de datos, proveedor LLM y despliegue sigue **pendiente**. Antes de escogerlos debemos ver el contrato de la API y los recursos disponibles en el entorno de prueba.
 
 ## 6. Contrato lógico de salida
 
@@ -274,6 +275,6 @@ No hay comandos de instalación ni de ejecución todavía porque **no se ha eleg
 
 ## Referencia del reto
 
-README elaborado a partir de las diapositivas del **reto de Deloitte en la UAB Hackathon 2026** compartidas por el equipo. Tarvia Group y su infraestructura son un **caso ficticio** del ejercicio.
+README elaborado a partir de las diapositivas del **caso de Deloitte** compartidas por el equipo. Tarvia Group y su infraestructura son un **caso ficticio** del ejercicio.
 
 Este documento recoge **requisitos del reto** y una **propuesta inicial de implementación**. Actualizaremos las secciones técnicas conforme comprobemos el funcionamiento de la API y construyamos el proyecto.
