@@ -1,16 +1,33 @@
 """Consultas locales de solo lectura para Vigía."""
 import json
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timedelta
 
 import duckdb
 
 from apps.backend.config import DB
 
+_active_connection = ContextVar("vigia_read_connection", default=None)
+
+
+@contextmanager
+def read_session():
+    if _active_connection.get() is not None:
+        yield
+        return
+    with duckdb.connect(str(DB), read_only=True, config={"enable_external_access": False}) as connection:
+        token = _active_connection.set(connection)
+        try:
+            yield
+        finally:
+            _active_connection.reset(token)
+
 
 def _rows(sql: str, params=()) -> list[dict]:
     # https://duckdb.org/docs/current/clients/python/dbapi
-    with duckdb.connect(str(DB), read_only=True, config={"enable_external_access": False}) as con:
-        result = con.execute(sql, params)
+    with read_session():
+        result = _active_connection.get().execute(sql, params)
         columns = [column[0] for column in result.description]
         return [dict(zip(columns, row)) for row in result.fetchall()]
 
@@ -42,6 +59,15 @@ def _limit(limit: int) -> int:
 def get_event(event_id: str) -> dict | None:
     rows = _rows("SELECT source, raw FROM events WHERE event_id = ?", [event_id])
     return _event(rows[0]) if rows else None
+
+
+def get_events(event_ids: list[str]) -> list[dict]:
+    if not event_ids:
+        return []
+    rows = _rows("SELECT event_id, source, raw FROM events WHERE event_id IN (SELECT unnest(?::VARCHAR[]))",
+                 [event_ids])
+    by_id = {row["event_id"]: _event(row) for row in rows}
+    return [by_id[key] for key in dict.fromkeys(event_ids) if key in by_id]
 
 
 def get_alert(alert_id: str) -> dict | None:
@@ -186,3 +212,20 @@ def alert_timeline(day: str) -> list[dict]:
 def latest_alert_day() -> str:
     result = _rows("SELECT CAST(max(ts AT TIME ZONE 'UTC') AS DATE) AS day FROM alerts")[0]["day"]
     return result.isoformat() if result else ""
+
+
+def alert_schedule(*, day: str = "", ids: list[str] | None = None) -> tuple[int, int]:
+    condition, params = "", []
+    if day:
+        condition = "WHERE CAST(ts AT TIME ZONE 'UTC' AS DATE) = CAST(? AS DATE)"
+        params = [day]
+    elif ids is not None:
+        condition = "WHERE alert_id IN (SELECT unnest(?::VARCHAR[]))"
+        params = [ids]
+    row = _rows(f"""
+        SELECT count(*) AS total,
+            count(*) FILTER (WHERE isodow(local_time) > 5 OR hour(local_time) < 8
+                            OR hour(local_time) >= 20) AS closed
+        FROM (SELECT ts AT TIME ZONE 'Europe/Madrid' AS local_time FROM alerts {condition})
+    """, params)[0]
+    return row["total"], row["closed"]

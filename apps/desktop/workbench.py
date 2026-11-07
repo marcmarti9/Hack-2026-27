@@ -1,8 +1,9 @@
 """Cola SIEM, decisiones, estadísticas e informe de Vigía."""
 import json
-import os
 import sys
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from pathlib import Path
 
 from PySide6.QtCore import QDate, Qt, QTimer
@@ -13,10 +14,13 @@ from PySide6.QtWidgets import (
     QSplitter, QStackedWidget, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
-from apps.backend.rules.engine import LEVELS
+from apps.backend.rules.engine import LEVELS, fuera_de_horario, madrid
 from apps.backend.tools import db
-from apps.desktop.assistant import claude_answer, context_for, local_answer
+from apps.desktop.assistant import available_model, context_for, local_answer, openai_answer
 from apps.desktop.brand_widgets import Mark
+from apps.desktop.case_data import SECTION_NAMES, case_sections, demo_process, fraction, pretty, soc_status
+from apps.desktop.demo import archive, for_alert
+from apps.desktop.operations import Operations
 from apps.desktop.reports import imported_summary, read_report
 from apps.desktop.review import CLASSIFICATIONS, VERDICTS, investigate
 from apps.desktop.widgets import button, label, text_area
@@ -55,12 +59,8 @@ def calendar(day: str) -> QDateEdit:
     return widget
 
 
-def available_model() -> str:
-    return os.getenv("ANTHROPIC_MODEL", "") if os.getenv("ANTHROPIC_API_KEY") else ""
-
-
 class Workbench(QWidget):
-    def __init__(self, window, rows: list[dict], total: int, latest_day: str):
+    def __init__(self, window, rows: list[dict], total: int, latest_day: str, schedule: tuple[int, int]):
         super().__init__()
         self.window = window
         self.store = window.reviews
@@ -68,6 +68,7 @@ class Workbench(QWidget):
         self.rows, self.total, self.offset = rows, total, 0
         self.dataset_total = total
         self.latest_day = latest_day
+        self.schedule = schedule
         self.selected = None
         self.filters = ("", "", "", "latest", "all")
         self.report_rows = None
@@ -76,6 +77,7 @@ class Workbench(QWidget):
         self.stats_loaded = False
         self.report_loaded = False
         self.operations = []
+        self.sections = Operations(self)
         self.root = QHBoxLayout(self)
         self.root.setContentsMargins(0, 0, 0, 0)
         self.root.setSpacing(0)
@@ -90,6 +92,15 @@ class Workbench(QWidget):
         brand.setWordWrap(False)
         top.addWidget(brand)
         top.addStretch()
+        self.soc = label("", "accentText")
+        self.soc.setToolTip("Horario de Madrid · lunes a viernes de 08:00 a 20:00")
+        self.soc.setWordWrap(False)
+        self.soc_timer = QTimer(self, interval=30_000)
+        self.soc_timer.timeout.connect(self._update_soc)
+        self.soc_timer.start()
+        self._update_soc()
+        top.addWidget(self.soc)
+        top.addWidget(label(f"Fuera de horario · {fraction(*schedule)}", "muted"))
         self.status = label("Índice local listo", "muted")
         top.addWidget(self.status)
         self.chat_toggle = button("Chat", self._toggle_chat, tip="Mostrar u ocultar el chat")
@@ -104,12 +115,20 @@ class Workbench(QWidget):
         self.pages.addWidget(self._alerts())
         self.pages.addWidget(self._statistics())
         self.pages.addWidget(self._reports())
+        self.pages.addWidget(self.sections.tickets(table))
+        self.pages.addWidget(self.sections.history(table))
+        self.pages.addWidget(self.sections.playbooks())
         self.split.addWidget(self.pages)
         self.split.addWidget(self._chat())
         self.split.setStretchFactor(0, 3)
         self.split.setStretchFactor(1, 1)
         self.split.setSizes([880, 350])
         self._render_rows()
+
+    def _update_soc(self):
+        state = soc_status()
+        self.soc.setText(state)
+        self.soc.setStyleSheet("color: " + ("#f3cf80" if state == "SOC cerrado" else "#9bda9a"))
 
     def _rail(self):
         rail = QWidget()
@@ -120,7 +139,7 @@ class Workbench(QWidget):
         layout.addWidget(Mark(30, icon=True), alignment=Qt.AlignmentFlag.AlignHCenter)
         layout.addSpacing(16)
         self.nav = QButtonGroup(self)
-        for index, title in enumerate(("Inicio", "Estadísticas", "Informe diario")):
+        for index, title in enumerate(("Inicio", "Estadísticas", "Informe diario", "Tickets", "Historial", "Playbooks")):
             control = button(title, lambda _checked=False, idx=index: self._navigate(idx))
             control.setCheckable(True)
             control.setChecked(index == 0)
@@ -135,6 +154,8 @@ class Workbench(QWidget):
 
     def _navigate(self, index: int):
         self.nav.button(index).setChecked(True)
+        if index != 2 and self.window.isFullScreen():
+            self._present()
         if index != 2 and self.replay.isActive():
             self.replay.stop()
             self.play.setText("Reproducir")
@@ -143,6 +164,10 @@ class Workbench(QWidget):
             self._refresh_stats()
         elif index == 2 and not self.report_loaded:
             self._refresh_report()
+        elif index == 3:
+            self.sections.refresh_tickets()
+        elif index == 4:
+            self.sections.refresh_history()
 
     def _profile(self):
         menu = QMenu(self)
@@ -163,7 +188,7 @@ class Workbench(QWidget):
         motion.setChecked(self.window.reduced_motion())
         motion.toggled.connect(lambda value: self.window.settings.setValue("reduced_motion", value))
         layout.addWidget(motion)
-        layout.addWidget(label(f"Modelo de Claude: {available_model() or 'sin configurar'}", "muted"))
+        layout.addWidget(label(f"Modelo de OpenAI: {available_model() or 'sin configurar'}", "muted"))
         layout.addWidget(button("Cerrar", dialog.accept))
         dialog.exec()
 
@@ -174,7 +199,7 @@ class Workbench(QWidget):
             "Estadísticas: consulta severidades, fuentes y decisiones locales.\n\n"
             "Informe diario: elige una fecha, importa un archivo JSON o JSONL de alertas y reproduce "
             "la jornada por horas UTC.\n\n"
-            "Chat: selecciona una alerta o indica un ID de evento. Claude se habilita si hay un modelo "
+            "Chat: selecciona una alerta o indica un ID de evento. OpenAI se habilita si hay un modelo "
             "y una clave configurados. Al elegirlo se envía el contexto mostrado.")
 
     def _logout(self):
@@ -206,7 +231,7 @@ class Workbench(QWidget):
         self.query.setAccessibleName("Buscar alertas")
         self.search = button("Buscar", self._search)
         self.prepare = button("Preparar 5", self._prepare_queue, primary=True,
-                              tip="Envía a Claude hasta cinco alertas visibles para análisis y contraste")
+                              tip="Envía a OpenAI hasta cinco alertas visibles para análisis y contraste")
         self.prepare.setVisible(bool(available_model()))
         self.query.returnPressed.connect(self.search.click)
         filters.addWidget(self.query, 1)
@@ -318,14 +343,19 @@ class Workbench(QWidget):
             return
 
         def operation():
-            processed = 0
-            for alert in batch:
-                try:
-                    self.store.save_analysis(alert["alert_id"], investigate(alert, True))
-                except (ValueError, OSError) as error:
-                    return processed, str(error)
-                processed += 1
-            return processed, ""
+            documents = {key: self.store.guidance(key) for key in {item["runbook"] for item in batch}}
+            processed, failures = 0, []
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                pending = {pool.submit(investigate, item, True, documents[item["runbook"]]): item["alert_id"]
+                           for item in batch}
+                for task in as_completed(pending):
+                    alert_id = pending[task]
+                    try:
+                        self.store.save_analysis(alert_id, task.result())
+                        processed += 1
+                    except (ValueError, OSError) as error:
+                        failures.append(f"{alert_id} · {error}")
+            return processed, "\n".join(failures)
 
         def done(result, error):
             self.reviews = self.store.all()
@@ -334,11 +364,12 @@ class Workbench(QWidget):
                 self._error("Se interrumpió el análisis de la cola.", error)
                 return
             processed, message = result
-            self.status.setText(f"{processed} analizadas" if not message else f"{processed} analizadas · interrumpido")
+            self.stats_loaded = False
+            self.status.setText(f"{processed}/{len(batch)} analizadas")
             if message:
-                self._error("El análisis se detuvo. Los resultados completados se han guardado.", message)
+                self._error("Algunas alertas no pudieron analizarse.", message)
 
-        self._run(operation, done, f"Analizando {len(batch)} alertas con Claude…")
+        self._run(operation, done, f"Analizando {len(batch)} alertas con OpenAI…")
 
     def _render_rows(self):
         selected = self.selected["alert_id"] if self.selected else ""
@@ -471,29 +502,59 @@ class Workbench(QWidget):
         else:
             self._search()
 
+    def _open_by_id(self, alert_id):
+        def done(alert, error):
+            if error or alert is None:
+                self._error("No se pudo abrir la alerta.", error or alert_id)
+            else:
+                self._detail(alert)
+
+        self._run(lambda: db.get_alert(alert_id), done, "Buscando alerta…")
+
     def _detail(self, alert):
         if self.window.job:
             return
+        alert_id = alert["alert_id"]
+        ticket, incident, closed = for_alert(alert_id)
+        baseline = {}
         dialog = QDialog(self)
-        dialog.setWindowTitle("Detalle · " + alert["alert_id"])
-        dialog.resize(820, 670)
+        dialog.setWindowTitle("Detalle · " + alert_id)
+        dialog.resize(930, 690)
         layout = QVBoxLayout(dialog)
         layout.addWidget(label(alert["rule_name"], "title"))
-        layout.addWidget(label(f"{alert['alert_id']}  ·  {alert['source_product']}  ·  {alert['runbook']}", "muted"))
+        layout.addWidget(label(f"{alert_id}  ·  {alert['source_product']}  ·  {alert['runbook']}", "muted"))
+        stamp = alert["created_at"]
+        layout.addWidget(label(f"{soc_status(stamp)} al dispararse · {madrid(stamp):%d/%m/%Y %H:%M %Z}", "accentText"))
+
         tabs = QTabWidget()
         detail = text_area("Proceso y revisión adversarial")
         detail.setObjectName("reviewProcess")
-        evidence = text_area("Eventos y contexto consultados")
         tabs.addTab(detail, "Proceso de revisión")
-        tabs.addTab(evidence, "Datos consultados")
+        data_page = QWidget()
+        data_layout = QVBoxLayout(data_page)
+        selector = QHBoxLayout()
+        event_choice = QComboBox()
+        event_choice.setAccessibleName("Evento original")
+        event_detail = button("Ver evento original")
+        event_detail.setEnabled(False)
+        selector.addWidget(event_choice, 1)
+        selector.addWidget(event_detail)
+        data_layout.addLayout(selector)
+        evidence = text_area("Eventos y contexto consultados")
+        data_layout.addWidget(evidence, 1)
+        tabs.addTab(data_page, "Datos consultados")
+        extra = {name: text_area(name) for name in SECTION_NAMES}
+        for name, widget in extra.items():
+            tabs.addTab(widget, name)
         layout.addWidget(tabs, 1)
+
         footer = QHBoxLayout()
-        local = button("Consultar evidencias")
-        remote = button("Analizar y contrastar con Claude", primary=True,
-                        tip="Envía la alerta y el contexto a Claude para dos pasadas")
+        remote = button("Analizar y contrastar con OpenAI", primary=True,
+                        tip="Envía la alerta, sus eventos y las guías de triaje a OpenAI en dos pasadas")
         remote.setVisible(bool(available_model()))
-        footer.addWidget(local)
+        export = button("Exportar JSON")
         footer.addWidget(remote)
+        footer.addWidget(export)
         footer.addStretch()
         accept = button("Aceptar")
         correct = button("Corregir")
@@ -503,11 +564,12 @@ class Workbench(QWidget):
         layout.addLayout(footer)
 
         def render():
-            item = self.reviews.get(alert["alert_id"], {})
-            analysis = item.get("analysis") or {}
+            item = self.reviews.get(alert_id, {})
+            analysis = item.get("analysis") or baseline
             lines = [alert["description"], f"Severidad del SIEM: {alert['severity']}",
                      f"Referencias enlazadas: {', '.join(alert['related_events']) or 'ninguna'}"]
             sources = []
+            event_ids = list(alert["related_events"])
             if analysis:
                 confidence = analysis.get("confidence")
                 lines.extend(["", f"Resultado: {VERDICTS[analysis['verdict']][0]}",
@@ -517,74 +579,150 @@ class Workbench(QWidget):
                               f"SLA: {analysis['sla']}", "", "02  ·  Datos consultados",
                               f"{len(analysis['events'])} eventos recuperados · pestaña Datos consultados"])
                 for event in analysis["events"]:
-                    sources.extend([f"{event['event_id']} · {event['source']}",
-                                    json.dumps(event, ensure_ascii=False, indent=2), ""])
+                    sources.extend([f"{event['event_id']} · {event['source']}", pretty(event), ""])
+                    event_ids.append(event["event_id"])
                 missing = set(analysis["requested"]) - {x["event_id"] for x in analysis["events"]}
                 if missing:
                     lines.append("Eventos no encontrados: " + ", ".join(sorted(missing)))
-                if not analysis["events"]:
-                    lines.append("No se recuperaron eventos para esta alerta.")
-                context = analysis.get("context", {})
-                for name, records in context.items():
+                if "sent_events" in analysis:
+                    sources.extend(["Registros incluidos en la solicitud a OpenAI",
+                                    pretty(analysis["sent_events"]), ""])
+                for name, records in analysis.get("context", {}).items():
                     if records:
-                        sources.extend([name.capitalize(), json.dumps(records, ensure_ascii=False, indent=2), ""])
-                lines.extend(["", "03  ·  Propuesta", self._result_text(analysis.get("proposal")),
+                        sources.extend([name.capitalize(), pretty(records), ""])
+                lines.extend(["", "03  ·  Propuesta", self._result_text(analysis.get("proposal"),
+                                                                      analysis.get("proposal_error", "")),
                               "", "04  ·  Revisión adversarial",
                               self._result_text(analysis.get("challenge"), analysis.get("review_error", ""))])
+                timings = analysis.get("timing", {})
+                phases = {"evidence_ms": "Datos", "proposal_ms": "Propuesta",
+                          "challenge_ms": "Contraste", "total_ms": "Total"}
+                if timings:
+                    lines.extend(["", "  ·  ".join(f"{title} {timings[key]} ms"
+                                                   for key, title in phases.items() if key in timings)])
+                if analysis.get("proposal") and analysis.get("challenge"):
+                    agrees = analysis["proposal"]["verdict"] == analysis["challenge"]["verdict"]
+                    lines.append("El contraste coincide con la propuesta." if agrees
+                                 else "El contraste discrepa. Requiere decisión humana.")
+                if analysis.get("guidance"):
+                    lines.append("Guías: " + " · ".join(f"{key} v{rev}" for key, rev in analysis["guidance"].items()))
             else:
-                lines.extend(["", "Análisis pendiente. Consulta las evidencias o ejecuta las dos pasadas con Claude."])
+                lines.extend(["", "Cargando contexto del índice…"])
             if item.get("decision"):
                 lines.extend(["", "Decisión humana: " + VERDICTS[item["verdict"]][0],
                               f"{item['reviewer']} · {item['reviewed_at']}"])
+            lines.extend(demo_process(ticket, closed))
+            if ticket:
+                sources.extend(["Evidencias y hallazgos citados en la demo", pretty(ticket.get("evidence", []))])
+                event_ids.extend(event["event_id"] for event in ticket.get("evidence", []))
+            event_ids.extend(point["event_id"] for point in incident.get("timeline", []))
             detail.setPlainText("\n".join(lines))
-            evidence.setPlainText("\n".join(sources) or "Consulta la evidencia para ver los registros originales.")
+            evidence.setPlainText("\n".join(sources) or "No hay datos recuperados.")
+            previous = event_choice.currentText()
+            event_choice.clear()
+            event_choice.addItems(list(dict.fromkeys(key for key in event_ids if key and key != "unknown")))
+            if previous:
+                event_choice.setCurrentText(previous)
+            event_detail.setEnabled(bool(event_choice.count()) and self.window.job is None)
+            history = self.store.history(alert_id)
+            if item.get("decision") and not any(entry["kind"] in {"Aceptada", "Corregida"} for entry in history):
+                history.append({"created_at": item["reviewed_at"], "kind": "Decisión humana",
+                                "actor": item["reviewer"], "data": {"verdict": item["verdict"]}})
+            for name, content in case_sections(alert, analysis, history).items():
+                extra[name].setPlainText(content)
             accept.setEnabled(self._can_accept(item))
-            local.setEnabled(not analysis and not item.get("decision"))
             for control in (remote, correct):
-                control.setEnabled(not item.get("decision"))
+                control.setEnabled(not item.get("decision") and self.window.job is None)
 
         def analyze(use_remote):
-            if self.window.job:
+            if self.window.job or not dialog.isVisible():
                 return
-            for control in (local, remote, accept, correct, close):
+            for control in (remote, accept, correct, event_detail):
                 control.setEnabled(False)
-            detail.appendPlainText("\nRecuperando datos…" if not use_remote else
-                                   "\nConsultando datos y ejecutando las dos pasadas…")
+            detail.appendPlainText("\nConsultando datos y ejecutando las dos pasadas…" if use_remote
+                                   else "\nRecuperando datos…")
 
             def finished(result, error):
-                close.setEnabled(True)
-                if error:
+                if use_remote:
+                    self.reviews = self.store.all()
+                    self.stats_loaded = False
+                    self._render_rows()
+                elif result:
+                    baseline.update(result)
+                if dialog.isVisible():
                     render()
-                    detail.appendPlainText(f"\nAnálisis interrumpido: {error}")
-                    return
-                self.reviews = self.store.all()
-                self._render_rows()
-                render()
+                    if error:
+                        detail.appendPlainText(f"\nAnálisis interrumpido: {error}")
 
             def operation():
-                analysis = investigate(alert, use_remote)
-                self.store.save_analysis(alert["alert_id"], analysis)
+                guidance = self.store.guidance(alert["runbook"]) if use_remote else None
+                analysis = investigate(alert, use_remote, guidance)
+                if use_remote:
+                    self.store.save_analysis(alert_id, analysis)
+                return analysis
 
             self._run(operation, finished, "Investigando alerta…")
 
-        local.clicked.connect(lambda: analyze(False))
+        def view_event():
+            event_id = event_choice.currentText()
+
+            def done(event, error):
+                if not dialog.isVisible():
+                    return
+                if error or event is None:
+                    self._error("No se pudo recuperar el evento.", error or event_id)
+                    return
+                viewer = QDialog(dialog)
+                viewer.setWindowTitle(event_id)
+                viewer.resize(720, 530)
+                contents = QVBoxLayout(viewer)
+                raw = text_area("Evento original")
+                raw.setPlainText(pretty(event))
+                contents.addWidget(raw, 1)
+                contents.addWidget(button("Cerrar", viewer.reject))
+                viewer.exec()
+
+            self._run(lambda: db.get_event(event_id), done, "Consultando evento original…")
+
+        def export_case():
+            name, _ = QFileDialog.getSaveFileName(dialog, "Exportar expediente", f"{alert_id}.json", "JSON (*.json)")
+            if not name:
+                return
+            try:
+                record = self.reviews.get(alert_id, {})
+                Path(name).write_text(pretty({"alerta": alert, "revision_local": record, "contexto": baseline,
+                                             "historial": self.store.history(alert_id),
+                                             "demo": {"ticket": ticket, "n2": incident, "descarte": closed}}) + "\n",
+                                      encoding="utf-8")
+            except OSError as error:
+                self._error("No se pudo exportar el expediente.", error)
+
         remote.clicked.connect(lambda: analyze(True))
         accept.clicked.connect(lambda: (self._accept(alert), render()))
         correct.clicked.connect(lambda: (self._correct(alert), render()))
+        event_detail.clicked.connect(view_event)
+        export.clicked.connect(export_case)
         render()
+        if not self.reviews.get(alert_id, {}).get("analysis"):
+            QTimer.singleShot(0, lambda: analyze(False))
         dialog.exec()
 
     @staticmethod
     def _result_text(result, error=""):
         if not result:
             return error or "Pendiente de ejecución."
-        return (f"{VERDICTS[result['verdict']][0]} · {result['confidence']}% estimado\n"
-                f"{result['summary']}\nEvidencias citadas: {', '.join(result['citations']) or 'ninguna'}")
+        text = [f"{VERDICTS[result['verdict']][0]} · {result['confidence']}% estimado", result["summary"],
+                f"Evidencias citadas: {', '.join(result['citations']) or 'ninguna'}"]
+        if result.get("questions"):
+            text.extend(["Preguntas abiertas:", *result["questions"]])
+        return "\n".join(text)
 
     def _statistics(self):
         widget, layout = self._panel("Estadísticas", "Distribución del índice y decisiones guardadas en este perfil.")
         self.stats_total = label("Consultando el índice…", "sectionTitle")
         layout.addWidget(self.stats_total)
+        self.stats_schedule = label("", "muted")
+        layout.addWidget(self.stats_schedule)
         self.stats_bars = {}
         grid = QGridLayout()
         for row, level in enumerate(reversed(LEVELS)):
@@ -607,11 +745,23 @@ class Workbench(QWidget):
         return widget
 
     def _refresh_stats(self):
-        def done(rows, error):
+        analyzed_ids = [key for key, item in self.reviews.items() if (item.get("analysis") or {}).get("proposal")]
+
+        def operation():
+            with db.read_session():
+                return (db.alert_totals(), db.alert_schedule(ids=analyzed_ids),
+                        db.alert_schedule(ids=list(archive()["ticket_by_alert"])))
+
+        def done(result, error):
             if error:
                 self.stats_total.setText("No se pudieron cargar las estadísticas.")
                 return
             self.stats_loaded = True
+            rows, analyzed, demo = result
+            self.stats_schedule.setText(
+                f"Fuera de horario · Índice {fraction(*self.schedule)}  ·  "
+                f"Propuesta OpenAI {fraction(*analyzed)}  ·  Agente simulado {fraction(*demo)}"
+            )
             by_level, by_source = Counter(), Counter()
             for row in rows:
                 by_level[row["severity"]] += row["total"]
@@ -629,7 +779,7 @@ class Workbench(QWidget):
                 count_label.setText(number(by_level[key]))
             self._fill_summary(self.stats_table, by_source.most_common())
 
-        self._run(db.alert_totals, done, "Calculando estadísticas…")
+        self._run(operation, done, "Calculando estadísticas…")
 
     @staticmethod
     def _fill_summary(widget, rows):
@@ -651,12 +801,16 @@ class Workbench(QWidget):
         controls.addWidget(refresh)
         controls.addWidget(load)
         controls.addWidget(self.report_reset)
+        self.presentation = button("Presentar", self._present)
+        controls.addWidget(self.presentation)
         controls.addStretch()
         layout.addLayout(controls)
         self.report_source = label("Fuente: índice de Tarvia", "muted")
         self.report_count = label("—", "sectionTitle")
         layout.addWidget(self.report_source)
         layout.addWidget(self.report_count)
+        self.report_schedule = label("", "muted")
+        layout.addWidget(self.report_schedule)
         self.report_table = table(["Fuente", "Severidad", "Alertas"])
         self.report_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.report_table, 1)
@@ -681,6 +835,16 @@ class Workbench(QWidget):
         self.replay.timeout.connect(self._tick_report)
         self.operations += [self.report_day, refresh, load, self.report_reset]
         return widget
+
+    def _present(self):
+        if self.window.isFullScreen():
+            self.window.showNormal()
+            self.presentation.setText("Presentar")
+            self._toggle_chat(self.chat_toggle.isChecked())
+        else:
+            self.window.showFullScreen()
+            self.presentation.setText("Salir de presentación")
+            self._toggle_chat(False)
 
     def _reset_report(self):
         self.report_rows = None
@@ -718,18 +882,22 @@ class Workbench(QWidget):
         imported = self.report_rows
 
         def operation():
-            return imported_summary(imported, day) if imported is not None else (
-                db.alert_totals(day), db.alert_timeline(day)
-            )
+            if imported is not None:
+                times = [row["time"] for row in imported if row["time"].date().isoformat() == day]
+                schedule = len(times), sum(fuera_de_horario(stamp.isoformat()) for stamp in times)
+                return (*imported_summary(imported, day), schedule)
+            with db.read_session():
+                return db.alert_totals(day), db.alert_timeline(day), db.alert_schedule(day=day)
 
         def done(result, error):
             if error:
                 self.report_count.setText("No se pudo cargar el informe.")
                 return
-            totals, timeline = result
+            totals, timeline, schedule = result
             self.report_loaded = True
             count = sum(row["total"] for row in totals)
             critical = sum(row["total"] for row in totals if row["severity"] == "critical")
+            self.report_schedule.setText(f"Alertas fuera de horario · {fraction(*schedule)}")
             self.report_count.setText(f"Total: {number(count)}  ·  Severidad crítica: {number(critical)}")
             self._fill_summary(self.report_table, [
                 (row["source"], SEVERITY[row["severity"]][0], row["total"]) for row in totals
@@ -745,8 +913,11 @@ class Workbench(QWidget):
     def _hour_changed(self, hour):
         count = self.hour_totals.get(hour, 0)
         cumulative = sum(count for time, count in self.hour_totals.items() if time <= hour)
+        day = self.report_day.date().toPython()
+        stamp = datetime(day.year, day.month, day.day, hour, tzinfo=timezone.utc).isoformat()
         self.hour_notice.setText(
-            f"{hour:02d}:00 UTC  ·  {number(count)} alertas esta hora  ·  {number(cumulative)} acumuladas"
+            f"{hour:02d}:00 UTC · {madrid(stamp):%H:%M %Z} · {soc_status(stamp)}  ·  "
+            f"{number(count)} alertas esta hora  ·  {number(cumulative)} acumuladas"
         )
         self.replay_signals.setText("\n".join(self.hour_signals.get(hour, [])) or "Sin actividad registrada en esta hora.")
 
@@ -801,7 +972,7 @@ class Workbench(QWidget):
         self.model.setAccessibleName("Modelo de investigación")
         self.model.addItem("Consulta local", False)
         if model := available_model():
-            self.model.addItem("Claude · envía contexto", True)
+            self.model.addItem("OpenAI · envía contexto", True)
             self.model.setItemData(1, model, Qt.ItemDataRole.ToolTipRole)
         layout.addWidget(self.model)
         composer = QHBoxLayout()
@@ -884,11 +1055,11 @@ class Workbench(QWidget):
         def answer():
             alert, events = context_for(question + ("\n" + attachment if not remote else ""), selected)
             if remote:
-                return claude_answer(question, alert, events, attachment)
+                return openai_answer(question, alert, events, attachment)
             return local_answer(alert, events)
 
         def done(result, error):
-            source = "Claude" if remote else "Consulta local"
+            source = "OpenAI" if remote else "Consulta local"
             self.chat.appendPlainText(f"\n{source}\n{result if error is None else str(error)}\n")
             self.question.setFocus()
 

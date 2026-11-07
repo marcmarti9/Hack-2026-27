@@ -191,7 +191,8 @@ class Window(QMainWindow):
                 if not (source / "03_alertas" / "alertas.jsonl").is_file():
                     raise ValueError("Selecciona la carpeta raíz del dataset de Tarvia.")
                 ingest(source, DB)
-            return (*db.alert_page("", 0, PAGE_SIZE), db.latest_alert_day())
+            with db.read_session():
+                return (*db.alert_page("", 0, PAGE_SIZE), db.latest_alert_day(), db.alert_schedule())
 
         def finished(result, error):
             if error:
