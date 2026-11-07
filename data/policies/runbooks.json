@@ -1,0 +1,24 @@
+{
+  "_placeholder": true,
+  "_note": "Ejemplos del prototipo. Pendiente integrar los 10 runbooks oficiales.",
+  "allow_default": true,
+  "default": {"name": "default", "required_tools": ["soc_alert", "cmdb_asset"]},
+  "by_rule": {
+    "RULE-IMPOSSIBLE-TRAVEL": {
+      "name": "Acceso imposible / identidad",
+      "required_tools": ["soc_alert", "cmdb_asset"],
+      "containment": {"operation": "disable_account", "target_field": "user"}
+    },
+    "RULE-ADMIN-TOOL-ON-SERVER": {
+      "name": "Herramienta de administración remota en servidor",
+      "required_tools": ["soc_alert", "cmdb_asset"],
+      "containment": {"operation": "isolate_host", "target_field": "host"}
+    },
+    "RULE-DNS-TUNNEL": {"name": "Posible túnel DNS", "required_tools": ["soc_alert", "cmdb_asset"]},
+    "RULE-SUSPICIOUS-PROC": {
+      "name": "Proceso sospechoso en puesto de trabajo",
+      "required_tools": ["soc_alert", "cmdb_asset"],
+      "containment": {"operation": "isolate_host", "target_field": "host"}
+    }
+  }
+}

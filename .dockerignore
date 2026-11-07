@@ -1,0 +1,13 @@
+**
+!requirements.txt
+!backend/
+!backend/**
+!frontend/
+!frontend/**
+!data/
+!data/**
+!tests/
+!tests/**
+**/__pycache__/
+**/*.pyc
+**/*.db*

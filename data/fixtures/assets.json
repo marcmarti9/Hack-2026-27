@@ -1,0 +1,7 @@
+[
+  {"id": "asset-dc-01", "hostname": "dc-01", "criticality": "critical", "role": "Controlador de dominio (AD)"},
+  {"id": "asset-srv-web-07", "hostname": "srv-web-07", "criticality": "medium", "role": "Servidor web (entorno de pruebas)"},
+  {"id": "asset-ws-0150", "hostname": "ws-0150", "criticality": "medium", "role": "Puesto de trabajo"},
+  {"id": "asset-ws-0733", "hostname": "ws-0733", "criticality": "medium", "role": "Puesto de trabajo"},
+  {"id": "asset-srv-erp-01", "hostname": "srv-erp-01", "criticality": "high", "role": "Servidor ERP"}
+]

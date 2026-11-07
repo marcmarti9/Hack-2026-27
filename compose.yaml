@@ -1,0 +1,49 @@
+name: vigia
+
+x-app: &app
+  image: vigia:local
+  build: .
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+services:
+  backend:
+    <<: *app
+    command: ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    environment:
+      DB_PATH: /var/lib/vigia/triage.db
+      SOC_CLIENT_MODE: fixture
+      LLM_MODE: ${LLM_MODE:-heuristic}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
+      CONFIDENCE_THRESHOLD: ${CONFIDENCE_THRESHOLD:-0.7}
+      CRITICAL_CONFIDENCE: ${CRITICAL_CONFIDENCE:-0.9}
+      MIN_EVIDENCES_RED: ${MIN_EVIDENCES_RED:-2}
+    volumes:
+      - triage:/var/lib/vigia
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).close()"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
+  frontend:
+    <<: *app
+    command: ["streamlit", "run", "frontend/app.py", "--server.address=0.0.0.0", "--server.headless=true", "--browser.gatherUsageStats=false", "--logger.hideWelcomeMessage=true"]
+    environment:
+      BACKEND_URL: http://backend:8000
+    ports:
+      - "127.0.0.1:${VIGIA_PORT:-8501}:8501"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=2).close()"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  triage:

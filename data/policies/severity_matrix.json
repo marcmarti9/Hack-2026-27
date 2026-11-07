@@ -1,0 +1,16 @@
+{
+  "_note": "Matriz base y SLA de Tarvia (01_contexto/politica_soc.md, apartados 2 y 3).",
+  "priority": {
+    "critical": {"critical": "critical", "high": "critical", "medium": "high",   "low": "medium", "informational": "low"},
+    "high":     {"critical": "critical", "high": "high",     "medium": "medium", "low": "low", "informational": "low"},
+    "medium":   {"critical": "critical", "high": "high",     "medium": "medium", "low": "low", "informational": "informational"},
+    "low":      {"critical": "high",     "high": "medium",   "medium": "low",    "low": "informational", "informational": "informational"}
+  },
+  "sla": {
+    "critical": "15 min",
+    "high": "30 min",
+    "medium": "4 h",
+    "low": "24 h",
+    "informational": "Revisión diaria"
+  }
+}

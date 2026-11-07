@@ -1,0 +1,6 @@
+[
+  {"id": "ioc:198.51.100.23", "indicator": "198.51.100.23", "verdict": "malicious", "tags": ["tor-exit", "credential-stuffing"], "source": "tip"},
+  {"id": "ioc:203.0.113.77", "indicator": "203.0.113.77", "verdict": "malicious", "tags": ["c2-infrastructure"], "source": "tip"},
+  {"id": "ioc:10.20.1.15", "indicator": "10.20.1.15", "verdict": "benign", "tags": ["internal", "ci-runner"], "source": "cmdb"},
+  {"id": "ioc:updates.vendor-example.com", "indicator": "updates.vendor-example.com", "verdict": "benign", "tags": ["known_good", "vendor"], "source": "tip"}
+]

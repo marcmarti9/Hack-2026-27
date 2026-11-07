@@ -1,0 +1,9 @@
+[
+  {"id": "E-1001", "timestamp": "2026-11-02T03:12:00Z", "host": "dc-01", "user": "j.martin", "src_ip": "198.51.100.23", "domain": null, "type": "login_success", "detail": "Inicio de sesión correcto de j.martin desde 198.51.100.23 (país no habitual)."},
+  {"id": "E-1002", "timestamp": "2026-11-02T02:40:00Z", "host": "dc-01", "user": "j.martin", "src_ip": "192.0.2.10", "domain": null, "type": "login_success", "detail": "Inicio de sesión de j.martin desde Madrid 32 minutos antes."},
+  {"id": "E-1003", "timestamp": "2026-11-02T03:20:00Z", "host": null, "user": "j.martin", "src_ip": "198.51.100.23", "domain": null, "type": "mailbox_rule", "detail": "Creada regla de reenvío automático de correo a una dirección externa."},
+  {"id": "E-2001", "timestamp": "2026-11-04T00:40:00Z", "host": "srv-web-07", "user": "svc-deploy", "src_ip": "10.20.1.15", "domain": null, "type": "ci_job", "detail": "Job de despliegue CI/CD asociado a CHG-2026-1187 ejecutado desde el runner interno."},
+  {"id": "E-3001", "timestamp": "2026-11-03T10:00:00Z", "host": "ws-0150", "user": "m.ruiz", "src_ip": "10.40.2.31", "domain": "updates.vendor-example.com", "type": "dns_query", "detail": "Consultas DNS periódicas de tamaño normal hacia el servicio de actualizaciones del proveedor."},
+  {"id": "E-4001", "timestamp": "2026-11-03T15:29:00Z", "host": "ws-0733", "user": "l.garcia", "src_ip": "192.0.2.50", "domain": null, "type": "process_start", "detail": "powershell.exe -enc (cadena codificada) lanzado desde un documento ofimático."},
+  {"id": "E-6001", "timestamp": "2026-11-05T01:14:00Z", "host": "srv-erp-01", "user": "svc-erp", "src_ip": "203.0.113.77", "domain": null, "type": "remote_admin", "detail": "Sesión de administración remota iniciada desde 203.0.113.77 (IP externa)."}
+]

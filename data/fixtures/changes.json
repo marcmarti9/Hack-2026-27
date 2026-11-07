@@ -1,0 +1,6 @@
+[
+  {"id": "CHG-2026-1187", "title": "Despliegue de release web", "status": "approved",
+   "start": "2026-11-03T22:00:00Z", "end": "2026-11-04T02:00:00Z", "hosts": ["srv-web-07"], "users": ["svc-deploy"]},
+  {"id": "CHG-2026-1190", "title": "Mantenimiento programado del ERP", "status": "approved",
+   "start": "2026-11-05T00:00:00Z", "end": "2026-11-05T02:00:00Z", "hosts": ["srv-erp-01"], "users": ["svc-erp"]}
+]

@@ -1,0 +1,7 @@
+[
+  {"id": "user-j.martin", "username": "j.martin", "role": "Administrador de dominio", "department": "IT"},
+  {"id": "user-svc-deploy", "username": "svc-deploy", "role": "Cuenta de servicio CI/CD", "department": "IT"},
+  {"id": "user-m.ruiz", "username": "m.ruiz", "role": "Analista de compras", "department": "Compras"},
+  {"id": "user-l.garcia", "username": "l.garcia", "role": "Gestora de tienda", "department": "Retail"},
+  {"id": "user-svc-erp", "username": "svc-erp", "role": "Cuenta de servicio ERP", "department": "IT"}
+]
