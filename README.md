@@ -10,7 +10,7 @@ Tarvia es una empresa ficticia. Su SOC necesita investigar alertas y mantener co
 
 ## Instalar Vigía
 
-[Instaladores de Vigía en GitHub Actions](https://github.com/marcmarti9/Hack-2026-27/actions/workflows/desktop-installers.yml)
+[Descargar los instaladores verificados de Vigía 0.9.0](https://github.com/marcmarti9/Hack-2026-27/actions/runs/42427079044)
 
 | Sistema | Paquete |
 | --- | --- |
