@@ -1,5 +1,6 @@
 """Controles compartidos de la mesa de Vigía."""
 from html import escape
+from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QPlainTextEdit, QPushButton, QTextBrowser
@@ -19,6 +20,7 @@ ACCENT_HOVER = "#245475"
 FOCUS = "#326b9a"
 WARNING = "#79521c"
 POSITIVE = "#2d644b"
+CHEVRON = (Path(__file__).with_name("brand") / "chevron-down.svg").as_posix()
 
 STYLE = f"""
 QMainWindow, QDialog, QWidget {{ background: {PAPER}; color: {INK}; font-size: 13px; }}
@@ -49,7 +51,11 @@ QLineEdit, QPlainTextEdit, QTextBrowser, QComboBox, QDateEdit {{
     padding: 7px; selection-background-color: {SELECTION}; selection-color: {INK};
 }}
 #authSurface QLineEdit {{ min-height: 27px; }}
-QComboBox::drop-down {{ subcontrol-origin: padding; subcontrol-position: top right; width: 19px; border: 0; }}
+QComboBox, QDateEdit {{ padding-right: 21px; }}
+QComboBox::drop-down, QDateEdit::drop-down {{
+    subcontrol-origin: padding; subcontrol-position: top right; width: 19px; border: 0;
+}}
+QComboBox::down-arrow, QDateEdit::down-arrow {{ image: url("{CHEVRON}"); width: 12px; height: 12px; }}
 QComboBox QAbstractItemView {{ background: {PANEL}; selection-background-color: {SELECTION}; selection-color: {INK}; }}
 QTableWidget {{ background: {PANEL};
     border: 1px solid {RULE}; gridline-color: {RULE}; selection-background-color: {SELECTION};
