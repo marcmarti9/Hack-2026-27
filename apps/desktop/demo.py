@@ -10,6 +10,10 @@ DEMO_USER = "analista.demo"
 DEMO_PASSWORD = "VigiaDemo2026"
 
 
+def display_questions(record: dict) -> list[str]:
+    return [question.replace(" con Claude", "") for question in record.get("open_questions", [])]
+
+
 @lru_cache(maxsize=1)
 def archive() -> dict:
     with gzip.open(RESOURCES / "demo.json.gz", "rt", encoding="utf-8") as stream:

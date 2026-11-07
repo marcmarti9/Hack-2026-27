@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timezone
 
 from apps.backend.rules.engine import fuera_de_horario
-from apps.desktop.demo import for_alert
+from apps.desktop.demo import display_questions, for_alert
 
 SECTION_NAMES = ("Entidades", "Línea de tiempo", "Acciones", "Historial")
 
@@ -40,7 +40,7 @@ def case_sections(alert: dict, analysis: dict, history: list[dict]) -> dict:
                         for point in incident.get("timeline", []))
         timeline.extend(["", "Causa raíz", incident.get("root_cause", ""),
                          "Notificaciones", "\n".join(incident.get("notifications", [])),
-                         "Límites y preguntas N2", "\n".join(incident.get("open_questions", [])),
+                         "Límites y preguntas N2", "\n".join(display_questions(incident)),
                          "Brechas de detección", "\n".join(incident.get("detection_gaps", [])),
                          "Incidentes relacionados", ", ".join(incident.get("related_incidents", []))])
 
@@ -101,7 +101,7 @@ def demo_process(ticket: dict, closed: dict) -> list[str]:
         ("El fiscal coincidió con el veredicto." if fiscal.get("agrees")
          else "El fiscal presentó objeciones.") if fiscal else "",
         f"Veredicto alternativo: {fiscal['alternative_verdict']}" if fiscal.get("alternative_verdict") else "",
-        *fiscal.get("objections", []), "", "Preguntas abiertas de la demo", *ticket.get("open_questions", []),
+        *fiscal.get("objections", []), "", "Preguntas abiertas de la demo", *display_questions(ticket),
     ]
 
 

@@ -10,7 +10,7 @@ from time import perf_counter
 from apps.backend.rules.engine import severidad
 from apps.backend.tools import db
 from apps.desktop.assistant import available_model, openai_message
-from apps.desktop.demo import RESOURCES
+from apps.desktop.demo import RESOURCES, display_questions
 
 VERDICTS = {
     "true_positive": ("Verdadero positivo", "#ff8793", "#35222c"),
@@ -256,7 +256,7 @@ def replay_demo(alert: dict, ticket: dict) -> dict:
     proposal = {
         "verdict": verdict, "confidence": confidence, "summary": ticket["summary"],
         "citations": [key for key in references if key in recovered],
-        "questions": ticket.get("open_questions", []),
+        "questions": display_questions(ticket),
         "actions": [f'{item["action"]} → {item["target"]} · {item["justification"]}'
                     for item in ticket["recommended_actions"]],
     }
