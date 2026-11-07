@@ -5,6 +5,9 @@ from functools import lru_cache
 from pathlib import Path
 
 RESOURCES = Path(__file__).with_name("resources")
+DEMO_ALERT = "ALR-20261010-011795"
+DEMO_USER = "analista.demo"
+DEMO_PASSWORD = "VigiaDemo2026"
 
 
 @lru_cache(maxsize=1)

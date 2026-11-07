@@ -10,9 +10,9 @@ Tarvia es una empresa ficticia. Su SOC necesita investigar alertas y mantener co
 
 | Sistema | Paquete |
 | --- | --- |
-| Linux x86-64 | `Vigia-0.3.0-linux-amd64.deb` para Debian/Ubuntu y derivados. Instala con `sudo apt install ./Vigia-0.3.0-linux-amd64.deb`. |
-| Linux x86-64, instalación por usuario | Extrae `Vigia-0.3.0-linux-x86_64.tar.gz` y ejecuta `sh vigia/install.sh`. Crea una entrada en el menú. |
-| Windows x64 | Ejecuta `Vigia-0.3.0-windows-x64.exe`, generado por el workflow de instaladores. |
+| Linux x86-64 | `Vigia-0.4.0-linux-amd64.deb` para Debian/Ubuntu y derivados. Instala con `sudo apt install ./Vigia-0.4.0-linux-amd64.deb`. |
+| Linux x86-64, instalación por usuario | Extrae `Vigia-0.4.0-linux-x86_64.tar.gz` y ejecuta `sh vigia/install.sh`. Crea una entrada en el menú. |
+| Windows x64 | Ejecuta `Vigia-0.4.0-windows-x64.exe`, generado por el workflow de instaladores. |
 | macOS Apple Silicon e Intel | Abre el `.dmg` de tu arquitectura y arrastra Vigía a Aplicaciones. Los builds de desarrollo carecen de firma de distribución y notarización. |
 
 En el primer inicio, crea la cuenta local y selecciona la carpeta raíz del [dataset de Tarvia](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/5d7569232756eaf0a8723b22c428b70e8f67824f). La importación corre en segundo plano y deja un índice reutilizable en el perfil del sistema operativo. El instalador lleva su runtime de Python y Qt. El dataset se descarga por separado.
@@ -26,6 +26,16 @@ El chat funciona en modo local y admite adjuntos de texto de hasta 16 KB. Para a
 **Estadísticas** muestra la proporción de alertas disparadas fuera del horario de Madrid (lunes a viernes, 08:00–20:00) con sus denominadores para el índice, la demo y las propuestas OpenAI locales. **Informe diario** reproduce la jornada por horas UTC, indica el estado del SOC en cada hora y ofrece **Presentar** a pantalla completa. Admite un fichero JSON o JSONL de hasta 5 MB con `alert_id`, `created_at` con zona horaria, `severity` y, opcionalmente, `source_product`.
 
 El inicio de sesión protege la mesa dentro del perfil del usuario del sistema. La cuenta se guarda con una derivación PBKDF2 y sal aleatoria. Quien controla los archivos del perfil también controla el acceso al índice. Esta versión tiene una cuenta local por perfil y carece de aprobación de contenciones desde la interfaz.
+
+### Presentación del hackathon
+
+Abre **Vigía Demo** desde el menú en Linux o Windows. En macOS, ejecuta `open -na /Applications/Vigia.app --args --demo` después de instalar la aplicación. En desarrollo, usa `python -m apps.desktop.entry --demo`.
+
+1. En el acceso, usa `analista.demo` y `VigiaDemo2026`, o pulsa **Entrar a la demo**. En el primer ensayo, selecciona el dataset oficial si la app lo solicita.
+2. En **Inicio**, abre **Caso LSASS** y pulsa **Reproducir análisis de la demo**. La propuesta, el fiscal y la confianza vienen del expediente archivado. Los eventos se recuperan del índice en ese momento. Pulsa **Aceptar** o **Corregir** y abre **Historial** para mostrar el registro de la decisión.
+3. En **Informe diario**, pulsa **Presentar** para enseñar la reproducción de la jornada. Para abrir directamente el caso desde terminal, añade `--present` a `--demo`.
+
+La demo funciona sin red ni clave de API. Usa un índice independiente y guarda el usuario, los cambios de playbook y las decisiones durante esa ejecución. Al volver a abrirla se puede repetir el recorrido. Para probar el análisis en vivo, inicia **Vigía** en modo normal con tu propia clave OpenAI configurada.
 
 ### Desarrollo y empaquetado
 

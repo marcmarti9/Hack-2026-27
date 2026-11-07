@@ -244,6 +244,56 @@ def check(app, window, home, password, output):
     window.close()
 
 
+def check_demo(app, window, normal_profile, output):
+    from apps.desktop.demo import DEMO_ALERT, DEMO_PASSWORD, DEMO_USER
+    from apps.desktop.session import Account
+
+    assert window.username.text() == DEMO_USER
+    assert not Account(normal_profile).verify(DEMO_PASSWORD)
+    failures = []
+
+    def replay():
+        dialog = app.activeModalWidget()
+        if not isinstance(dialog, QDialog):
+            QTimer.singleShot(50, replay)
+            return
+        try:
+            assert DEMO_ALERT in dialog.windowTitle()
+            wait_for(lambda: window.job is None, "evidencias de la demo")
+            controls = {control.text(): control for control in dialog.findChildren(QPushButton)}
+            assert "Analizar y contrastar con OpenAI" not in controls
+            assert window.workbench.model.findData(True) == -1
+            assert not controls["Aceptar"].isEnabled()
+            controls["Reproducir análisis de la demo"].click()
+            wait_for(lambda: window.job is None, "reproducción del expediente")
+            text = dialog.findChild(QPlainTextEdit, "reviewProcess").toPlainText()
+            assert "REPRODUCCIÓN DE LA DEMO" in text and "85%" in text and "EDR-0123412" in text
+            if output:
+                dialog.grab().save(str(output.with_name("vigia-demo-lsass.png")))
+            assert controls["Aceptar"].isEnabled()
+            controls["Aceptar"].click()
+            rows = window.reviews.history(DEMO_ALERT)
+            assert [item["kind"] for item in rows] == ["Aceptada", "Análisis"]
+            assert rows[1]["data"]["origin"] == "demo"
+            from apps.desktop.review import Reviews
+            assert all((row["analysis"] or {}).get("origin") != "demo"
+                       for row in Reviews(normal_profile).all().values())
+        except BaseException as error:
+            failures.append(error)
+        finally:
+            dialog.close()
+
+    window.show()
+    with patch("apps.desktop.review.openai_message") as transport:
+        QTimer.singleShot(100, replay)
+        window.enter_demo()
+        wait_for(lambda: hasattr(window, "workbench") and window.job is None, "mesa demo")
+        transport.assert_not_called()
+    if failures:
+        raise failures[0]
+    window.close()
+
+
 def main() -> None:
     app = QApplication([])
     with TemporaryDirectory() as path:
@@ -253,9 +303,12 @@ def main() -> None:
         from apps.desktop.window import Window
         with patch.dict(os.environ, {"OPENAI_MODEL": "test-model", "OPENAI_API_KEY": "test-key"}):
             check(app, Window(home), home, "contraseña de prueba", output)
+            with TemporaryDirectory(prefix="vigia-demo-") as demo_profile:
+                check_demo(app, Window(Path(demo_profile), demo=True, present=True), home, output)
     app.quit()
     print("Vigía: sesión, ojo durante carga, 11.061 alertas, búsqueda, fecha y veredicto, chat local, "
-          "contraste adversarial simulado, decisiones persistentes, estadísticas y reproducción diaria.")
+          "contraste adversarial simulado, decisiones persistentes, estadísticas, reproducción diaria "
+          "y modo hackathon sin OpenAI.")
 
 
 if __name__ == "__main__":

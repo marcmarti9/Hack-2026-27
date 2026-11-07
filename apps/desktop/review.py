@@ -238,6 +238,48 @@ def investigate(alert: dict, remote: bool = False, guidance: dict | None = None)
     return analysis
 
 
+def replay_demo(alert: dict, ticket: dict) -> dict:
+    """Reconstruye el expediente archivado dentro de la sesión de demostración."""
+    if alert["alert_id"] not in ticket["alert_ids"]:
+        raise ValueError("El expediente de la demo no corresponde a esta alerta.")
+    started = perf_counter()
+    references = list(dict.fromkeys(item["event_id"] for item in ticket["evidence"]))
+    with db.read_session():
+        analysis = _collect(alert)
+        related = list(dict.fromkeys(analysis["requested"] + references))
+        analysis["events"] = db.get_events(related)
+    analysis["requested"] = related
+    recovered = {event["event_id"] for event in analysis["events"]}
+    verdict = ticket["verdict"] if ticket["verdict"] in VERDICTS else "needs_more_info"
+    confidence = round(ticket["confidence"] * 100)
+    fiscal = ticket.get("fiscal") or {}
+    proposal = {
+        "verdict": verdict, "confidence": confidence, "summary": ticket["summary"],
+        "citations": [key for key in references if key in recovered],
+        "questions": ticket.get("open_questions", []),
+        "actions": [f'{item["action"]} → {item["target"]} · {item["justification"]}'
+                    for item in ticket["recommended_actions"]],
+    }
+    challenge = None
+    if fiscal:
+        alternative = fiscal.get("alternative_verdict")
+        challenge = {
+            "verdict": verdict if fiscal["agrees"] else (
+                alternative if alternative in VERDICTS else "needs_more_info"
+            ),
+            "summary": "\n".join([fiscal["comment"], *fiscal["objections"]]),
+            "confidence": None, "citations": [],
+        }
+    checked = fiscal.get("agrees") and references and set(references) <= recovered and verdict in CLASSIFICATIONS
+    elapsed = round((perf_counter() - started) * 1000)
+    analysis.update({
+        "origin": "demo", "provider": "la demo archivada", "proposal": proposal, "challenge": challenge,
+        "verdict": verdict if checked else "needs_more_info", "confidence": confidence if checked else None,
+        "timing": {"evidence_ms": elapsed},
+    })
+    return analysis
+
+
 def _analyze(alert: dict, analysis: dict, guidance: dict) -> None:
     analysis["provider"] = available_model()
     events = analysis["events"]

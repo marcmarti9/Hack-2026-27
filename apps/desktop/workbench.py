@@ -19,10 +19,10 @@ from apps.backend.tools import db
 from apps.desktop.assistant import available_model, context_for, local_answer, openai_answer
 from apps.desktop.brand_widgets import Mark
 from apps.desktop.case_data import SECTION_NAMES, case_sections, demo_process, fraction, pretty, soc_status
-from apps.desktop.demo import archive, for_alert
+from apps.desktop.demo import DEMO_ALERT, archive, for_alert
 from apps.desktop.operations import Operations
 from apps.desktop.reports import imported_summary, read_report
-from apps.desktop.review import CLASSIFICATIONS, VERDICTS, investigate
+from apps.desktop.review import CLASSIFICATIONS, VERDICTS, investigate, replay_demo
 from apps.desktop.widgets import button, label, text_area
 
 PAGE_SIZE = 50
@@ -63,6 +63,7 @@ class Workbench(QWidget):
     def __init__(self, window, rows: list[dict], total: int, latest_day: str, schedule: tuple[int, int]):
         super().__init__()
         self.window = window
+        self.demo = window.demo
         self.store = window.reviews
         self.reviews = self.store.all()
         self.rows, self.total, self.offset = rows, total, 0
@@ -88,7 +89,7 @@ class Workbench(QWidget):
         layout.setContentsMargins(20, 14, 18, 16)
         self.root.addWidget(body, 1)
         top = QHBoxLayout()
-        brand = label("VIGÍA  /  SOC TARVIA", "accentText")
+        brand = label("VIGÍA  /  DEMO DE TARVIA" if self.demo else "VIGÍA  /  SOC TARVIA", "accentText")
         brand.setWordWrap(False)
         top.addWidget(brand)
         top.addStretch()
@@ -129,6 +130,9 @@ class Workbench(QWidget):
         state = soc_status()
         self.soc.setText(state)
         self.soc.setStyleSheet("color: " + ("#f3cf80" if state == "SOC cerrado" else "#9bda9a"))
+
+    def _remote_model(self):
+        return "" if self.demo else available_model()
 
     def _rail(self):
         rail = QWidget()
@@ -188,7 +192,8 @@ class Workbench(QWidget):
         motion.setChecked(self.window.reduced_motion())
         motion.toggled.connect(lambda value: self.window.settings.setValue("reduced_motion", value))
         layout.addWidget(motion)
-        layout.addWidget(label(f"Modelo de OpenAI: {available_model() or 'sin configurar'}", "muted"))
+        layout.addWidget(label("Modo demo · expedientes archivados" if self.demo else
+                               f"Modelo de OpenAI: {self._remote_model() or 'sin configurar'}", "muted"))
         layout.addWidget(button("Cerrar", dialog.accept))
         dialog.exec()
 
@@ -232,11 +237,15 @@ class Workbench(QWidget):
         self.search = button("Buscar", self._search)
         self.prepare = button("Preparar 5", self._prepare_queue, primary=True,
                               tip="Envía a OpenAI hasta cinco alertas visibles para análisis y contraste")
-        self.prepare.setVisible(bool(available_model()))
+        self.prepare.setVisible(bool(self._remote_model()))
         self.query.returnPressed.connect(self.search.click)
         filters.addWidget(self.query, 1)
         filters.addWidget(self.search)
         filters.addWidget(self.prepare)
+        if self.demo:
+            demo_case = button("Caso LSASS", lambda: self._open_by_id(DEMO_ALERT), primary=True)
+            filters.addWidget(demo_case)
+            self.operations.append(demo_case)
         layout.addLayout(filters)
 
         options = QHBoxLayout()
@@ -339,7 +348,7 @@ class Workbench(QWidget):
 
     def _prepare_queue(self):
         batch = self._queue_candidates()
-        if not batch or not available_model():
+        if not batch or not self._remote_model():
             return
 
         def operation():
@@ -549,9 +558,14 @@ class Workbench(QWidget):
         layout.addWidget(tabs, 1)
 
         footer = QHBoxLayout()
-        remote = button("Analizar y contrastar con OpenAI", primary=True,
-                        tip="Envía la alerta, sus eventos y las guías de triaje a OpenAI en dos pasadas")
-        remote.setVisible(bool(available_model()))
+        if self.demo:
+            remote = button("Reproducir análisis de la demo", primary=True,
+                            tip="Abre la propuesta y el contraste del expediente archivado")
+            remote.setVisible(bool(ticket))
+        else:
+            remote = button("Analizar y contrastar con OpenAI", primary=True,
+                            tip="Envía la alerta, sus eventos y las guías de triaje a OpenAI en dos pasadas")
+            remote.setVisible(bool(self._remote_model()))
         export = button("Exportar JSON")
         footer.addWidget(remote)
         footer.addWidget(export)
@@ -572,6 +586,8 @@ class Workbench(QWidget):
             event_ids = list(alert["related_events"])
             if analysis:
                 confidence = analysis.get("confidence")
+                if analysis.get("origin") == "demo":
+                    lines.extend(["", "REPRODUCCIÓN DE LA DEMO · propuesta y contraste archivados"])
                 lines.extend(["", f"Resultado: {VERDICTS[analysis['verdict']][0]}",
                               f"Confianza estimada por {analysis['provider']}: {confidence}%"
                               if confidence is not None else "Confianza: sin estimación validada.",
@@ -634,16 +650,19 @@ class Workbench(QWidget):
             for control in (remote, correct):
                 control.setEnabled(not item.get("decision") and self.window.job is None)
 
-        def analyze(use_remote):
+        def analyze(run_review):
             if self.window.job or not dialog.isVisible():
                 return
             for control in (remote, accept, correct, event_detail):
                 control.setEnabled(False)
-            detail.appendPlainText("\nConsultando datos y ejecutando las dos pasadas…" if use_remote
-                                   else "\nRecuperando datos…")
+            message = "Recuperando datos…"
+            if run_review:
+                message = ("Recuperando el expediente archivado…" if self.demo else
+                           "Consultando datos y ejecutando las dos pasadas…")
+            detail.appendPlainText("\n" + message)
 
             def finished(result, error):
-                if use_remote:
+                if run_review:
                     self.reviews = self.store.all()
                     self.stats_loaded = False
                     self._render_rows()
@@ -655,9 +674,12 @@ class Workbench(QWidget):
                         detail.appendPlainText(f"\nAnálisis interrumpido: {error}")
 
             def operation():
-                guidance = self.store.guidance(alert["runbook"]) if use_remote else None
-                analysis = investigate(alert, use_remote, guidance)
-                if use_remote:
+                if run_review and self.demo:
+                    analysis = replay_demo(alert, ticket)
+                else:
+                    guidance = self.store.guidance(alert["runbook"]) if run_review else None
+                    analysis = investigate(alert, run_review, guidance)
+                if run_review:
                     self.store.save_analysis(alert_id, analysis)
                 return analysis
 
@@ -711,7 +733,9 @@ class Workbench(QWidget):
     def _result_text(result, error=""):
         if not result:
             return error or "Pendiente de ejecución."
-        text = [f"{VERDICTS[result['verdict']][0]} · {result['confidence']}% estimado", result["summary"],
+        confidence = result["confidence"]
+        text = [f"{VERDICTS[result['verdict']][0]} · "
+                + (f"{confidence}% estimado" if confidence is not None else "sin estimación propia"), result["summary"],
                 f"Evidencias citadas: {', '.join(result['citations']) or 'ninguna'}"]
         if result.get("questions"):
             text.extend(["Preguntas abiertas:", *result["questions"]])
@@ -745,7 +769,8 @@ class Workbench(QWidget):
         return widget
 
     def _refresh_stats(self):
-        analyzed_ids = [key for key, item in self.reviews.items() if (item.get("analysis") or {}).get("proposal")]
+        analyzed_ids = [key for key, item in self.reviews.items() if (analysis := item.get("analysis"))
+                        and analysis.get("proposal") and analysis.get("origin") != "demo"]
 
         def operation():
             with db.read_session():
@@ -971,7 +996,7 @@ class Workbench(QWidget):
         self.model = QComboBox()
         self.model.setAccessibleName("Modelo de investigación")
         self.model.addItem("Consulta local", False)
-        if model := available_model():
+        if model := self._remote_model():
             self.model.addItem("OpenAI · envía contexto", True)
             self.model.setItemData(1, model, Qt.ItemDataRole.ToolTipRole)
         layout.addWidget(self.model)

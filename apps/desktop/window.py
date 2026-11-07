@@ -11,6 +11,7 @@ from apps.backend.config import DATA, DB
 from apps.backend.ingest import ingest
 from apps.backend.tools import db
 from apps.desktop.brand_widgets import BRAND, Mark, MatrixPanel, OpeningMark
+from apps.desktop.demo import DEMO_ALERT, DEMO_PASSWORD, DEMO_USER
 from apps.desktop.review import Reviews
 from apps.desktop.session import Account
 from apps.desktop.widgets import STYLE, button, label
@@ -37,12 +38,16 @@ class Job(QRunnable):
 
 
 class Window(QMainWindow):
-    def __init__(self, home: Path):
+    def __init__(self, home: Path, *, demo: bool = False, present: bool = False):
         super().__init__()
+        self.demo = demo
+        self.present = demo and present
         self.account = Account(home)
+        if demo and not self.account.name():
+            self.account.create(DEMO_USER, DEMO_PASSWORD)
         self.reviews = Reviews(home)
         self.settings = QSettings(str(home / "settings.ini"), QSettings.Format.IniFormat)
-        self.setWindowTitle("Vigía | SOC de Tarvia")
+        self.setWindowTitle("Vigía | Demo de Tarvia" if demo else "Vigía | SOC de Tarvia")
         self.setWindowIcon(QIcon(str(BRAND / "vigia_icon_dark.svg")))
         self.resize(1440, 850)
         self.setMinimumSize(990, 600)
@@ -99,9 +104,11 @@ class Window(QMainWindow):
         form = QVBoxLayout(card)
         form.setContentsMargins(28, 27, 28, 26)
         form.setSpacing(12)
-        form.addWidget(label("ACCESO AL EQUIPO", "accentText"))
+        form.addWidget(label("DEMO DEL HACKATHON" if self.demo else "ACCESO AL EQUIPO", "accentText"))
         form.addWidget(label("Iniciar sesión", "title"))
-        if not existing:
+        if self.demo:
+            form.addWidget(label(f"Usuario {DEMO_USER} · Contraseña {DEMO_PASSWORD}", "muted"))
+        elif not existing:
             form.addWidget(label("En el primer acceso, tus credenciales inicializan el perfil local.", "muted"))
         fields = QFormLayout()
         fields.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
@@ -127,9 +134,16 @@ class Window(QMainWindow):
         form.addWidget(self.login_notice)
         self.login_button = button("Iniciar sesión", lambda: self._login(bool(existing)), primary=True)
         form.addWidget(self.login_button)
+        if self.demo:
+            form.addWidget(button("Entrar a la demo", self.enter_demo))
         self.password.returnPressed.connect(self.login_button.click if existing else self.confirm.setFocus)
         self.confirm.returnPressed.connect(self.login_button.click)
         (self.password if existing else self.username).setFocus()
+
+    def enter_demo(self):
+        if self.demo and self.login_button.isEnabled():
+            self.password.setText(DEMO_PASSWORD)
+            self.login_button.click()
 
     def _login(self, existing: bool):
         password = self.password.text()
@@ -209,6 +223,9 @@ class Window(QMainWindow):
                 self.transitioning = False
                 self.workbench = Workbench(self, *result)
                 self.setCentralWidget(self.workbench)
+                if self.present:
+                    self.present = False
+                    self.workbench._open_by_id(DEMO_ALERT)
 
             QTimer.singleShot(0 if self.reduced_motion() else 230, show)
 
