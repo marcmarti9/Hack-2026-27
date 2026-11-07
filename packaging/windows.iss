@@ -1,7 +1,7 @@
 [Setup]
 AppId={{2BB2F998-E6C1-4CA7-9123-387A29CBA675}
 AppName=Vigía
-AppVersion=0.1.0
+AppVersion=0.2.0
 AppPublisher=Marc's & Co.
 DefaultDirName={localappdata}\Programs\Vigia
 DisableProgramGroupPage=yes
@@ -9,7 +9,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\out\installers
-OutputBaseFilename=Vigia-0.1.0-windows-x64
+OutputBaseFilename=Vigia-0.2.0-windows-x64
 UninstallDisplayIcon={app}\Vigia.exe
 WizardStyle=modern
 Compression=lzma2

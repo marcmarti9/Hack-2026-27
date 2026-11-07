@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "out" / "packaging"
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 
 def main() -> None:
@@ -14,6 +14,7 @@ def main() -> None:
         sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
         "--name", "Vigia", "--onedir", "--windowed",
         "--paths", str(ROOT), "--collect-data", "tzdata",
+        "--add-data", f"{ROOT / 'apps' / 'desktop' / 'brand'}:apps/desktop/brand",
         "--distpath", str(OUT / "dist"), "--workpath", str(OUT / "work"),
         "--specpath", str(OUT), str(ROOT / "apps" / "desktop" / "entry.py"),
     ], check=True, cwd=ROOT)

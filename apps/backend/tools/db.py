@@ -132,12 +132,57 @@ def network_zones(zone: str) -> list[dict]:
     return _rows("SELECT * FROM zones WHERE zona = ?", [zone])
 
 
-def alert_page(query: str, offset: int, limit: int = 100) -> tuple[list[dict], int]:
-    pattern = query.strip().lower()
-    predicate = "WHERE contains(lower(alert_id || ' ' || rule_id || ' ' || raw::VARCHAR), ?)" if pattern else ""
-    params = [pattern] if pattern else []
+def alert_page(query: str, offset: int, limit: int = 100, *, day: str = "", severity: str = "",
+               sort: str = "latest", selected_ids: list[str] | None = None,
+               exclude_ids: list[str] | None = None) -> tuple[list[dict], int]:
+    clauses, params = [], []
+    if pattern := query.strip().lower():
+        clauses.append("contains(lower(alert_id || ' ' || rule_id || ' ' || raw::VARCHAR), ?)")
+        params.append(pattern)
+    if day:
+        clauses.append("CAST(ts AT TIME ZONE 'UTC' AS DATE) = CAST(? AS DATE)")
+        params.append(day)
+    if severity:
+        clauses.append("severity = ?")
+        params.append(severity)
+    if selected_ids is not None:
+        clauses.append("alert_id IN (SELECT unnest(?::VARCHAR[]))")
+        params.append(selected_ids)
+    if exclude_ids:
+        clauses.append("alert_id NOT IN (SELECT unnest(?::VARCHAR[]))")
+        params.append(exclude_ids)
+    predicate = "WHERE " + " AND ".join(clauses) if clauses else ""
+    order = {
+        "latest": "ts DESC",
+        "oldest": "ts ASC",
+        "severity": "CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 "
+                    "WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, ts DESC",
+    }[sort]
     rows = _rows(f"""
         SELECT raw, count(*) OVER () AS total FROM alerts {predicate}
-        ORDER BY ts DESC, alert_id LIMIT ? OFFSET ?
+        ORDER BY {order}, alert_id LIMIT ? OFFSET ?
     """, [*params, _limit(limit), offset])
     return [json.loads(row["raw"]) for row in rows], rows[0]["total"] if rows else 0
+
+
+def alert_totals(day: str = "") -> list[dict]:
+    predicate = "WHERE CAST(ts AT TIME ZONE 'UTC' AS DATE) = CAST(? AS DATE)" if day else ""
+    return _rows(f"""
+        SELECT severity, source_product AS source, count(*) AS total FROM alerts {predicate}
+        GROUP BY severity, source_product ORDER BY total DESC
+    """, [day] if day else [])
+
+
+def alert_timeline(day: str) -> list[dict]:
+    return _rows("""
+        SELECT hour(ts AT TIME ZONE 'UTC') AS hour, count(*) AS total,
+            list(DISTINCT source_product || ' · ' || (raw->>'rule_name')
+                 ORDER BY source_product || ' · ' || (raw->>'rule_name'))[:3] AS signals
+        FROM alerts WHERE CAST(ts AT TIME ZONE 'UTC' AS DATE) = CAST(? AS DATE)
+        GROUP BY hour ORDER BY hour
+    """, [day])
+
+
+def latest_alert_day() -> str:
+    result = _rows("SELECT CAST(max(ts AT TIME ZONE 'UTC') AS DATE) AS day FROM alerts")[0]["day"]
+    return result.isoformat() if result else ""

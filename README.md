@@ -10,14 +10,18 @@ Tarvia es una empresa ficticia. Su SOC necesita investigar alertas y mantener co
 
 | Sistema | Paquete |
 | --- | --- |
-| Linux x86-64 | `Vigia-0.1.0-linux-amd64.deb` para Debian/Ubuntu y derivados. Instala con `sudo apt install ./Vigia-0.1.0-linux-amd64.deb`. |
-| Linux x86-64, instalación por usuario | Extrae `Vigia-0.1.0-linux-x86_64.tar.gz` y ejecuta `sh vigia/install.sh`. Crea una entrada en el menú. |
-| Windows x64 | Ejecuta `Vigia-0.1.0-windows-x64.exe`, generado por el workflow de instaladores. |
+| Linux x86-64 | `Vigia-0.2.0-linux-amd64.deb` para Debian/Ubuntu y derivados. Instala con `sudo apt install ./Vigia-0.2.0-linux-amd64.deb`. |
+| Linux x86-64, instalación por usuario | Extrae `Vigia-0.2.0-linux-x86_64.tar.gz` y ejecuta `sh vigia/install.sh`. Crea una entrada en el menú. |
+| Windows x64 | Ejecuta `Vigia-0.2.0-windows-x64.exe`, generado por el workflow de instaladores. |
 | macOS Apple Silicon e Intel | Abre el `.dmg` de tu arquitectura y arrastra Vigía a Aplicaciones. Los builds de desarrollo carecen de firma de distribución y notarización. |
 
 En el primer inicio, crea la cuenta local y selecciona la carpeta raíz del [dataset de Tarvia](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/5d7569232756eaf0a8723b22c428b70e8f67824f). La importación corre en segundo plano y deja un índice reutilizable en el perfil del sistema operativo. El instalador lleva su runtime de Python y Qt. El dataset se descarga por separado.
 
-La mesa permite buscar y paginar alertas, leer sus expedientes y consultar la alerta activa o un ID de evento desde el chat. El modo local recupera datos sin conexión y presenta referencias de los logs. Para activar Claude, inicia Vigía con `ANTHROPIC_API_KEY` y `ANTHROPIC_MODEL` en el entorno. La opción es voluntaria y cada consulta marcada envía la pregunta, la alerta y hasta ocho eventos recuperados a Anthropic. La salida de Claude se muestra como sugerencia. La presencia de referencias válidas no certifica el contenido de la sugerencia.
+La mesa tiene una cola SIEM con búsqueda, calendario, filtros y orden. Si Claude está configurado, **Preparar 5** envía hasta cinco alertas visibles para que el analista pueda revisarlas desde la cola. El detalle separa el proceso de revisión de los datos recuperados. `✓` acepta una propuesta vigente que ha superado la segunda pasada. `×` permite registrar una clasificación propia. Vigía guarda la decisión, el usuario, la fecha y la propuesta original en el perfil local. Las alertas del dataset empiezan sin veredicto. Un falso negativo o verdadero negativo requiere una referencia independiente del analista, por lo que esas etiquetas se registran manualmente.
+
+El chat puede consultar la alerta activa y los IDs de evento en modo local. Tiene preguntas sugeridas, adjuntos de texto de hasta 16 KB y un acceso al dictado del sistema operativo. Para activar Claude, inicia Vigía con `ANTHROPIC_API_KEY` y `ANTHROPIC_MODEL` en el entorno. Una consulta con Claude envía la pregunta, la alerta, los eventos recuperados y el adjunto seleccionado. El análisis de una alerta envía su contexto a dos llamadas separadas, una para proponer y otra para intentar refutar. Si las dos pasadas discrepan, faltan eventos o se citan IDs ajenos a los datos recuperados, la propuesta queda pendiente. El porcentaje es la menor estimación declarada por el modelo en ambas pasadas. El porcentaje y las citas no certifican la exactitud de la conclusión.
+
+**Estadísticas** desglosa la cola por fuente y severidad, además de las decisiones locales. **Informe diario** resume las alertas por fecha y reproduce la jornada por horas UTC. Admite un fichero JSON o JSONL de hasta 5 MB con `alert_id`, `created_at` con zona horaria, `severity` y, opcionalmente, `source_product`.
 
 El inicio de sesión protege la mesa dentro del perfil del usuario del sistema. La cuenta se guarda con una derivación PBKDF2 y sal aleatoria. Quien controla los archivos del perfil también controla el acceso al índice. Esta versión tiene una cuenta local por perfil y carece de aprobación de contenciones desde la interfaz.
 
