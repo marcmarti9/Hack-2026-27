@@ -1,10 +1,10 @@
 """Sesión y carga del índice de Vigía."""
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, QSettings, QThreadPool, QTimer, Qt, Signal
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import QElapsedTimer, QObject, QRunnable, QSettings, QThreadPool, QTimer, Qt, Signal
+from PySide6.QtGui import QColor, QFontDatabase, QIcon, QPainter
 from PySide6.QtWidgets import (
-    QFileDialog, QFormLayout, QLineEdit, QMainWindow, QVBoxLayout, QWidget,
+    QFileDialog, QFormLayout, QFrame, QLineEdit, QMainWindow, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from apps.backend.config import DATA, DB
@@ -14,7 +14,7 @@ from apps.desktop.brand_widgets import BRAND, Mark, OpeningMark
 from apps.desktop.demo import DEMO_ALERT, DEMO_PASSWORD, DEMO_USER
 from apps.desktop.review import Reviews
 from apps.desktop.session import Account
-from apps.desktop.widgets import STYLE, button, label
+from apps.desktop.widgets import button, label, palette_for, stylesheet
 from apps.desktop.workbench import PAGE_SIZE, Workbench
 
 
@@ -37,6 +37,50 @@ class Job(QRunnable):
             self.signals.done.emit(result, None)
 
 
+class LoginCanvas(QWidget):
+    """Trama de caracteres tenue; el formulario queda en primer plano."""
+
+    def __init__(self, window):
+        super().__init__()
+        self.window = window
+        self.clock = QElapsedTimer()
+        self.timer = QTimer(self, interval=90)
+        self.timer.timeout.connect(self.update)
+        self.glyph_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+        self.glyph_font.setPixelSize(13)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self.window.reduced_motion():
+            self.clock.start()
+            self.timer.start()
+
+    def hideEvent(self, event):
+        self.timer.stop()
+        super().hideEvent(event)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setFont(self.glyph_font)
+        color = QColor(palette_for(self.window.dark)["ACCENT"])
+        alphabet = "0123456789ABCDEF:·"
+        elapsed = self.clock.elapsed() if self.timer.isActive() else 0
+        for column, x in enumerate(range(26, self.width() - 20, 38)):
+            if abs(x - self.width() / 2) < 232 or column % 7 == 2:
+                continue
+            stride = 16
+            length = 4 + column * 7 % 8
+            span = self.height() + length * stride
+            head = (column * 119 + elapsed * (6 + column % 5) // 1000) % span
+            for i in range(length):
+                y = head - i * stride
+                if 0 < y < self.height():
+                    color.setAlphaF(0.045 + 0.105 * (1 - i / length))
+                    painter.setPen(color)
+                    painter.drawText(x, y, alphabet[(column * 13 + (head // stride - i) * 7) % len(alphabet)])
+
+
 class Window(QMainWindow):
     def __init__(self, home: Path, *, demo: bool = False, present: bool = False):
         super().__init__()
@@ -47,14 +91,34 @@ class Window(QMainWindow):
             self.account.create(DEMO_USER, DEMO_PASSWORD)
         self.reviews = Reviews(home)
         self.settings = QSettings(str(home / "settings.ini"), QSettings.Format.IniFormat)
+        self.dark = self.settings.value("theme", "dark", type=str) != "light"
         self.setWindowTitle("Vigía | SOC de Tarvia")
         self.setWindowIcon(QIcon(str(BRAND / "vigia_icon_light.svg")))
         self.resize(1440, 850)
         self.setMinimumSize(990, 600)
         self.job = None
         self.transitioning = False
-        self.setStyleSheet(STYLE)
+        self.setStyleSheet(stylesheet(self.dark))
         self.show_login()
+
+    def theme_button(self):
+        control = button(self._theme_action(), self._toggle_theme)
+        control.setObjectName("themeToggle")
+        return control
+
+    def _theme_action(self):
+        return "Tema claro" if self.dark else "Tema oscuro"
+
+    def _toggle_theme(self):
+        self.dark = not self.dark
+        self.settings.setValue("theme", "dark" if self.dark else "light")
+        self.setStyleSheet(stylesheet(self.dark))
+        for mark in self.findChildren(Mark):
+            mark.set_theme(self.dark)
+        for control in self.findChildren(QPushButton, "themeToggle"):
+            control.setText(self._theme_action())
+        if isinstance(self.centralWidget(), Workbench):
+            self.centralWidget().refresh_theme()
 
     def reduced_motion(self) -> bool:
         return self.settings.value("reduced_motion", False, type=bool)
@@ -77,38 +141,60 @@ class Window(QMainWindow):
         page = QWidget()
         self.setCentralWidget(page)
         pane = QVBoxLayout(page)
-        pane.setContentsMargins(32, 24, 32, 24)
-        pane.addStretch()
+        pane.setContentsMargins(32, 24, 32, 20)
+        pane.setSpacing(16)
+        pane.addWidget(self.theme_button(), alignment=Qt.AlignmentFlag.AlignRight)
+
+        scroll = QScrollArea()
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        pane.addWidget(scroll, 1)
+        body = LoginCanvas(self)
+        scroll.setWidget(body)
+        center = QVBoxLayout(body)
+        center.setContentsMargins(12, 12, 12, 16)
+        center.addStretch()
         card = QWidget()
         card.setObjectName("authSurface")
-        card.setFixedWidth(420)
-        pane.addWidget(card, alignment=Qt.AlignmentFlag.AlignHCenter)
-        pane.addStretch()
+        card.setFixedWidth(472)
+        center.addWidget(card, alignment=Qt.AlignmentFlag.AlignHCenter)
+        center.addStretch()
+
         form = QVBoxLayout(card)
-        form.setContentsMargins(32, 29, 32, 30)
-        form.setSpacing(13)
-        form.addWidget(Mark(157), alignment=Qt.AlignmentFlag.AlignLeft)
-        form.addSpacing(8)
-        form.addWidget(label("Iniciar sesión", "title"))
-        description = "Entorno de práctica" if self.demo else "SOC de Tarvia"
-        if not existing:
-            description = "Configura tu acceso local al SOC de Tarvia."
-        form.addWidget(label(description, "muted"))
+        form.setContentsMargins(40, 34, 40, 38)
+        form.setSpacing(16)
+        form.addWidget(Mark(184, dark=self.dark), alignment=Qt.AlignmentFlag.AlignLeft)
+        form.addSpacing(6)
+        heading = QVBoxLayout()
+        heading.setSpacing(6)
+        heading.addWidget(label("Iniciar sesión" if existing else "Configurar acceso", "title"))
+        if self.demo:
+            heading.addWidget(label("Entorno de práctica · SOC de Tarvia", "muted"))
+        else:
+            heading.addWidget(label("SOC de Tarvia" if existing else "Crea tu acceso local al SOC de Tarvia.", "muted"))
+        form.addLayout(heading)
+        form.addSpacing(5)
+
         fields = QFormLayout()
         fields.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         fields.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
+        fields.setVerticalSpacing(9)
         form.addLayout(fields)
         self.username = QLineEdit(existing or "")
         self.username.setMaxLength(80)
         self.username.setReadOnly(bool(existing))
+        self.username.setAccessibleName("Usuario")
         fields.addRow("Usuario", self.username)
         self.password = QLineEdit()
         self.password.setMaxLength(128)
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password.setAccessibleName("Contraseña")
         fields.addRow("Contraseña", self.password)
         self.confirm = QLineEdit(parent=card)
         self.confirm.setMaxLength(128)
         self.confirm.setEchoMode(QLineEdit.EchoMode.Password)
+        self.confirm.setAccessibleName("Repetir contraseña")
         if not existing:
             fields.addRow("Repetir contraseña", self.confirm)
         else:
@@ -117,9 +203,12 @@ class Window(QMainWindow):
         self.login_notice.setVisible(False)
         form.addWidget(self.login_notice)
         self.login_button = button("Iniciar sesión", lambda: self._login(bool(existing)), primary=True)
+        self.login_button.setMinimumHeight(42)
         form.addWidget(self.login_button)
         if self.demo:
-            form.addWidget(button("Entrar en modo de práctica", self.enter_demo))
+            practice = button("Entrar en modo de práctica", self.enter_demo)
+            practice.setMinimumHeight(40)
+            form.addWidget(practice)
         self.password.returnPressed.connect(self.login_button.click if existing else self.confirm.setFocus)
         self.confirm.returnPressed.connect(self.login_button.click)
         (self.password if existing else self.username).setFocus()
@@ -160,17 +249,27 @@ class Window(QMainWindow):
         page = QWidget()
         self.setCentralWidget(page)
         layout = QVBoxLayout(page)
-        layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        layout.setContentsMargins(32, 24, 32, 20)
+        layout.addWidget(self.theme_button(), alignment=Qt.AlignmentFlag.AlignRight)
         layout.addStretch()
-        self.loading_mark = OpeningMark(self.reduced_motion())
-        layout.addWidget(self.loading_mark, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        content = QWidget()
+        content.setMaximumWidth(520)
+        stack = QVBoxLayout(content)
+        stack.setContentsMargins(0, 0, 0, 0)
+        stack.setSpacing(15)
+        self.loading_mark = OpeningMark(self.reduced_motion(), dark=self.dark)
+        stack.addWidget(self.loading_mark, alignment=Qt.AlignmentFlag.AlignHCenter)
+        stack.addSpacing(10)
         self.load_notice = label("Selecciona la carpeta raíz del dataset de Tarvia.", "muted")
         self.load_notice.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.load_notice)
+        stack.addWidget(self.load_notice)
         self.choose = button("Seleccionar carpeta…", self._choose_dataset, primary=True)
         self.back = button("Cerrar sesión", self.show_login)
         for control in (self.choose, self.back):
-            layout.addWidget(control, alignment=Qt.AlignmentFlag.AlignHCenter)
+            control.setMinimumHeight(40)
+            stack.addWidget(control, alignment=Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(content, alignment=Qt.AlignmentFlag.AlignHCenter)
         layout.addStretch()
 
     def _choose_dataset(self):

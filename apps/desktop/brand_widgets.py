@@ -10,12 +10,20 @@ BRAND = Path(__file__).with_name("brand")
 
 
 class Mark(QWidget):
-    def __init__(self, width: int, icon: bool = False):
+    def __init__(self, width: int, icon: bool = False, *, dark: bool = False):
         super().__init__()
-        self.renderer = QSvgRenderer(str(BRAND / ("vigia_icon_light.svg" if icon else "vigia_logo_light.svg")))
+        self.renderer = QSvgRenderer(self)
+        self.icon = icon
+        self.set_theme(dark)
         self.setFixedSize(width, width if icon else round(width * 207 / 768))
         self.setAccessibleName("Vigía")
         self.opening = 1.0
+
+    def set_theme(self, dark):
+        kind = "icon" if self.icon else "logo"
+        variant = "dark" if dark else "light"
+        self.renderer.load(str(BRAND / f"vigia_{kind}_{variant}.svg"))
+        self.update()
 
     def paintEvent(self, _event):
         painter = QPainter(self)
@@ -38,8 +46,8 @@ class Mark(QWidget):
 
 
 class OpeningMark(Mark):
-    def __init__(self, reduced_motion: bool):
-        super().__init__(340)
+    def __init__(self, reduced_motion: bool, *, dark: bool = False):
+        super().__init__(340, dark=dark)
         self.reduced_motion = reduced_motion
         self.clock = QElapsedTimer()
         self.timer = QTimer(self, interval=32)
@@ -78,13 +86,15 @@ _NAV_PATHS = {
     "history": "M5 5a7 7 0 1 1-2 6 M3 3v4h4 M10 6v5l3 2",
     "guides": "M10 6c-2-2-4-2-7-2v11c3 0 5 0 7 2 2-2 4-2 7-2V4c-3 0-5 0-7 2z M10 6v11",
     "notices": "M5 14h10l-1-2V8a4 4 0 0 0-8 0v4z M8 17h4",
+    "backup": "M3 7h14v10H3z M3 7l3-4h8l3 4 M7 12h6",
     "profile": "M10 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M4 17v-1c0-2 2-4 6-4s6 2 6 4v1",
 }
 
 
-def navigation_icon(name: str) -> QIcon:
+def navigation_icon(name: str, dark: bool = False) -> QIcon:
+    stroke = "#b0c1d0" if dark else "#405467"
     svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
-        <path d="{_NAV_PATHS[name]}" fill="none" stroke="#405467" stroke-width="1.45"
+        <path d="{_NAV_PATHS[name]}" fill="none" stroke="{stroke}" stroke-width="1.45"
         stroke-linecap="round" stroke-linejoin="round"/>
     </svg>"""
     pixmap = QPixmap(40, 40)

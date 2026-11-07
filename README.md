@@ -10,14 +10,14 @@ Tarvia es una empresa ficticia. Su SOC necesita investigar alertas y mantener co
 
 | Sistema | Paquete |
 | --- | --- |
-| Linux x86-64 | `Vigia-0.6.0-linux-amd64.deb` para Debian/Ubuntu y derivados. Instala con `sudo apt install ./Vigia-0.6.0-linux-amd64.deb`. |
-| Linux x86-64, instalación por usuario | Extrae `Vigia-0.6.0-linux-x86_64.tar.gz` y ejecuta `sh vigia/install.sh`. Crea una entrada en el menú. |
-| Windows x64 | Ejecuta `Vigia-0.6.0-windows-x64.exe`, generado por el workflow de instaladores. |
+| Linux x86-64 | `Vigia-0.7.0-linux-amd64.deb` para Debian/Ubuntu y derivados. Instala con `sudo apt install ./Vigia-0.7.0-linux-amd64.deb`. |
+| Linux x86-64, instalación por usuario | Extrae `Vigia-0.7.0-linux-x86_64.tar.gz` y ejecuta `sh vigia/install.sh`. Crea una entrada en el menú. |
+| Windows x64 | Ejecuta `Vigia-0.7.0-windows-x64.exe`, generado por el workflow de instaladores. |
 | macOS Apple Silicon e Intel | Abre el `.dmg` de tu arquitectura y arrastra Vigía a Aplicaciones. Los builds de desarrollo carecen de firma de distribución y notarización. |
 
 En el primer inicio, crea la cuenta local y selecciona la carpeta raíz del [dataset de Tarvia](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/5d7569232756eaf0a8723b22c428b70e8f67824f). La importación corre en segundo plano y deja un índice reutilizable en el perfil del sistema operativo. El instalador lleva su runtime de Python y Qt. El dataset se descarga por separado.
 
-En **Inicio**, la cola SIEM permite buscar y filtrar por fecha, severidad y veredicto. El botón junto al logo pliega la navegación y deja accesibles las vistas mediante sus iconos. El chat se puede mostrar, ocultar y redimensionar. Cada expediente muestra el proceso de revisión, los registros originales, las entidades, la línea de tiempo, las acciones y el historial. **Tickets** abre tanto los casos locales como los 17 expedientes de la demo. Los 13 informes N2 y los descartes de la demo aparecen como referencias históricas separadas de las decisiones nuevas. Desde el detalle se puede exportar el expediente en JSON.
+En **Inicio**, la cola SIEM permite buscar y filtrar por fecha, severidad y veredicto. El botón junto al logo pliega la navegación y deja accesibles las vistas mediante sus iconos. El chat se puede mostrar, ocultar y redimensionar. El botón **Tema claro** o **Tema oscuro** cambia la apariencia al instante y recuerda la elección en el perfil. **Perfil → Ajustes** permite reducir las animaciones. Cada expediente muestra el proceso de revisión, los registros originales, las entidades, la línea de tiempo, las acciones y el historial. **Tickets** abre tanto los casos locales como los 17 expedientes de la demo. Los 13 informes N2 y los descartes de la demo aparecen como referencias históricas separadas de las decisiones nuevas. Desde el detalle se puede exportar el expediente en JSON.
 
 **Aceptar propuesta** acepta una propuesta cuando el contraste coincide y ambas respuestas citan eventos recuperados. **Corregir** registra la clasificación humana, incluidos falsos y verdaderos negativos. **Historial** guarda las justificaciones basadas en evidencias, la revisión adversarial, las decisiones y las versiones de guía utilizadas. **Playbooks** permite editar y versionar los diez runbooks y la skill de triaje. Las modificaciones se aplican al siguiente análisis. **Ver guías** abre el runbook correspondiente a la alerta y la skill vigente. La severidad indica la prioridad según la matriz del SOC. La confianza describe el grado de certeza de un análisis disponible. **Positivo benigno** permite registrar que la regla detectó actividad autorizada.
 
@@ -36,6 +36,16 @@ Abre **Vigía · Práctica** desde el menú en Linux o Windows. En macOS, ejecut
 3. En **Informe diario**, pulsa **Presentar** para enseñar la reproducción de la jornada. Para abrir directamente el caso desde terminal, añade `--present` a `--demo`.
 
 El entorno de práctica funciona sin red ni clave de API. Usa un índice independiente y guarda el usuario, los cambios de playbook y las decisiones durante esa ejecución. Al volver a abrirla se puede repetir el recorrido. Para probar el análisis en vivo, inicia **Vigía** en modo normal con tu propia clave OpenAI configurada.
+
+### Copias de seguridad
+
+**Copias** permite guardar un plan y crear una instantánea del perfil. El ZIP incluye las bases de la cuenta y las revisiones, sus guías y las preferencias. El manifiesto registra la suma SHA-256 de cada archivo. El dataset, el índice descargable y las claves de API se gestionan por separado.
+
+- **Personalizado** admite carpetas locales, unidades USB y depósitos S3. Los destinos locales y USB se eligen como carpetas existentes.
+- **3-2-1** requiere una copia en carpeta o USB y otra fuera del equipo. **3-2-1-1** añade un bucket independiente con retención de objetos.
+- **Guardar cambios** conserva el plan. **Crear copia** muestra qué destinos se verificaron y qué errores requieren atención. Una unidad desconectada no impide copiar a los otros destinos.
+
+Para S3, configura un perfil autorizado en AWS CLI v2. Pega una ruta `s3://bucket/carpeta` o pulsa **Obtener código** y ejecuta el archivo descargado con `python vigia_codigo_s3.py NOMBRE_DEL_BUCKET`. El código identifica el destino. AWS CLI gestiona las credenciales del equipo. Para retención, elige un bucket con Object Lock, indica los días y vigila el resultado de esa copia. Vigía solicita el modo `COMPLIANCE` y comprueba la suma devuelta por S3. [AWS CLI PutObject](https://docs.aws.amazon.com/cli/latest/reference/s3api/put-object.html) · [S3 Object Lock](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html)
 
 ### Desarrollo y empaquetado
 
@@ -116,7 +126,7 @@ La política de prioridad y los permisos se implementan con los apartados 2 a 5 
 
 Los indicadores reales del dataset solo se pueden consultar en servicios de reputación. Durante las comprobaciones de esta rama, los contenedores que leen los datos se ejecutan sin red y con el dataset montado en solo lectura.
 
-La guía de triaje del equipo también describe tags, un score de 1 a 100 y agrupación de incidentes. Vigía muestra la severidad calculada, la evidencia y la confianza por separado. El score y el gestor de copias de seguridad se mantienen como referencias de diseño para otras iteraciones. [Guía de triaje](https://github.com/marcmarti9/Hack-2026-27/blob/9ddb430/Triaje%20SOC%20Tarvia%20-%20tags%20y%20score__(TRIATGE).pdf) · [Boceto de copias de seguridad](https://github.com/marcmarti9/Hack-2026-27/blob/9ddb430/BACKUP%20MANAGER.png)
+La guía de triaje del equipo también describe tags, un score de 1 a 100 y agrupación de incidentes. Vigía muestra la severidad calculada, la evidencia y la confianza por separado. El score de 1 a 100 queda como referencia para otra iteración. [Guía de triaje](https://github.com/marcmarti9/Hack-2026-27/blob/9ddb430/Triaje%20SOC%20Tarvia%20-%20tags%20y%20score__(TRIATGE).pdf) · [Boceto de copias de seguridad](https://github.com/marcmarti9/Hack-2026-27/blob/9ddb430/BACKUP%20MANAGER.png)
 
 ## Equipo
 

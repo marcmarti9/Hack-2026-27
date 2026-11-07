@@ -46,6 +46,13 @@ def check(app, window, home, password, output):
     assert soc_status("2026-10-26T19:00:00Z") == "SOC cerrado"
 
     window.show()
+    assert window.dark
+    window.username.setText("Analista local")
+    login_theme = window.findChild(QPushButton, "themeToggle")
+    login_theme.click()
+    assert not window.dark and window.username.text() == "Analista local"
+    login_theme.click()
+    assert window.dark and window.settings.value("theme", type=str) == "dark"
     if output:
         app.processEvents()
         window.grab().save(str(output.with_name("vigia-acceso.png")))
@@ -60,6 +67,13 @@ def check(app, window, home, password, output):
         window.grab().save(str(output.with_name("vigia-carga.png")))
     wait_for(lambda: hasattr(window, "workbench"), "importación y mesa")
     work = window.workbench
+    work.findChild(QPushButton, "themeToggle").click()
+    assert not window.dark
+    if output:
+        app.processEvents()
+        window.grab().save(str(output.with_name("vigia-claro.png")))
+    work.findChild(QPushButton, "themeToggle").click()
+    assert window.dark
     window.resize(990, 690)
     app.processEvents()
     assert not work.chat_panel.isVisible() and not work.chat_toggle.isChecked()
@@ -80,6 +94,24 @@ def check(app, window, home, password, output):
     assert work.pages.currentIndex() == 0
     work.menu_toggle.click()
     assert work.rail_logo.isVisible() and work.nav.button(0).text() == "Inicio"
+    with TemporaryDirectory(prefix="vigia-qa-copias-") as target:
+        from apps.desktop.widgets import fade_in
+        window.settings.setValue("reduced_motion", True)
+        work._navigate(6)
+        backup = work.backup_page
+        fade_in(backup)
+        assert backup.graphicsEffect() is None
+        window.settings.setValue("reduced_motion", False)
+        backup.local.addItem(target)
+        backup.save.click()
+        assert "guardados" in backup.status.text()
+        backup.start.click()
+        wait_for(lambda: window.job is None, "copia local")
+        assert "1 de 1 destinos verificados" in backup.status.text()
+        assert len(list(Path(target).glob("Vigia/*/*.zip"))) == 1
+        if output:
+            window.grab().save(str(output.with_name("vigia-copias.png")))
+        work._navigate(0)
     assert work.dataset_total == 11061 and work.schedule == (11061, 3503)
     data = archive()
     assert len(data["tickets"]) == 17 and len(data["incidents"]) == 13 and len(data["closed"]) == 10974

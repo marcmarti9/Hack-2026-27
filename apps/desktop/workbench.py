@@ -17,13 +17,14 @@ from PySide6.QtWidgets import (
 from apps.backend.rules.engine import LEVELS, fuera_de_horario, madrid
 from apps.backend.tools import db
 from apps.desktop.assistant import available_model, context_for, local_answer, openai_answer
+from apps.desktop.backup_page import BackupPage
 from apps.desktop.brand_widgets import Mark, navigation_icon
 from apps.desktop.case_data import SECTION_NAMES, case_sections, demo_process, fraction, pretty, soc_status
 from apps.desktop.demo import DEMO_ALERT, archive, for_alert
 from apps.desktop.operations import Operations
 from apps.desktop.reports import imported_summary, read_report
 from apps.desktop.review import CLASSIFICATIONS, PLAYBOOKS, VERDICTS, investigate, replay_demo
-from apps.desktop.widgets import POSITIVE, WARNING, Article, button, label, set_primary, text_area
+from apps.desktop.widgets import Article, button, fade_in, label, palette_for, set_primary, text_area
 
 PAGE_SIZE = 50
 SEVERITY = {
@@ -46,6 +47,7 @@ def table(headers: list[str]) -> QTableWidget:
     widget.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
     widget.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
     widget.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+    widget.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
     widget.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
     return widget
 
@@ -87,12 +89,13 @@ class Workbench(QWidget):
         body = QWidget()
         body.setObjectName("mainCanvas")
         layout = QVBoxLayout(body)
-        layout.setContentsMargins(20, 14, 18, 16)
+        layout.setContentsMargins(28, 19, 24, 18)
+        layout.setSpacing(15)
         self.root.addWidget(body, 1)
         masthead = QWidget()
         masthead.setObjectName("workspaceHeader")
         top = QHBoxLayout(masthead)
-        top.setContentsMargins(12, 5, 7, 5)
+        top.setContentsMargins(15, 9, 9, 9)
         brand = label("Entorno de práctica" if self.demo else "SOC de Tarvia", "muted")
         brand.setWordWrap(False)
         top.addWidget(brand)
@@ -105,6 +108,7 @@ class Workbench(QWidget):
         self.soc_timer.start()
         self._update_soc()
         top.addWidget(self.soc)
+        top.addWidget(self.window.theme_button())
         self.status = label("Índice local listo", "muted")
         self.chat_toggle = button("Chat", self._choose_chat, tip="Mostrar u ocultar el chat")
         self.chat_toggle.setCheckable(True)
@@ -121,6 +125,9 @@ class Workbench(QWidget):
         self.pages.addWidget(self.sections.tickets(table))
         self.pages.addWidget(self.sections.history(table))
         self.pages.addWidget(self.sections.playbooks())
+        self.backup_page = BackupPage(self)
+        self.pages.addWidget(self.backup_page)
+        self.pages.currentChanged.connect(lambda index: fade_in(self.pages.widget(index)))
         self.split.addWidget(self.pages)
         self.split.addWidget(self._chat())
         self.split.setStretchFactor(0, 3)
@@ -142,11 +149,35 @@ class Workbench(QWidget):
     def _choose_chat(self, visible):
         self.chat_choice = visible
         self._toggle_chat(visible)
+        if visible:
+            fade_in(self.chat_panel)
 
     def _update_soc(self):
         state = soc_status()
         self.soc.setText(state)
-        self.soc.setStyleSheet("color: " + (WARNING if state == "SOC cerrado" else POSITIVE))
+        palette = palette_for(self.window.dark)
+        self.soc.setStyleSheet("color: " + palette["WARNING" if state == "SOC cerrado" else "POSITIVE"])
+
+    def severity_color(self, level):
+        if self.window.dark:
+            return {"critical": "#edaaa7", "high": "#e7b399", "medium": "#dfc089",
+                    "low": "#a8cab7", "informational": "#a7b4c0"}.get(level, "#a7b4c0")
+        return SEVERITY.get(level, SEVERITY["informational"])[1]
+
+    def verdict_color(self, key):
+        if self.window.dark:
+            return {"true_positive": "#edaaa7", "benign_true_positive": "#b5c9a5",
+                    "false_positive": "#a8cab7", "false_negative": "#e0bb8b",
+                    "true_negative": "#9cc9d5", "needs_more_info": "#a7b4c0"}[key]
+        return VERDICTS[key][1]
+
+    def refresh_theme(self):
+        self._update_soc()
+        self.menu_toggle.setIcon(navigation_icon("menu", self.window.dark))
+        for control in self.rail_controls:
+            control.setIcon(navigation_icon(control.property("navigationIcon"), self.window.dark))
+        self._apply_stats_theme()
+        self._render_rows()
 
     def _remote_model(self):
         return "" if self.demo else available_model()
@@ -155,18 +186,18 @@ class Workbench(QWidget):
         self.rail = QWidget()
         self.rail.setObjectName("rail")
         layout = QVBoxLayout(self.rail)
-        layout.setContentsMargins(8, 14, 8, 12)
-        layout.setSpacing(5)
+        layout.setContentsMargins(8, 20, 8, 16)
+        layout.setSpacing(7)
         self.rail_identity = QBoxLayout(QBoxLayout.Direction.LeftToRight)
         self.rail_identity.setSpacing(5)
-        self.rail_logo = Mark(116)
-        self.rail_eye = Mark(24, icon=True)
+        self.rail_logo = Mark(122, dark=self.window.dark)
+        self.rail_eye = Mark(24, icon=True, dark=self.window.dark)
         for mark in (self.rail_logo, self.rail_eye):
             self.rail_identity.addWidget(mark, alignment=Qt.AlignmentFlag.AlignHCenter)
         self.menu_toggle = button("", self._toggle_menu)
         self.menu_toggle.setObjectName("menuToggle")
         self.menu_toggle.setFixedSize(34, 34)
-        self.menu_toggle.setIcon(navigation_icon("menu"))
+        self.menu_toggle.setIcon(navigation_icon("menu", self.window.dark))
         self.menu_toggle.setIconSize(QSize(18, 18))
         self.rail_identity.addWidget(self.menu_toggle, alignment=Qt.AlignmentFlag.AlignHCenter)
         layout.addLayout(self.rail_identity)
@@ -176,6 +207,7 @@ class Workbench(QWidget):
         destinations = (
             ("Inicio", "alerts"), ("Estadísticas", "statistics"), ("Informe diario", "report"),
             ("Tickets", "tickets"), ("Historial", "history"), ("Playbooks", "guides"),
+            ("Copias", "backup"),
         )
         for index, (title, icon) in enumerate(destinations):
             control = self._rail_button(title, icon, lambda _checked=False, idx=index: self._navigate(idx))
@@ -195,7 +227,8 @@ class Workbench(QWidget):
         control = button(title, callback, tip=title)
         control.setObjectName("navItem")
         control.setAccessibleName(title)
-        control.setIcon(navigation_icon(icon))
+        control.setProperty("navigationIcon", icon)
+        control.setIcon(navigation_icon(icon, self.window.dark))
         control.setIconSize(QSize(18, 18))
         self.rail_controls[control] = title
         return control
@@ -203,10 +236,11 @@ class Workbench(QWidget):
     def _toggle_menu(self):
         self._set_menu_expanded(not self.menu_expanded)
         self.window.settings.setValue("menu_expanded", self.menu_expanded)
+        fade_in(self.rail_logo if self.menu_expanded else self.rail_eye)
 
     def _set_menu_expanded(self, expanded):
         self.menu_expanded = expanded
-        self.rail.setFixedWidth(178 if expanded else 57)
+        self.rail.setFixedWidth(190 if expanded else 57)
         self.rail_logo.setVisible(expanded)
         self.rail_eye.setVisible(not expanded)
         self.rail_identity.setDirection(QBoxLayout.Direction.LeftToRight if expanded else QBoxLayout.Direction.TopToBottom)
@@ -284,17 +318,19 @@ class Workbench(QWidget):
     def _panel(self, title: str, description: str) -> tuple[QWidget, QVBoxLayout]:
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 13, 0)
-        layout.setSpacing(10)
+        layout.setContentsMargins(0, 4, 18, 0)
+        layout.setSpacing(16)
         layout.addWidget(label(title, "title"))
         layout.addWidget(label(description, "muted"))
         return widget, layout
 
     def _alerts(self):
         widget, layout = self._panel(
-            "Alertas", f"{number(self.dataset_total)} en el índice   ·   Fuera de horario {fraction(*self.schedule)}"
+            "Alertas", f"{number(self.dataset_total)} alertas en el índice   ·   {fraction(*self.schedule)} fuera de horario"
         )
+        layout.addSpacing(4)
         filters = QHBoxLayout()
+        filters.setSpacing(10)
         self.query = QLineEdit()
         self.query.setMaxLength(150)
         self.query.setPlaceholderText("Buscar por ID, regla, usuario o equipo")
@@ -314,6 +350,7 @@ class Workbench(QWidget):
         layout.addLayout(filters)
 
         options = QHBoxLayout()
+        options.setSpacing(9)
         self.day_filter = QCheckBox("Fecha UTC")
         self.day = calendar(self.latest_day)
         self.day.setEnabled(False)
@@ -346,30 +383,36 @@ class Workbench(QWidget):
         self.reset_filters.hide()
         options.addWidget(self.reset_filters)
         layout.addLayout(options)
+        layout.addSpacing(7)
 
         self.table = table(["Hora UTC", "Alerta", "Severidad", "Estado", "Veredicto", "Analista", "Detalle"])
         self.table.setAccessibleName("Cola de alertas")
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(6, 106)
+        self.table.verticalHeader().setDefaultSectionSize(50)
+        self.table.setHorizontalScrollMode(QTableWidget.ScrollMode.ScrollPerPixel)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(6, 134)
+        self.table.horizontalHeaderItem(6).setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self.table.currentCellChanged.connect(self._select)
         self.table.cellActivated.connect(lambda row, _: self._detail(self.rows[row]))
-        layout.addWidget(self.table, 1)
-        self.empty_queue = label("No hay alertas que coincidan con la búsqueda. Prueba a limpiar los filtros.", "muted")
-        layout.addWidget(self.empty_queue)
 
-        decision_bar = QWidget()
-        decision_bar.setObjectName("queueFooter")
-        decisions = QHBoxLayout(decision_bar)
-        decisions.setContentsMargins(0, 9, 0, 0)
-        self.selected_alert = label("", "muted")
-        self.queue_correct = button("Corregir", lambda: self._act_on_selection(self._correct))
-        self.queue_accept = button("Aceptar propuesta", lambda: self._act_on_selection(self._accept), primary=True)
-        decisions.addWidget(self.selected_alert, 1)
-        decisions.addWidget(self.queue_correct)
-        decisions.addWidget(self.queue_accept)
-        layout.addWidget(decision_bar)
+        self.queue_view = QStackedWidget()
+        self.queue_view.addWidget(self.table)
+        empty = QWidget()
+        empty_layout = QVBoxLayout(empty)
+        empty_layout.setContentsMargins(24, 24, 24, 24)
+        empty_layout.setSpacing(8)
+        empty_layout.addStretch()
+        empty_layout.addWidget(label("Sin alertas en esta vista", "sectionTitle"))
+        self.empty_queue = label("Cambia la búsqueda o limpia los filtros para ampliar los resultados.", "muted")
+        empty_layout.addWidget(self.empty_queue)
+        empty_layout.addStretch(2)
+        self.queue_view.addWidget(empty)
+        layout.addWidget(self.queue_view, 1)
+
         pager = QHBoxLayout()
+        pager.setSpacing(8)
         self.count = label("", "muted")
         self.previous = button("Anterior", lambda: self._fetch(self.offset - PAGE_SIZE, self.filters))
         self.next = button("Siguiente", lambda: self._fetch(self.offset + PAGE_SIZE, self.filters))
@@ -377,6 +420,24 @@ class Workbench(QWidget):
         pager.addWidget(self.previous)
         pager.addWidget(self.next)
         layout.addLayout(pager)
+
+        decision_bar = QWidget()
+        decision_bar.setObjectName("queueFooter")
+        decisions = QHBoxLayout(decision_bar)
+        decisions.setContentsMargins(0, 14, 0, 4)
+        decisions.setSpacing(10)
+        selection = QVBoxLayout()
+        selection.setSpacing(3)
+        self.selected_alert = label("", "muted")
+        self.selected_rule = label("", "sectionTitle")
+        selection.addWidget(self.selected_alert)
+        selection.addWidget(self.selected_rule)
+        decisions.addLayout(selection, 1)
+        self.queue_correct = button("Corregir", lambda: self._act_on_selection(self._correct))
+        self.queue_accept = button("Aceptar propuesta", lambda: self._act_on_selection(self._accept), primary=True)
+        decisions.addWidget(self.queue_correct)
+        decisions.addWidget(self.queue_accept)
+        layout.addWidget(decision_bar)
         self.operations += [self.search, self.prepare, self.day_filter, self.severity, self.verdict,
                             self.sort, self.reset_filters]
         return widget
@@ -484,8 +545,10 @@ class Workbench(QWidget):
             analysis = item.get("analysis") or {}
             if identifier == selected:
                 next_row = row
-            verdict, color, _ = VERDICTS[self._verdict(item)]
-            level, level_color = SEVERITY.get(analysis.get("severity", alert["severity"]), ("Info", "#536272"))
+            verdict_key = self._verdict(item)
+            verdict = VERDICTS[verdict_key][0]
+            severity_key = analysis.get("severity", alert["severity"])
+            level = SEVERITY.get(severity_key, SEVERITY["informational"])[0]
             state = {"accepted": "Validada", "corrected": "Corregida"}.get(item.get("decision"))
             state = state or ("Por decidir" if self._can_accept(item) else
                               "Sin consenso" if analysis.get("proposal") else "Pendiente")
@@ -497,12 +560,19 @@ class Workbench(QWidget):
                 cell.setToolTip(f"{identifier}\n{alert['rule_name']}" if column == 1 else value)
                 if column == 4 and analysis.get("confidence") is not None:
                     cell.setToolTip(f"{value} · {analysis['confidence']}% estimado")
-                if column in (2, 4):
-                    cell.setForeground(QBrush(QColor(level_color if column == 2 else color)))
+                if column == 2:
+                    cell.setForeground(QBrush(QColor(self.severity_color(severity_key))))
+                elif column == 4:
+                    cell.setForeground(QBrush(QColor(self.verdict_color(verdict_key))))
+                if column == 1 or (column == 3 and state == "Por decidir"):
+                    font = cell.font()
+                    font.setBold(True)
+                    cell.setFont(font)
                 self.table.setItem(row, column, cell)
             actions = QWidget()
+            actions.setObjectName("queueRowActions")
             controls = QHBoxLayout(actions)
-            controls.setContentsMargins(2, 2, 2, 2)
+            controls.setContentsMargins(4, 5, 4, 5)
             controls.setSpacing(4)
             detail = button("Ver detalle", lambda _, entry=alert: self._detail(entry),
                             tip=f"Ver detalle de {identifier}")
@@ -511,9 +581,9 @@ class Workbench(QWidget):
             controls.addWidget(detail)
             self.table.setCellWidget(row, 6, actions)
         self.table.blockSignals(False)
-        self.count.setText(f"{self.offset + 1}–{self.offset + len(self.rows)} de {number(self.total)}"
-                           if self.rows else "Sin coincidencias")
-        self.empty_queue.setVisible(not self.rows)
+        self.count.setText(f"Mostrando {number(self.offset + 1)}–{number(self.offset + len(self.rows))} de {number(self.total)}"
+                           if self.rows else "0 alertas")
+        self.queue_view.setCurrentIndex(0 if self.rows else 1)
         self.reset_filters.setVisible(self.filters != ("", "", "", "latest", "all"))
         if self.rows:
             self.table.setCurrentCell(next_row, 1)
@@ -530,7 +600,9 @@ class Workbench(QWidget):
     def _selection_actions(self, busy):
         identifier = self.selected["alert_id"] if self.selected else ""
         item = self.reviews.get(identifier, {})
-        self.selected_alert.setText(f"Seleccionada · {identifier}" if identifier else "Selecciona una alerta")
+        self.selected_alert.setText(f"Alerta seleccionada · {identifier}" if identifier else "Sin alerta seleccionada")
+        self.selected_rule.setText(self.selected["rule_name"] if self.selected else "")
+        self.selected_rule.setVisible(bool(identifier))
         self.queue_accept.setEnabled(not busy and bool(identifier) and self._can_accept(item))
         self.queue_correct.setEnabled(not busy and bool(identifier) and not item.get("decision"))
 
@@ -626,8 +698,8 @@ class Workbench(QWidget):
         dialog.setWindowTitle("Detalle · " + alert_id)
         dialog.resize(900, 735)
         layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(24, 18, 24, 18)
-        layout.setSpacing(10)
+        layout.setContentsMargins(30, 23, 30, 24)
+        layout.setSpacing(14)
         heading = QHBoxLayout()
         heading.addWidget(label(f"{alert_id}  ·  {alert['source_product']}  ·  {alert['runbook']}", "muted"), 1)
         heading.addWidget(button("Ver guías", lambda: self._view_guidance(dialog, alert["runbook"])))
@@ -674,6 +746,7 @@ class Workbench(QWidget):
         for name, widget in extra.items():
             tabs.addTab(widget, name)
         layout.addWidget(tabs, 1)
+        tabs.currentChanged.connect(lambda index: fade_in(tabs.widget(index)))
 
         footer = QHBoxLayout()
         if self.demo:
@@ -699,8 +772,11 @@ class Workbench(QWidget):
             item = self.reviews.get(alert_id, {})
             analysis = item.get("analysis") or baseline
             verdict = item.get("verdict") or analysis.get("verdict", "needs_more_info")
-            verdict_name, verdict_color, _ = VERDICTS[verdict]
-            severity, severity_color = SEVERITY[analysis.get("severity", alert["severity"])]
+            verdict_name = VERDICTS[verdict][0]
+            verdict_color = self.verdict_color(verdict)
+            severity_key = analysis.get("severity", alert["severity"])
+            severity = SEVERITY[severity_key][0]
+            severity_color = self.severity_color(severity_key)
             values["Severidad"].setText(severity)
             values["Severidad"].setStyleSheet(f"color: {severity_color};")
             values["Veredicto"].setText(verdict_name)
@@ -892,33 +968,85 @@ class Workbench(QWidget):
         return "\n".join(text)
 
     def _statistics(self):
-        widget, layout = self._panel("Estadísticas", "Distribución del índice y decisiones guardadas en este perfil.")
+        widget, layout = self._panel("Estadísticas", "Actividad registrada en el índice y decisiones de tu perfil.")
+        layout.setSpacing(18)
+
+        overview = QHBoxLayout()
+        overview.setSpacing(28)
+        volume = QVBoxLayout()
+        volume.setSpacing(6)
+        volume.addWidget(label("Volumen y revisión", "muted"))
         self.stats_total = label("Consultando el índice…", "sectionTitle")
-        layout.addWidget(self.stats_total)
-        self.stats_schedule = label("", "muted")
-        layout.addWidget(self.stats_schedule)
+        volume.addWidget(self.stats_total)
+        volume.addStretch(1)
+        overview.addLayout(volume, 1)
+
+        schedule = QVBoxLayout()
+        schedule.setSpacing(6)
+        schedule.addWidget(label("Fuera de horario", "muted"))
+        self.stats_schedule = label("")
+        schedule.addWidget(self.stats_schedule)
+        overview.addLayout(schedule, 2)
+        layout.addLayout(overview)
+
+        breakdown = QHBoxLayout()
+        breakdown.setSpacing(28)
+        severity = QVBoxLayout()
+        severity.setSpacing(10)
+        severity.addWidget(label("Alertas por severidad", "sectionTitle"))
         self.stats_bars = {}
         grid = QGridLayout()
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(10)
         for row, level in enumerate(reversed(LEVELS)):
-            grid.addWidget(label(SEVERITY[level][0]), row, 0)
+            title = SEVERITY[level][0]
+            grid.addWidget(label(title, "muted"), row, 0)
             bar = QProgressBar()
             bar.setTextVisible(False)
-            bar.setStyleSheet(f"QProgressBar::chunk {{ background:{SEVERITY[level][1]}; }}")
-            number = label("—")
+            bar.setFixedHeight(8)
+            bar.setAccessibleName(f"Alertas de severidad {title.lower()}")
             grid.addWidget(bar, row, 1)
-            grid.addWidget(number, row, 2)
-            self.stats_bars[level] = (bar, number)
+            count_label = label("—")
+            count_label.setWordWrap(False)
+            count_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            grid.addWidget(count_label, row, 2)
+            self.stats_bars[level] = (bar, count_label)
         grid.setColumnStretch(1, 1)
-        layout.addLayout(grid)
+        severity.addLayout(grid)
+        severity.addSpacing(10)
+        severity.addWidget(label("Veredictos registrados", "sectionTitle"))
         self.stats_verdict = label("", "muted")
-        layout.addWidget(self.stats_verdict)
-        layout.addWidget(label("Alertas por fuente", "sectionTitle"))
+        severity.addWidget(self.stats_verdict)
+        self.stats_retry = button("Volver a intentar", self._refresh_stats)
+        self.stats_retry.hide()
+        severity.addWidget(self.stats_retry, alignment=Qt.AlignmentFlag.AlignLeft)
+        severity.addStretch(1)
+        breakdown.addLayout(severity, 1)
+
+        sources = QVBoxLayout()
+        sources.setSpacing(10)
+        sources.addWidget(label("Alertas por fuente", "sectionTitle"))
         self.stats_table = table(["Fuente", "Alertas"])
+        self.stats_table.setAccessibleName("Número de alertas por fuente")
+        self.stats_table.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft)
         self.stats_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        layout.addWidget(self.stats_table, 1)
+        self.stats_table.horizontalHeaderItem(1).setTextAlignment(Qt.AlignmentFlag.AlignRight)
+        sources.addWidget(self.stats_table, 1)
+        breakdown.addLayout(sources, 1)
+        layout.addLayout(breakdown, 1)
+        self._apply_stats_theme()
         return widget
 
+    def _apply_stats_theme(self):
+        for level, (bar, _) in self.stats_bars.items():
+            color = self.severity_color(level)
+            bar.setStyleSheet(f"QProgressBar::chunk {{ background: {color}; border-radius: 2px; }}")
+
     def _refresh_stats(self):
+        if self.window.job:
+            return
+        self.stats_retry.hide()
+        self.stats_total.setText("Consultando el índice…")
         analyzed_ids = [key for key, item in self.reviews.items() if (analysis := item.get("analysis"))
                         and analysis.get("proposal") and analysis.get("origin") != "demo"]
 
@@ -929,13 +1057,23 @@ class Workbench(QWidget):
 
         def done(result, error):
             if error:
+                self.stats_loaded = False
                 self.stats_total.setText("No se pudieron cargar las estadísticas.")
+                self.stats_schedule.clear()
+                self.stats_verdict.clear()
+                for bar, count_label in self.stats_bars.values():
+                    bar.setRange(0, 1)
+                    bar.setValue(0)
+                    bar.setToolTip("")
+                    count_label.setText("—")
+                self.stats_table.setRowCount(0)
+                self.stats_retry.show()
                 return
             self.stats_loaded = True
             rows, analyzed, demo = result
             self.stats_schedule.setText(
-                f"Fuera de horario · Índice {fraction(*self.schedule)}  ·  "
-                f"Propuesta OpenAI {fraction(*analyzed)}  ·  Agente simulado {fraction(*demo)}"
+                f"Índice {fraction(*self.schedule)}  ·  "
+                f"Propuestas OpenAI {fraction(*analyzed)}  ·  Agente simulado {fraction(*demo)}"
             )
             by_level, by_source = Counter(), Counter()
             for row in rows:
@@ -949,10 +1087,14 @@ class Workbench(QWidget):
             self.stats_verdict.setText("  ·  ".join(f"{VERDICTS[key][0]}: {decisions[key]}"
                                                    for key in CLASSIFICATIONS))
             for key, (bar, count_label) in self.stats_bars.items():
+                count = by_level[key]
                 bar.setRange(0, max(total, 1))
-                bar.setValue(by_level[key])
-                count_label.setText(number(by_level[key]))
-            self._fill_summary(self.stats_table, by_source.most_common())
+                bar.setValue(count)
+                bar.setToolTip(f"{fraction(total, count)} del índice")
+                count_label.setText(number(count))
+            self._fill_summary(self.stats_table, [(source, number(count)) for source, count in by_source.most_common()])
+            for row in range(self.stats_table.rowCount()):
+                self.stats_table.item(row, 1).setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         self._run(operation, done, "Calculando estadísticas…")
 
@@ -961,11 +1103,17 @@ class Workbench(QWidget):
         widget.setRowCount(len(rows))
         for index, values in enumerate(rows):
             for column, value in enumerate(values):
-                widget.setItem(index, column, QTableWidgetItem(str(value)))
+                item = QTableWidgetItem(str(value))
+                item.setToolTip(str(value))
+                widget.setItem(index, column, item)
 
     def _reports(self):
-        widget, layout = self._panel("Informe diario", "Resumen por fecha y reproducción de la actividad por horas UTC.")
+        widget, layout = self._panel(
+            "Informe diario", "Consulta la actividad de una jornada y recórrela hora a hora."
+        )
+        layout.setSpacing(14)
         controls = QHBoxLayout()
+        controls.setSpacing(8)
         self.report_day = calendar(self.latest_day)
         self.report_day.dateChanged.connect(self._refresh_report)
         controls.addWidget(self.report_day)
@@ -973,39 +1121,80 @@ class Workbench(QWidget):
         load = button("Importar archivo…", self._load_report)
         self.report_reset = button("Volver al índice", self._reset_report)
         self.report_reset.hide()
-        controls.addWidget(refresh)
-        controls.addWidget(load)
-        controls.addWidget(self.report_reset)
+        for control in (refresh, load, self.report_reset):
+            controls.addWidget(control)
+        controls.addStretch()
         self.presentation = button("Presentar", self._present)
         controls.addWidget(self.presentation)
-        controls.addStretch()
         layout.addLayout(controls)
+
         self.report_source = label("Fuente: índice de Tarvia", "muted")
-        self.report_count = label("—", "sectionTitle")
-        layout.addWidget(self.report_source)
-        layout.addWidget(self.report_count)
+        self.report_count = label("Consultando el índice…", "sectionTitle")
         self.report_schedule = label("", "muted")
-        layout.addWidget(self.report_schedule)
-        self.report_table = table(["Fuente", "Severidad", "Alertas"])
-        self.report_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        layout.addWidget(self.report_table, 1)
-        layout.addWidget(label("Reproducción de la jornada", "sectionTitle"))
+        summary = QVBoxLayout()
+        summary.setSpacing(5)
+        for item in (self.report_source, self.report_count, self.report_schedule):
+            summary.addWidget(item)
+        layout.addLayout(summary)
+
+        timeline = QVBoxLayout()
+        timeline.setSpacing(8)
+        timeline_header = QHBoxLayout()
+        timeline_header.addWidget(label("Actividad por hora", "sectionTitle"))
+        timeline_header.addStretch()
+        self.report_peak = label("", "muted")
+        timeline_header.addWidget(self.report_peak)
+        timeline.addLayout(timeline_header)
+
+        chart = QGridLayout()
+        chart.setSpacing(2)
+        self.report_columns = []
+        for hour in range(24):
+            column = QProgressBar()
+            column.setOrientation(Qt.Orientation.Vertical)
+            column.setTextVisible(False)
+            column.setRange(0, 1)
+            column.setValue(0)
+            column.setFixedSize(11, 45)
+            column.setAccessibleName(f"{hour:02d}:00 UTC")
+            self.report_columns.append(column)
+            chart.addWidget(column, 0, hour, alignment=Qt.AlignmentFlag.AlignHCenter)
+            chart.setColumnStretch(hour, 1)
+            if hour in (0, 6, 12, 18, 23):
+                tick = label(f"{hour:02d}", "muted")
+                tick.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+                chart.addWidget(tick, 1, hour)
+        timeline.addLayout(chart)
+
         playback = QHBoxLayout()
-        self.play = button("Reproducir", self._play)
+        self.play = button("Reproducir", self._play, primary=True)
+        self.play.setEnabled(False)
         self.hour = QSlider(Qt.Orientation.Horizontal)
         self.hour.setRange(0, 23)
         self.hour.setAccessibleName("Hora del informe UTC")
+        self.hour.setEnabled(False)
         self.hour.valueChanged.connect(self._hour_changed)
         self.hour_totals = {}
         self.hour_signals = {}
         self.hour_notice = label("", "muted")
         self.replay_signals = label("", "muted")
-        self.replay_signals.setMinimumHeight(46)
         playback.addWidget(self.play)
         playback.addWidget(self.hour, 1)
-        layout.addLayout(playback)
-        layout.addWidget(self.hour_notice)
-        layout.addWidget(self.replay_signals)
+        timeline.addLayout(playback)
+        timeline.addWidget(self.hour_notice)
+        timeline.addWidget(self.replay_signals)
+        layout.addLayout(timeline)
+
+        self.report_table = table(["Fuente", "Severidad", "Alertas"])
+        self.report_table.setAccessibleName("Alertas del día por fuente y severidad")
+        self.report_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.report_table.horizontalHeaderItem(2).setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(label("Desglose de la jornada", "sectionTitle"))
+        layout.addWidget(self.report_table, 1)
+        self.report_empty = label("", "muted")
+        self.report_empty.hide()
+        layout.addWidget(self.report_empty)
+
         self.replay = QTimer(self, interval=440)
         self.replay.timeout.connect(self._tick_report)
         self.operations += [self.report_day, refresh, load, self.report_reset]
@@ -1053,6 +1242,8 @@ class Workbench(QWidget):
             return
         self.replay.stop()
         self.play.setText("Reproducir")
+        self.play.setEnabled(False)
+        self.hour.setEnabled(False)
         day = self.report_day.date().toString(Qt.DateFormat.ISODate)
         imported = self.report_rows
 
@@ -1067,6 +1258,15 @@ class Workbench(QWidget):
         def done(result, error):
             if error:
                 self.report_count.setText("No se pudo cargar el informe.")
+                self.report_schedule.clear()
+                self.report_table.setRowCount(0)
+                self.hour_totals = {}
+                self.hour_signals = {}
+                self._update_report_columns()
+                self.hour_notice.clear()
+                self.replay_signals.clear()
+                self.report_empty.setText("Pulsa Actualizar para volver a consultar la fecha seleccionada.")
+                self.report_empty.show()
                 return
             totals, timeline, schedule = result
             self.report_loaded = True
@@ -1077,13 +1277,30 @@ class Workbench(QWidget):
             self._fill_summary(self.report_table, [
                 (row["source"], SEVERITY[row["severity"]][0], row["total"]) for row in totals
             ])
+            for row in range(self.report_table.rowCount()):
+                self.report_table.item(row, 2).setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
+            self.report_empty.setText("No hay alertas en la fecha seleccionada.")
+            self.report_empty.setVisible(not totals)
             self.hour_totals = {row["hour"]: row["total"] for row in timeline}
             self.hour_signals = {row["hour"]: row["signals"] for row in timeline}
+            self._update_report_columns()
             self.hour.setValue(0)
             self._hour_changed(0)
             self.play.setEnabled(bool(timeline))
+            self.hour.setEnabled(bool(timeline))
 
         self._run(operation, done, "Preparando informe…")
+
+    def _update_report_columns(self):
+        peak = max(self.hour_totals.values(), default=0)
+        self.report_peak.setText(f"Máximo por hora: {number(peak)} · UTC")
+        for hour, column in enumerate(self.report_columns):
+            count = self.hour_totals.get(hour, 0)
+            column.setMaximum(max(peak, 1))
+            column.setValue(count)
+            column.setToolTip(f"{hour:02d}:00 UTC · {number(count)} alertas")
 
     def _hour_changed(self, hour):
         count = self.hour_totals.get(hour, 0)
@@ -1094,6 +1311,7 @@ class Workbench(QWidget):
             f"{hour:02d}:00 UTC · {madrid(stamp):%H:%M %Z} · {soc_status(stamp)}  ·  "
             f"{number(count)} alertas esta hora  ·  {number(cumulative)} acumuladas"
         )
+        self.hour.setAccessibleDescription(self.hour_notice.text())
         self.replay_signals.setText("\n".join(self.hour_signals.get(hour, [])) or "Sin actividad registrada en esta hora.")
 
     def _play(self):
@@ -1116,9 +1334,10 @@ class Workbench(QWidget):
         panel = QWidget()
         self.chat_panel = panel
         panel.setObjectName("chatPanel")
-        panel.setMinimumWidth(270)
+        panel.setMinimumWidth(296)
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(13, 11, 13, 13)
+        layout.setContentsMargins(18, 16, 18, 17)
+        layout.setSpacing(13)
         header = QHBoxLayout()
         header.addWidget(label("Chat", "sectionTitle"), 1)
         self.chat_size = button("Ampliar", self._resize_chat, tip="Ampliar o acoplar el chat")
@@ -1135,13 +1354,13 @@ class Workbench(QWidget):
         self.attachment_info.hide()
         layout.addWidget(self.attachment_info)
         options = QHBoxLayout()
+        options.setSpacing(6)
         add = button("Adjuntar", self._attach, tip="Adjuntar o quitar un archivo de texto")
         prompts = button("Ejemplos", self._prompts, tip="Preguntas de ejemplo")
         mic = button("Dictado", self._dictation, tip="Usar dictado del sistema")
-        options.addWidget(add)
-        options.addWidget(prompts)
-        options.addWidget(mic)
-        options.addStretch()
+        for control in (add, prompts, mic):
+            control.setObjectName("chatTool")
+            options.addWidget(control, 1)
         layout.addLayout(options)
         self.model = QComboBox()
         self.model.setAccessibleName("Modelo de investigación")

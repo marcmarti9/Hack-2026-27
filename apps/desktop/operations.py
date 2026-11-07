@@ -1,5 +1,5 @@
 """Paneles de tickets, historial y edición de guías."""
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QPlainTextEdit
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QHeaderView, QPlainTextEdit
 
 from apps.desktop.case_data import pretty
 from apps.desktop.demo import archive
@@ -16,10 +16,19 @@ class Operations:
     def tickets(self, table_factory):
         widget, layout = self.work._panel("Tickets", "Casos del índice local y expedientes archivados de referencia.")
         self.ticket_table = table_factory(["Ticket", "Origen", "Alerta o grupo", "Estado"])
-        self.ticket_table.horizontalHeader().setStretchLastSection(True)
+        self.ticket_table.setAccessibleName("Tickets")
+        self.ticket_table.setWordWrap(False)
+        self.ticket_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.ticket_table.cellDoubleClicked.connect(lambda row, _: self._open_ticket(row))
+        self.ticket_table.currentCellChanged.connect(self._ticket_selection)
         layout.addWidget(self.ticket_table)
-        layout.addWidget(button("Ver detalle", lambda: self._open_ticket(self.ticket_table.currentRow())))
+        footer = QHBoxLayout()
+        self.ticket_selection = label("", "muted")
+        self.ticket_open = button("Ver detalle", lambda: self._open_ticket(self.ticket_table.currentRow()))
+        self.ticket_open.setEnabled(False)
+        footer.addWidget(self.ticket_selection, 1)
+        footer.addWidget(self.ticket_open)
+        layout.addLayout(footer)
         return widget
 
     def refresh_tickets(self):
@@ -27,13 +36,19 @@ class Operations:
             ((f"VIG-{key}", "Local", key, "Decidido" if record["decision"] else "Por revisar"), key)
             for key, record in sorted(self.work.reviews.items(), reverse=True)
         ] + [
-            ((ticket["ticket_id"], "Archivo", f"{len(ticket['alert_ids'])} alertas · {ticket['title']}", "Referencia"),
+            ((ticket["ticket_id"], "Archivo", ticket["title"], "Referencia"),
              ticket["alert_ids"][0])
             for ticket in archive()["tickets"] if ticket["alert_ids"]
         ]
         self.work._fill_summary(self.ticket_table, [item[0] for item in self.ticket_rows])
         if self.ticket_rows:
             self.ticket_table.selectRow(0)
+        self._ticket_selection(self.ticket_table.currentRow())
+
+    def _ticket_selection(self, row, *_):
+        selected = 0 <= row < len(self.ticket_rows)
+        self.ticket_open.setEnabled(selected)
+        self.ticket_selection.setText(self.ticket_rows[row][0][2] if selected else "No hay tickets en esta vista.")
 
     def _open_ticket(self, row: int):
         if 0 <= row < len(self.ticket_rows):
