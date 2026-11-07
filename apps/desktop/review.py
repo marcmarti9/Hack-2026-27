@@ -14,6 +14,7 @@ from apps.desktop.demo import RESOURCES, display_questions
 
 VERDICTS = {
     "true_positive": ("Verdadero positivo", "#ff8793", "#35222c"),
+    "benign_true_positive": ("Positivo benigno", "#b7d7a0", "#28362b"),
     "false_positive": ("Falso positivo", "#83d99e", "#1b332d"),
     "false_negative": ("Falso negativo", "#ffbd77", "#382c22"),
     "true_negative": ("Verdadero negativo", "#79d6d7", "#1b333c"),

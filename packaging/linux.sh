@@ -10,7 +10,7 @@ mkdir -p "$stage/DEBIAN" "$stage/opt/vigia" "$stage/usr/share/applications" "$st
 cp -a out/packaging/dist/Vigia/. "$stage/opt/vigia/"
 cat > "$stage/DEBIAN/control" <<'CONTROL'
 Package: vigia
-Version: 0.4.1
+Version: 0.5.0
 Section: utils
 Priority: optional
 Architecture: amd64
@@ -32,9 +32,9 @@ DESKTOP
 sed -e 's/^Name=Vigía$/Name=Vigía Demo/' -e 's|^Exec=/usr/bin/vigia$|Exec=/usr/bin/vigia --demo|' \
     "$stage/usr/share/applications/vigia.desktop" > "$stage/usr/share/applications/vigia-demo.desktop"
 ln -s /opt/vigia/Vigia "$stage/usr/bin/vigia"
-dpkg-deb --root-owner-group -Zxz -z3 --build "$stage" "$destination/Vigia-0.4.1-linux-amd64.deb"
+dpkg-deb --root-owner-group -Zxz -z3 --build "$stage" "$destination/Vigia-0.5.0-linux-amd64.deb"
 
 # Archivo instalable por usuario en distribuciones fuera de Debian.
 cp packaging/install-linux.sh "$stage/opt/vigia/install.sh"
 chmod 755 "$stage/opt/vigia/install.sh"
-tar -C "$stage/opt" -czf "$destination/Vigia-0.4.1-linux-x86_64.tar.gz" vigia
+tar -C "$stage/opt" -czf "$destination/Vigia-0.5.0-linux-x86_64.tar.gz" vigia

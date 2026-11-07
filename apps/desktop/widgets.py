@@ -1,49 +1,94 @@
 """Controles compartidos de la mesa de Vigía."""
+from html import escape
+
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QPlainTextEdit, QPushButton
+from PySide6.QtWidgets import QLabel, QPlainTextEdit, QPushButton, QTextBrowser
 
 
-STYLE = """
-QMainWindow, QDialog, QWidget { background: #101723; color: #e6edf7; font-size: 13px; }
-QToolTip { background: #243348; color: #eef4fc; border: 1px solid #41536b; }
-#title { font-size: 29px; font-weight: 700; }
-#sectionTitle { font-size: 19px; font-weight: 650; }
-#muted { color: #a7b8ce; }
-#notice { color: #ffcb98; }
-#accentText { color: #a9df7a; font-weight: 700; }
-#rail { background: #121d2a; border-right: 1px solid #29374c; }
-#surface, #chatPanel { background: #151f2e; border: 1px solid #2b394e; border-radius: 9px; }
-#loginSide { background: #0d1714; }
-#authSurface { background: #121e1b; border: 1px solid #2f4c3e; border-radius: 15px; }
-#authSurface QLabel, #chatPanel QLabel { background: transparent; }
-#matrixTitle { background: transparent; color: #f0faed; font-size: 46px; font-weight: 700; }
-#matrixCopy { background: transparent; color: #c6ddce; font-size: 15px; }
-QLineEdit, QPlainTextEdit, QComboBox, QDateEdit {
-    background: #101a29; border: 1px solid #34465e; border-radius: 5px;
-    padding: 7px; selection-background-color: #355876;
-}
-#authSurface QLineEdit { background: #0c1613; border-color: #3a5949; min-height: 27px; }
-QTableWidget { background: #152031; alternate-background-color: #192538;
-    border: 1px solid #2b394e; border-radius: 7px; gridline-color: #243349;
-    selection-background-color: #2e445b; }
-QTableWidget::item { padding: 3px 6px; }
-QLineEdit:focus, QPlainTextEdit:focus, QTableWidget:focus, QPushButton:focus,
-QComboBox:focus, QDateEdit:focus { border: 1px solid #a2dc72; }
-QPushButton { background: #202d40; padding: 7px 10px; border: 1px solid #354760; border-radius: 5px; }
-QPushButton:hover { background: #293b51; }
-QPushButton:checked { background: #274536; color: #c1eea3; border-color: #4a7053; }
-QPushButton:disabled { color: #8392a5; background: #1a2534; }
-QPushButton#primary { background: #a1d66c; color: #142319; border-color: #b6e189; font-weight: 700; }
-QPushButton#primary:hover { background: #b4e584; }
-QPushButton#primary:disabled { background: #2e4335; color: #a5b6a8; border-color: #395141; }
-#rowAction { padding: 4px 5px; }
-QHeaderView::section { background: #1c2a3d; color: #afc3dc; padding: 8px 6px; border: 0; }
-QSplitter::handle { background: #26354a; }
-QMenu { background: #1b293c; border: 1px solid #3b4e67; padding: 4px; }
-QMenu::item { padding: 7px 14px; }
-QMenu::item:selected { background: #344d68; }
+# Hallmark · mesa de triaje · tinta fría y verde de Vigía · tipografía nativa
+INK = "#e6eceb"
+MUTED = "#a3b2b6"
+PAPER = "#10171a"
+RAIL = "#0c1315"
+PANEL = "#151f22"
+HOVER = "#1b292d"
+RULE = "#2d3c41"
+SELECTION = "#253b37"
+ACCENT = "#b0e081"
+WARNING = "#f1c580"
+
+STYLE = f"""
+QMainWindow, QDialog, QWidget {{ background: {PAPER}; color: {INK}; font-size: 13px; }}
+QLabel {{ background: transparent; }}
+QToolTip {{ background: {HOVER}; color: {INK}; border: 1px solid {RULE}; }}
+#title {{ font-size: 30px; font-weight: 700; }}
+#sectionTitle {{ font-size: 17px; font-weight: 700; }}
+#muted {{ color: {MUTED}; }}
+#notice {{ color: {WARNING}; }}
+#accentText {{ color: {ACCENT}; font-weight: 700; }}
+#rail {{ background: {RAIL}; border-right: 1px solid {RULE}; }}
+#railBrand {{ background: {RAIL}; font-size: 21px; font-weight: 700; }}
+#railCaption {{ background: {RAIL}; color: {MUTED}; font-size: 12px; }}
+#navItem {{ background: {RAIL}; border-color: transparent; border-left-width: 2px; text-align: left; }}
+#navItem:hover {{ background: {HOVER}; }}
+#navItem:checked {{ background: {SELECTION}; border-left-color: {ACCENT}; color: {INK}; font-weight: 700; }}
+#navItem:focus {{ border-color: {ACCENT}; }}
+#workspaceHeader, #queueFooter {{ border-bottom: 1px solid {RULE}; }}
+#queueFooter {{ border-top: 1px solid {RULE}; border-bottom: 0; }}
+#chatPanel {{ border-left: 1px solid {RULE}; }}
+#loginSide {{ background: {PAPER}; }}
+#authSurface {{ background: {PAPER}; }}
+#matrixTitle {{ background: transparent; color: {INK}; font-size: 42px; font-weight: 700; }}
+#matrixCopy {{ background: transparent; color: {MUTED}; font-size: 15px; }}
+QLineEdit, QPlainTextEdit, QTextBrowser, QComboBox, QDateEdit {{
+    background: {PANEL}; border: 1px solid {RULE}; border-radius: 4px;
+    padding: 7px; selection-background-color: {SELECTION};
+}}
+#authSurface QLineEdit {{ min-height: 27px; }}
+QTableWidget {{ background: {PAPER}; alternate-background-color: {PANEL};
+    border: 1px solid {RULE}; gridline-color: {RULE}; selection-background-color: {SELECTION};
+    selection-color: {INK}; }}
+QTableWidget::item {{ padding: 4px 8px; }}
+QLineEdit:focus, QPlainTextEdit:focus, QTextBrowser:focus, QTableWidget:focus,
+QPushButton:focus, QComboBox:focus, QDateEdit:focus {{ border: 1px solid {ACCENT}; }}
+QPushButton {{ background: {PANEL}; padding: 7px 10px; border: 1px solid {RULE}; border-radius: 4px; }}
+QPushButton:hover {{ background: {HOVER}; }}
+QPushButton:pressed, QPushButton:checked {{ background: {SELECTION}; color: {ACCENT}; }}
+QPushButton:disabled {{ color: {MUTED}; background: {PAPER}; }}
+QPushButton#primary {{ background: {ACCENT}; color: {RAIL}; border-color: {ACCENT}; font-weight: 700; }}
+QPushButton#primary:hover {{ background: {INK}; }}
+QPushButton#primary:pressed {{ background: {MUTED}; }}
+QPushButton#primary:focus {{ border-color: {INK}; }}
+QPushButton#primary:disabled {{ background: {PANEL}; color: {MUTED}; border-color: {RULE}; }}
+#rowAction {{ padding: 4px 9px; background: {PAPER}; }}
+#rowAction:hover {{ background: {HOVER}; color: {ACCENT}; }}
+QHeaderView::section {{ background: {PANEL}; color: {MUTED}; padding: 9px 8px;
+    border: 0; border-bottom: 1px solid {RULE}; font-weight: 600; }}
+QSplitter::handle {{ background: {PAPER}; width: 7px; }}
+QMenu {{ background: {PANEL}; border: 1px solid {RULE}; padding: 4px; }}
+QMenu::item {{ padding: 7px 14px; }}
+QMenu::item:selected {{ background: {SELECTION}; }}
+QTabWidget::pane {{ border: 0; border-top: 1px solid {RULE}; }}
+QTabBar::tab {{ color: {MUTED}; padding: 9px 12px; border: 1px solid transparent; border-bottom-width: 2px; }}
+QTabBar::tab:hover {{ background: {HOVER}; color: {INK}; }}
+QTabBar::tab:selected {{ color: {INK}; border-bottom-color: {ACCENT}; font-weight: 700; }}
+QTabBar::tab:focus {{ border-top-color: {ACCENT}; }}
+QScrollBar:vertical {{ background: {PAPER}; width: 10px; margin: 0; }}
+QScrollBar:horizontal {{ background: {PAPER}; height: 10px; margin: 0; }}
+QScrollBar::handle {{ background: {RULE}; border-radius: 4px; min-height: 26px; min-width: 26px; }}
+QScrollBar::handle:hover {{ background: {MUTED}; }}
+QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
+QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
+QProgressBar {{ background: {PANEL}; border: 1px solid {RULE}; border-radius: 3px; }}
+QProgressBar::chunk {{ background: {ACCENT}; }}
+QSlider::groove:horizontal {{ height: 4px; background: {RULE}; }}
+QSlider::handle:horizontal {{ background: {ACCENT}; width: 14px; margin: -5px 0; border-radius: 7px; }}
+#caseFacts {{ background: {PANEL}; border-top: 1px solid {RULE}; border-bottom: 1px solid {RULE}; }}
+#factLabel {{ color: {MUTED}; font-size: 12px; }}
+#factValue {{ font-size: 17px; font-weight: 700; }}
+#caseReading, #reviewProcess {{ background: {PAPER}; border: 1px solid transparent; padding: 0; }}
+#caseReading:focus, #reviewProcess:focus {{ border-color: {ACCENT}; }}
 """
-
 
 def label(text: str, role: str = "") -> QLabel:
     widget = QLabel()
@@ -63,8 +108,16 @@ def button(text, callback=None, *, primary=False, tip=""):
         widget.setObjectName("primary")
     if tip:
         widget.setToolTip(tip)
-        widget.setAccessibleName(tip)
+        widget.setAccessibleDescription(tip)
     return widget
+
+
+def set_primary(widget: QPushButton, primary: bool):
+    name = "primary" if primary else ""
+    if widget.objectName() != name:
+        widget.setObjectName(name)
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
 
 
 def text_area(name: str) -> QPlainTextEdit:
@@ -72,3 +125,32 @@ def text_area(name: str) -> QPlainTextEdit:
     widget.setAccessibleName(name)
     widget.setReadOnly(True)
     return widget
+
+
+class Article(QTextBrowser):
+    """Lectura con secciones y texto seleccionable, incluidas salidas no confiables."""
+
+    def __init__(self, name: str):
+        super().__init__()
+        self.setObjectName("caseReading")
+        self.setAccessibleName(name)
+        self.setOpenLinks(False)
+        self.setOpenExternalLinks(False)
+        self.document().setDocumentMargin(14)
+
+    def show_sections(self, sections):
+        blocks = []
+        for heading, copy in sections:
+            if not copy:
+                continue
+            paragraphs = escape(copy).split("\n\n")
+            body = "".join("<p>" + paragraph.replace("\n", "<br>") + "</p>" for paragraph in paragraphs)
+            blocks.append(f"<h2>{escape(heading)}</h2>{body}")
+        self.setHtml(f"""
+            <style>
+              body {{ color: {INK}; font-size: 14px; }}
+              h2 {{ color: {INK}; font-size: 16px; margin-top: 18px; margin-bottom: 5px; }}
+              p {{ margin-top: 0; margin-bottom: 9px; line-height: 145%; }}
+            </style>
+            {"".join(blocks)}
+        """)

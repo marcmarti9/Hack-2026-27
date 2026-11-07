@@ -6,8 +6,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
-from PySide6.QtCore import QDate, Qt, QTimer
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtCore import QDate, QSignalBlocker, Qt, QTimer
+from PySide6.QtGui import QBrush, QColor, QFontDatabase
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QComboBox, QDateEdit, QDialog, QFileDialog, QGridLayout,
     QHBoxLayout, QHeaderView, QLineEdit, QMenu, QMessageBox, QProgressBar, QSlider,
@@ -22,8 +22,8 @@ from apps.desktop.case_data import SECTION_NAMES, case_sections, demo_process, f
 from apps.desktop.demo import DEMO_ALERT, archive, for_alert
 from apps.desktop.operations import Operations
 from apps.desktop.reports import imported_summary, read_report
-from apps.desktop.review import CLASSIFICATIONS, VERDICTS, investigate, replay_demo
-from apps.desktop.widgets import button, label, text_area
+from apps.desktop.review import CLASSIFICATIONS, PLAYBOOKS, VERDICTS, investigate, replay_demo
+from apps.desktop.widgets import ACCENT, WARNING, Article, button, label, set_primary, text_area
 
 PAGE_SIZE = 50
 SEVERITY = {
@@ -41,7 +41,7 @@ def table(headers: list[str]) -> QTableWidget:
     widget = QTableWidget(0, len(headers))
     widget.setHorizontalHeaderLabels(headers)
     widget.verticalHeader().hide()
-    widget.verticalHeader().setDefaultSectionSize(37)
+    widget.verticalHeader().setDefaultSectionSize(41)
     widget.setAlternatingRowColors(True)
     widget.setShowGrid(False)
     widget.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -75,6 +75,7 @@ class Workbench(QWidget):
         self.report_rows = None
         self.attachment = ("", "")
         self.chat_expanded = False
+        self.chat_choice = None
         self.stats_loaded = False
         self.report_loaded = False
         self.operations = []
@@ -88,8 +89,11 @@ class Workbench(QWidget):
         layout = QVBoxLayout(body)
         layout.setContentsMargins(20, 14, 18, 16)
         self.root.addWidget(body, 1)
-        top = QHBoxLayout()
-        brand = label("VIGÍA  /  DEMO DE TARVIA" if self.demo else "VIGÍA  /  SOC TARVIA", "accentText")
+        masthead = QWidget()
+        masthead.setObjectName("workspaceHeader")
+        top = QHBoxLayout(masthead)
+        top.setContentsMargins(0, 0, 0, 9)
+        brand = label("Demo del hackathon" if self.demo else "Centro de operaciones", "muted")
         brand.setWordWrap(False)
         top.addWidget(brand)
         top.addStretch()
@@ -101,14 +105,12 @@ class Workbench(QWidget):
         self.soc_timer.start()
         self._update_soc()
         top.addWidget(self.soc)
-        top.addWidget(label(f"Fuera de horario · {fraction(*schedule)}", "muted"))
         self.status = label("Índice local listo", "muted")
-        top.addWidget(self.status)
-        self.chat_toggle = button("Chat", self._toggle_chat, tip="Mostrar u ocultar el chat")
+        self.chat_toggle = button("Chat", self._choose_chat, tip="Mostrar u ocultar el chat")
         self.chat_toggle.setCheckable(True)
         self.chat_toggle.setChecked(True)
         top.addWidget(self.chat_toggle)
-        layout.addLayout(top)
+        layout.addWidget(masthead)
         self.split = QSplitter()
         self.split.setChildrenCollapsible(False)
         layout.addWidget(self.split, 1)
@@ -123,13 +125,28 @@ class Workbench(QWidget):
         self.split.addWidget(self._chat())
         self.split.setStretchFactor(0, 3)
         self.split.setStretchFactor(1, 1)
-        self.split.setSizes([880, 350])
+        self.split.setSizes([980, 310])
+        layout.addWidget(self.status)
         self._render_rows()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "chat_panel") and self.chat_choice is None and not self.window.isFullScreen():
+            self._apply_chat_width()
+
+    def _apply_chat_width(self):
+        visible = self.width() >= 1180 if self.chat_choice is None else self.chat_choice
+        self.chat_toggle.setChecked(visible)
+        self._toggle_chat(visible)
+
+    def _choose_chat(self, visible):
+        self.chat_choice = visible
+        self._toggle_chat(visible)
 
     def _update_soc(self):
         state = soc_status()
         self.soc.setText(state)
-        self.soc.setStyleSheet("color: " + ("#f3cf80" if state == "SOC cerrado" else "#9bda9a"))
+        self.soc.setStyleSheet("color: " + (WARNING if state == "SOC cerrado" else ACCENT))
 
     def _remote_model(self):
         return "" if self.demo else available_model()
@@ -137,14 +154,19 @@ class Workbench(QWidget):
     def _rail(self):
         rail = QWidget()
         rail.setObjectName("rail")
-        rail.setFixedWidth(132)
+        rail.setFixedWidth(150)
         layout = QVBoxLayout(rail)
-        layout.setContentsMargins(8, 16, 8, 12)
-        layout.addWidget(Mark(30, icon=True), alignment=Qt.AlignmentFlag.AlignHCenter)
-        layout.addSpacing(16)
+        layout.setContentsMargins(12, 18, 12, 12)
+        identity = QHBoxLayout()
+        identity.addWidget(Mark(26, icon=True))
+        identity.addWidget(label("Vigía", "railBrand"), 1)
+        layout.addLayout(identity)
+        layout.addWidget(label("SOC de Tarvia", "railCaption"))
+        layout.addSpacing(20)
         self.nav = QButtonGroup(self)
-        for index, title in enumerate(("Inicio", "Estadísticas", "Informe diario", "Tickets", "Historial", "Playbooks")):
+        for index, title in enumerate(("Alertas", "Estadísticas", "Informe diario", "Tickets", "Historial", "Playbooks")):
             control = button(title, lambda _checked=False, idx=index: self._navigate(idx))
+            control.setObjectName("navItem")
             control.setCheckable(True)
             control.setChecked(index == 0)
             self.nav.addButton(control, index)
@@ -199,7 +221,7 @@ class Workbench(QWidget):
 
     def _manual(self):
         QMessageBox.information(self, "Manual de Vigía",
-            "Inicio: busca o filtra alertas y abre su detalle. Una propuesta que supera la segunda "
+            "Alertas: busca o filtra alertas y abre su detalle. Una propuesta que supera la segunda "
             "pasada puede aceptarse. Si la corriges, elige el veredicto y Vigía registra tu decisión.\n\n"
             "Estadísticas: consulta severidades, fuentes y decisiones locales.\n\n"
             "Informe diario: elige una fecha, importa un archivo JSON o JSONL de alertas y reproduce "
@@ -228,7 +250,9 @@ class Workbench(QWidget):
         return widget, layout
 
     def _alerts(self):
-        widget, layout = self._panel("Alertas", "Cola SIEM · Revisión humana de Tarvia")
+        widget, layout = self._panel(
+            "Alertas", f"{number(self.dataset_total)} en el índice   ·   Fuera de horario {fraction(*self.schedule)}"
+        )
         filters = QHBoxLayout()
         self.query = QLineEdit()
         self.query.setMaxLength(150)
@@ -252,7 +276,9 @@ class Workbench(QWidget):
         self.day_filter = QCheckBox("Fecha UTC")
         self.day = calendar(self.latest_day)
         self.day.setEnabled(False)
+        self.day.hide()
         self.day_filter.toggled.connect(self.day.setEnabled)
+        self.day_filter.toggled.connect(self.day.setVisible)
         self.day_filter.toggled.connect(self._search)
         self.day.dateChanged.connect(lambda _: self._search() if self.day_filter.isChecked() else None)
         self.severity = QComboBox()
@@ -275,24 +301,33 @@ class Workbench(QWidget):
         for control in (self.day_filter, self.day, self.severity, self.verdict, self.sort):
             options.addWidget(control)
         options.addStretch()
+        self.reset_filters = button("Limpiar filtros", self._reset_filters)
+        self.reset_filters.hide()
+        options.addWidget(self.reset_filters)
         layout.addLayout(options)
-        legend = QHBoxLayout()
-        for key in CLASSIFICATIONS:
-            text, color, fill = VERDICTS[key]
-            badge = label(text)
-            badge.setStyleSheet(f"color:{color}; background:{fill}; padding:4px 7px; border-radius:4px;")
-            legend.addWidget(badge)
-        legend.addStretch()
-        layout.addLayout(legend)
 
-        self.table = table(["Hora UTC", "Alerta", "Severidad", "Estado", "Veredicto", "Asignado", "Acciones"])
+        self.table = table(["Hora UTC", "Alerta", "Severidad", "Estado", "Veredicto", "Analista", "Detalle"])
         self.table.setAccessibleName("Cola de alertas")
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(6, 170)
+        self.table.setColumnWidth(6, 106)
         self.table.currentCellChanged.connect(self._select)
-        self.table.cellDoubleClicked.connect(lambda row, _: self._detail(self.rows[row]))
+        self.table.cellActivated.connect(lambda row, _: self._detail(self.rows[row]))
         layout.addWidget(self.table, 1)
+        self.empty_queue = label("No hay alertas que coincidan con la búsqueda. Prueba a limpiar los filtros.", "muted")
+        layout.addWidget(self.empty_queue)
+
+        decision_bar = QWidget()
+        decision_bar.setObjectName("queueFooter")
+        decisions = QHBoxLayout(decision_bar)
+        decisions.setContentsMargins(0, 9, 0, 0)
+        self.selected_alert = label("", "muted")
+        self.queue_correct = button("Corregir", lambda: self._act_on_selection(self._correct))
+        self.queue_accept = button("Aceptar propuesta", lambda: self._act_on_selection(self._accept), primary=True)
+        decisions.addWidget(self.selected_alert, 1)
+        decisions.addWidget(self.queue_correct)
+        decisions.addWidget(self.queue_accept)
+        layout.addWidget(decision_bar)
         pager = QHBoxLayout()
         self.count = label("", "muted")
         self.previous = button("Anterior", lambda: self._fetch(self.offset - PAGE_SIZE, self.filters))
@@ -301,8 +336,24 @@ class Workbench(QWidget):
         pager.addWidget(self.previous)
         pager.addWidget(self.next)
         layout.addLayout(pager)
-        self.operations += [self.search, self.prepare, self.day_filter, self.severity, self.verdict, self.sort]
+        self.operations += [self.search, self.prepare, self.day_filter, self.severity, self.verdict,
+                            self.sort, self.reset_filters]
         return widget
+
+    def _reset_filters(self):
+        controls = (self.query, self.day_filter, self.severity, self.verdict, self.sort)
+        blockers = [QSignalBlocker(control) for control in controls]
+        self.query.clear()
+        self.day_filter.setChecked(False)
+        self.day.hide()
+        for combo in controls[2:]:
+            combo.setCurrentIndex(0)
+        del blockers
+        self._search()
+
+    def _act_on_selection(self, action):
+        if self.selected and not self.window.job:
+            action(self.selected)
 
     def _search(self, *_):
         day = self.day.date().toString(Qt.DateFormat.ISODate) if self.day_filter.isChecked() else ""
@@ -392,13 +443,13 @@ class Workbench(QWidget):
             analysis = item.get("analysis") or {}
             if identifier == selected:
                 next_row = row
-            verdict, color, fill = VERDICTS[self._verdict(item)]
+            verdict, color, _ = VERDICTS[self._verdict(item)]
             level, level_color = SEVERITY.get(analysis.get("severity", alert["severity"]), ("Info", "#a9b8cd"))
             state = {"accepted": "Validada", "corrected": "Corregida"}.get(item.get("decision"))
             state = state or ("Por decidir" if self._can_accept(item) else
                               "Sin consenso" if analysis.get("proposal") else "Pendiente")
             stamp = alert["created_at"]
-            columns = (stamp[5:10] + " " + stamp[11:16], alert["rule_name"], level,
+            columns = (stamp[8:10] + "/" + stamp[5:7] + " " + stamp[11:16], alert["rule_name"], level,
                        state, verdict, item.get("reviewer") or "—")
             for column, value in enumerate(columns):
                 cell = QTableWidgetItem(value)
@@ -407,8 +458,6 @@ class Workbench(QWidget):
                     cell.setToolTip(f"{value} · {analysis['confidence']}% estimado")
                 if column in (2, 4):
                     cell.setForeground(QBrush(QColor(level_color if column == 2 else color)))
-                if column == 4:
-                    cell.setBackground(QBrush(QColor(fill)))
                 self.table.setItem(row, column, cell)
             actions = QWidget()
             controls = QHBoxLayout(actions)
@@ -416,28 +465,33 @@ class Workbench(QWidget):
             controls.setSpacing(4)
             detail = button("Ver detalle", lambda _, entry=alert: self._detail(entry),
                             tip=f"Ver detalle de {identifier}")
-            accept = button("✓", lambda _, entry=alert: self._accept(entry), tip=f"Aceptar {identifier}")
-            accept.setEnabled(self._can_accept(item))
-            correct = button("×", lambda _, entry=alert: self._correct(entry), tip=f"Corregir {identifier}")
-            correct.setEnabled(not item.get("decision"))
-            for action in (detail, accept, correct):
-                action.setObjectName("rowAction")
-                controls.addWidget(action)
-            accept.setFixedWidth(28)
-            correct.setFixedWidth(28)
+            detail.setObjectName("rowAction")
+            detail.setAccessibleName(f"Ver detalle de {identifier}")
+            controls.addWidget(detail)
             self.table.setCellWidget(row, 6, actions)
         self.table.blockSignals(False)
         self.count.setText(f"{self.offset + 1}–{self.offset + len(self.rows)} de {number(self.total)}"
                            if self.rows else "Sin coincidencias")
+        self.empty_queue.setVisible(not self.rows)
+        self.reset_filters.setVisible(self.filters != ("", "", "", "latest", "all"))
         if self.rows:
+            self.table.setCurrentCell(next_row, 1)
             self.table.selectRow(next_row)
         self._select(next_row if self.rows else -1)
         self._controls(self.window.job is not None)
 
     def _select(self, row, *_):
         self.selected = self.rows[row] if 0 <= row < len(self.rows) else None
+        self._selection_actions(self.window.job is not None)
         if hasattr(self, "chat_context"):
             self.chat_context.setText("Contexto: " + (self.selected["alert_id"] if self.selected else "ninguna alerta"))
+
+    def _selection_actions(self, busy):
+        identifier = self.selected["alert_id"] if self.selected else ""
+        item = self.reviews.get(identifier, {})
+        self.selected_alert.setText(f"Seleccionada · {identifier}" if identifier else "Selecciona una alerta")
+        self.queue_accept.setEnabled(not busy and bool(identifier) and self._can_accept(item))
+        self.queue_correct.setEnabled(not busy and bool(identifier) and not item.get("decision"))
 
     def _controls(self, busy: bool):
         for control in self.operations:
@@ -447,6 +501,7 @@ class Workbench(QWidget):
         self.day.setEnabled(not busy and self.day_filter.isChecked())
         self.prepare.setEnabled(not busy and bool(self._queue_candidates()))
         self.table.setEnabled(not busy)
+        self._selection_actions(busy)
 
     def _run(self, operation, done, message: str):
         if self.window.job:
@@ -528,17 +583,38 @@ class Workbench(QWidget):
         baseline = {}
         dialog = QDialog(self)
         dialog.setWindowTitle("Detalle · " + alert_id)
-        dialog.resize(930, 690)
+        dialog.resize(900, 735)
         layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(24, 18, 24, 18)
+        layout.setSpacing(10)
+        heading = QHBoxLayout()
+        heading.addWidget(label(f"{alert_id}  ·  {alert['source_product']}  ·  {alert['runbook']}", "muted"), 1)
+        heading.addWidget(button("Ver guías", lambda: self._view_guidance(dialog, alert["runbook"])))
+        layout.addLayout(heading)
         layout.addWidget(label(alert["rule_name"], "title"))
-        layout.addWidget(label(f"{alert_id}  ·  {alert['source_product']}  ·  {alert['runbook']}", "muted"))
         stamp = alert["created_at"]
-        layout.addWidget(label(f"{soc_status(stamp)} al dispararse · {madrid(stamp):%d/%m/%Y %H:%M %Z}", "accentText"))
+        layout.addWidget(label(f"{madrid(stamp):%d/%m/%Y %H:%M %Z}  ·  {soc_status(stamp)} al dispararse", "muted"))
+
+        facts = QWidget()
+        facts.setObjectName("caseFacts")
+        metrics = QHBoxLayout(facts)
+        metrics.setContentsMargins(13, 10, 13, 10)
+        values = {}
+        for title in ("Severidad", "Veredicto", "Confianza", "Eventos"):
+            column = QVBoxLayout()
+            column.setSpacing(3)
+            column.addWidget(label(title, "factLabel"))
+            values[title] = label("—", "factValue")
+            column.addWidget(values[title])
+            metrics.addLayout(column, 2 if title == "Veredicto" else 1)
+        layout.addWidget(facts)
+        feedback = label("", "muted")
+        layout.addWidget(feedback)
 
         tabs = QTabWidget()
-        detail = text_area("Proceso y revisión adversarial")
+        detail = Article("Proceso y revisión adversarial")
         detail.setObjectName("reviewProcess")
-        tabs.addTab(detail, "Proceso de revisión")
+        tabs.addTab(detail, "Resumen")
         data_page = QWidget()
         data_layout = QVBoxLayout(data_page)
         selector = QHBoxLayout()
@@ -550,8 +626,9 @@ class Workbench(QWidget):
         selector.addWidget(event_detail)
         data_layout.addLayout(selector)
         evidence = text_area("Eventos y contexto consultados")
+        evidence.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
         data_layout.addWidget(evidence, 1)
-        tabs.addTab(data_page, "Datos consultados")
+        tabs.addTab(data_page, "Evidencias")
         extra = {name: text_area(name) for name in SECTION_NAMES}
         for name, widget in extra.items():
             tabs.addTab(widget, name)
@@ -570,7 +647,7 @@ class Workbench(QWidget):
         footer.addWidget(remote)
         footer.addWidget(export)
         footer.addStretch()
-        accept = button("Aceptar")
+        accept = button("Aceptar", primary=True)
         correct = button("Corregir")
         close = button("Cerrar", dialog.reject)
         for control in (accept, correct, close):
@@ -580,59 +657,71 @@ class Workbench(QWidget):
         def render():
             item = self.reviews.get(alert_id, {})
             analysis = item.get("analysis") or baseline
-            lines = [alert["description"], f"Severidad del SIEM: {alert['severity']}",
-                     f"Referencias enlazadas: {', '.join(alert['related_events']) or 'ninguna'}"]
+            verdict = item.get("verdict") or analysis.get("verdict", "needs_more_info")
+            verdict_name, verdict_color, _ = VERDICTS[verdict]
+            severity, severity_color = SEVERITY[analysis.get("severity", alert["severity"])]
+            values["Severidad"].setText(severity)
+            values["Severidad"].setStyleSheet(f"color: {severity_color};")
+            values["Veredicto"].setText(verdict_name)
+            values["Veredicto"].setStyleSheet(f"color: {verdict_color};")
+            confidence = analysis.get("confidence")
+            values["Confianza"].setText(f"{confidence} %" if confidence is not None else "—")
+            values["Eventos"].setText(str(len(analysis["events"])) if analysis else "—")
+
+            sections = [("Qué detectó el SIEM", alert["description"])]
             sources = []
             event_ids = list(alert["related_events"])
             if analysis:
-                confidence = analysis.get("confidence")
                 if analysis.get("origin") == "demo":
-                    lines.extend(["", "REPRODUCCIÓN DE LA DEMO · propuesta y contraste archivados"])
-                lines.extend(["", f"Resultado: {VERDICTS[analysis['verdict']][0]}",
-                              f"Confianza estimada por {analysis['provider']}: {confidence}%"
-                              if confidence is not None else "Confianza: sin estimación validada.",
-                              "", "01  ·  Contexto y política", analysis["severity_rationale"],
-                              f"SLA: {analysis['sla']}", "", "02  ·  Datos consultados",
-                              f"{len(analysis['events'])} eventos recuperados · pestaña Datos consultados"])
+                    feedback.setText("Reproducción de la demo · propuesta y contraste archivados")
+                elif analysis.get("review_error") or analysis.get("proposal_error"):
+                    feedback.setText("Análisis pendiente de revisión")
+                elif self._can_accept(item):
+                    feedback.setText("El contraste coincide con la propuesta. Puedes aceptarla o corregirla.")
+                else:
+                    feedback.setText("Sin decisión registrada.")
+                sections.extend([
+                    ("Propuesta", self._result_text(analysis.get("proposal"), analysis.get("proposal_error", ""))),
+                    ("Revisión adversarial", self._result_text(analysis.get("challenge"), analysis.get("review_error", ""))),
+                ])
                 for event in analysis["events"]:
                     sources.extend([f"{event['event_id']} · {event['source']}", pretty(event), ""])
                     event_ids.append(event["event_id"])
                 missing = set(analysis["requested"]) - {x["event_id"] for x in analysis["events"]}
+                policy = [analysis["severity_rationale"], f"SLA: {analysis['sla']}",
+                          f"{len(analysis['events'])} eventos recuperados. Consulta la pestaña Evidencias."]
+                if alert["related_events"]:
+                    policy.append("Referencias de la alerta: " + ", ".join(alert["related_events"]))
                 if missing:
-                    lines.append("Eventos no encontrados: " + ", ".join(sorted(missing)))
+                    policy.append("Eventos no encontrados: " + ", ".join(sorted(missing)))
+                sections.append(("Datos y criterio de severidad", "\n".join(policy)))
                 if "sent_events" in analysis:
                     sources.extend(["Registros incluidos en la solicitud a OpenAI",
                                     pretty(analysis["sent_events"]), ""])
                 for name, records in analysis.get("context", {}).items():
                     if records:
                         sources.extend([name.capitalize(), pretty(records), ""])
-                lines.extend(["", "03  ·  Propuesta", self._result_text(analysis.get("proposal"),
-                                                                      analysis.get("proposal_error", "")),
-                              "", "04  ·  Revisión adversarial",
-                              self._result_text(analysis.get("challenge"), analysis.get("review_error", ""))])
                 timings = analysis.get("timing", {})
                 phases = {"evidence_ms": "Datos", "proposal_ms": "Propuesta",
                           "challenge_ms": "Contraste", "total_ms": "Total"}
-                if timings:
-                    lines.extend(["", "  ·  ".join(f"{title} {timings[key]} ms"
-                                                   for key, title in phases.items() if key in timings)])
-                if analysis.get("proposal") and analysis.get("challenge"):
-                    agrees = analysis["proposal"]["verdict"] == analysis["challenge"]["verdict"]
-                    lines.append("El contraste coincide con la propuesta." if agrees
-                                 else "El contraste discrepa. Requiere decisión humana.")
+                trace = ["  ·  ".join(f"{title} {timings[key]} ms" for key, title in phases.items() if key in timings)]
                 if analysis.get("guidance"):
-                    lines.append("Guías: " + " · ".join(f"{key} v{rev}" for key, rev in analysis["guidance"].items()))
+                    trace.append("Guías usadas: " + " · ".join(f"{key} v{rev}" for key, rev in analysis["guidance"].items()))
+                if confidence is not None:
+                    trace.append(f"Confianza estimada por {analysis['provider']}: {confidence}%")
+                sections.append(("Tiempos y guías", "\n".join(line for line in trace if line)))
             else:
-                lines.extend(["", "Cargando contexto del índice…"])
+                feedback.setText("Cargando evidencias del índice…")
             if item.get("decision"):
-                lines.extend(["", "Decisión humana: " + VERDICTS[item["verdict"]][0],
-                              f"{item['reviewer']} · {item['reviewed_at']}"])
-            lines.extend(demo_process(ticket, closed))
+                feedback.setText(f"Decisión registrada · {verdict_name} · {item['reviewer']}")
+                sections.insert(1, ("Decisión humana", f"{verdict_name} · {item['reviewer']} · {item['reviewed_at']}"))
+            if archived := demo_process(ticket, closed):
+                sections.append(("Expediente de referencia", "\n".join(archived).strip()))
             if ticket:
                 sources.extend(["Evidencias y hallazgos citados en la demo", pretty(ticket.get("evidence", []))])
                 event_ids.extend(event["event_id"] for event in ticket.get("evidence", []))
             event_ids.extend(point["event_id"] for point in incident.get("timeline", []))
-            detail.setPlainText("\n".join(lines))
+            detail.show_sections(sections)
             evidence.setPlainText("\n".join(sources) or "No hay datos recuperados.")
             previous = event_choice.currentText()
             event_choice.clear()
@@ -646,7 +735,9 @@ class Workbench(QWidget):
                                 "actor": item["reviewer"], "data": {"verdict": item["verdict"]}})
             for name, content in case_sections(alert, analysis, history).items():
                 extra[name].setPlainText(content)
-            accept.setEnabled(self._can_accept(item))
+            can_accept = self._can_accept(item)
+            accept.setEnabled(can_accept)
+            set_primary(remote, not can_accept and not item.get("decision"))
             for control in (remote, correct):
                 control.setEnabled(not item.get("decision") and self.window.job is None)
 
@@ -659,7 +750,7 @@ class Workbench(QWidget):
             if run_review:
                 message = ("Recuperando el expediente archivado…" if self.demo else
                            "Consultando datos y ejecutando las dos pasadas…")
-            detail.appendPlainText("\n" + message)
+            feedback.setText(message)
 
             def finished(result, error):
                 if run_review:
@@ -671,7 +762,7 @@ class Workbench(QWidget):
                 if dialog.isVisible():
                     render()
                     if error:
-                        detail.appendPlainText(f"\nAnálisis interrumpido: {error}")
+                        feedback.setText(f"Análisis interrumpido: {error}")
 
             def operation():
                 if run_review and self.demo:
@@ -728,6 +819,24 @@ class Workbench(QWidget):
         if not self.reviews.get(alert_id, {}).get("analysis"):
             QTimer.singleShot(0, lambda: analyze(False))
         dialog.exec()
+
+    def _view_guidance(self, parent, runbook):
+        viewer = QDialog(parent)
+        viewer.setWindowTitle("Guías vigentes")
+        viewer.resize(720, 560)
+        layout = QVBoxLayout(viewer)
+        layout.addWidget(label("Guías de triaje", "title"))
+        tabs = QTabWidget()
+        for key in dict.fromkeys((runbook, "SKILL")):
+            if key not in PLAYBOOKS:
+                continue
+            revision, content = self.store.document(key)
+            document = text_area(key)
+            document.setPlainText(content)
+            tabs.addTab(document, f"{key} · v{revision}")
+        layout.addWidget(tabs, 1)
+        layout.addWidget(button("Cerrar", viewer.reject), alignment=Qt.AlignmentFlag.AlignRight)
+        viewer.exec()
 
     @staticmethod
     def _result_text(result, error=""):
@@ -865,7 +974,7 @@ class Workbench(QWidget):
         if self.window.isFullScreen():
             self.window.showNormal()
             self.presentation.setText("Presentar")
-            self._toggle_chat(self.chat_toggle.isChecked())
+            self._apply_chat_width()
         else:
             self.window.showFullScreen()
             self.presentation.setText("Salir de presentación")
@@ -970,7 +1079,7 @@ class Workbench(QWidget):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(13, 11, 13, 13)
         header = QHBoxLayout()
-        header.addWidget(label("Vigía IA", "sectionTitle"), 1)
+        header.addWidget(label("Chat", "sectionTitle"), 1)
         self.chat_size = button("Ampliar", self._resize_chat, tip="Ampliar o acoplar el chat")
         header.addWidget(button("Nuevo", self._clear_chat, tip="Empezar una consulta nueva"))
         header.addWidget(self.chat_size)
@@ -985,8 +1094,8 @@ class Workbench(QWidget):
         self.attachment_info.hide()
         layout.addWidget(self.attachment_info)
         options = QHBoxLayout()
-        add = button("+ Archivo", self._attach, tip="Adjuntar o quitar un archivo de texto")
-        prompts = button("Prompts ▾", self._prompts, tip="Preguntas de ejemplo")
+        add = button("Adjuntar", self._attach, tip="Adjuntar o quitar un archivo de texto")
+        prompts = button("Ejemplos", self._prompts, tip="Preguntas de ejemplo")
         mic = button("Dictado", self._dictation, tip="Usar dictado del sistema")
         options.addWidget(add)
         options.addWidget(prompts)

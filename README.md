@@ -10,16 +10,16 @@ Tarvia es una empresa ficticia. Su SOC necesita investigar alertas y mantener co
 
 | Sistema | Paquete |
 | --- | --- |
-| Linux x86-64 | `Vigia-0.4.1-linux-amd64.deb` para Debian/Ubuntu y derivados. Instala con `sudo apt install ./Vigia-0.4.1-linux-amd64.deb`. |
-| Linux x86-64, instalación por usuario | Extrae `Vigia-0.4.1-linux-x86_64.tar.gz` y ejecuta `sh vigia/install.sh`. Crea una entrada en el menú. |
-| Windows x64 | Ejecuta `Vigia-0.4.1-windows-x64.exe`, generado por el workflow de instaladores. |
+| Linux x86-64 | `Vigia-0.5.0-linux-amd64.deb` para Debian/Ubuntu y derivados. Instala con `sudo apt install ./Vigia-0.5.0-linux-amd64.deb`. |
+| Linux x86-64, instalación por usuario | Extrae `Vigia-0.5.0-linux-x86_64.tar.gz` y ejecuta `sh vigia/install.sh`. Crea una entrada en el menú. |
+| Windows x64 | Ejecuta `Vigia-0.5.0-windows-x64.exe`, generado por el workflow de instaladores. |
 | macOS Apple Silicon e Intel | Abre el `.dmg` de tu arquitectura y arrastra Vigía a Aplicaciones. Los builds de desarrollo carecen de firma de distribución y notarización. |
 
 En el primer inicio, crea la cuenta local y selecciona la carpeta raíz del [dataset de Tarvia](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/5d7569232756eaf0a8723b22c428b70e8f67824f). La importación corre en segundo plano y deja un índice reutilizable en el perfil del sistema operativo. El instalador lleva su runtime de Python y Qt. El dataset se descarga por separado.
 
 La cola SIEM permite buscar y filtrar por fecha, severidad y veredicto. Cada expediente muestra el proceso de revisión, los registros originales, las entidades, la línea de tiempo, las acciones y el historial. **Tickets** abre tanto los casos locales como los 17 expedientes de la demo. Los 13 informes N2 y los descartes de la demo aparecen como referencias históricas separadas de las decisiones nuevas. Desde el detalle se puede exportar el expediente en JSON.
 
-`✓` acepta una propuesta cuando el contraste coincide y ambas respuestas citan eventos recuperados. `×` registra la clasificación humana, incluidos falsos y verdaderos negativos. **Historial** guarda las justificaciones basadas en evidencias, la revisión adversarial, las decisiones y las versiones de guía utilizadas. **Playbooks** permite editar y versionar los diez runbooks y la skill de triaje. Las modificaciones se aplican al siguiente análisis.
+`✓` acepta una propuesta cuando el contraste coincide y ambas respuestas citan eventos recuperados. `×` registra la clasificación humana, incluidos falsos y verdaderos negativos. **Historial** guarda las justificaciones basadas en evidencias, la revisión adversarial, las decisiones y las versiones de guía utilizadas. **Playbooks** permite editar y versionar los diez runbooks y la skill de triaje. Las modificaciones se aplican al siguiente análisis. **Ver guías** abre el runbook correspondiente a la alerta y la skill vigente. La severidad indica la prioridad según la matriz del SOC. La confianza describe el grado de certeza de un análisis disponible. **Positivo benigno** permite registrar que la regla detectó actividad autorizada.
 
 El chat funciona en modo local y admite adjuntos de texto de hasta 16 KB. Para activar el agente, inicia Vigía con `OPENAI_API_KEY` en el entorno. `OPENAI_MODEL` permite elegir el modelo y por defecto usa `gpt-5.4-mini`. Las acciones de OpenAI indican cuándo envían datos fuera del perfil. El análisis envía la alerta, hasta doce eventos, el contexto local y las guías aplicables. El agente propone un resultado y una segunda llamada intenta refutarlo. Si falta evidencia o las pasadas discrepan, Vigía deja el resultado pendiente. La confianza es la menor de las estimaciones de ambas pasadas. El detalle registra el tiempo de recuperación, propuesta, contraste y total. **Preparar 5** puede investigar hasta dos alertas a la vez.
 
@@ -32,7 +32,7 @@ El inicio de sesión protege la mesa dentro del perfil del usuario del sistema. 
 Abre **Vigía Demo** desde el menú en Linux o Windows. En macOS, ejecuta `open -na /Applications/Vigia.app --args --demo` después de instalar la aplicación. En desarrollo, usa `python -m apps.desktop.entry --demo`.
 
 1. En el acceso, usa `analista.demo` y `VigiaDemo2026`, o pulsa **Entrar a la demo**. En el primer ensayo, selecciona el dataset oficial si la app lo solicita.
-2. En **Inicio**, abre **Caso LSASS** y pulsa **Reproducir análisis de la demo**. La propuesta, el fiscal y la confianza vienen del expediente archivado. Los eventos se recuperan del índice en ese momento. Pulsa **Aceptar** o **Corregir** y abre **Historial** para mostrar el registro de la decisión.
+2. En **Alertas**, abre **Caso LSASS** y pulsa **Reproducir análisis de la demo**. La propuesta, el fiscal y la confianza vienen del expediente archivado. Los eventos se recuperan del índice en ese momento. Pulsa **Aceptar** o **Corregir** y abre **Historial** para mostrar el registro de la decisión.
 3. En **Informe diario**, pulsa **Presentar** para enseñar la reproducción de la jornada. Para abrir directamente el caso desde terminal, añade `--present` a `--demo`.
 
 La demo funciona sin red ni clave de API. Usa un índice independiente y guarda el usuario, los cambios de playbook y las decisiones durante esa ejecución. Al volver a abrirla se puede repetir el recorrido. Para probar el análisis en vivo, inicia **Vigía** en modo normal con tu propia clave OpenAI configurada.
@@ -115,6 +115,8 @@ La guía técnica define la estructura y el orden de trabajo del motor. En caso 
 La política de prioridad y los permisos se implementan con los apartados 2 a 5 de la política del SOC. El simulador ofrece un contrato propio de aprobación y contención. El código de esta rama aún carece de operaciones contra ese simulador. [Política del SOC](https://github.com/dttdfr/DTT-UAB-The-Hack/blob/5d7569232756eaf0a8723b22c428b70e8f67824f/01_contexto/politica_soc.md) · [API simulada](https://github.com/dttdfr/DTT-UAB-The-Hack/blob/5d7569232756eaf0a8723b22c428b70e8f67824f/06_herramientas/LEEME_herramientas.md)
 
 Los indicadores reales del dataset solo se pueden consultar en servicios de reputación. Durante las comprobaciones de esta rama, los contenedores que leen los datos se ejecutan sin red y con el dataset montado en solo lectura.
+
+La guía de triaje del equipo también describe tags, un score de 1 a 100 y agrupación de incidentes. Vigía muestra la severidad calculada, la evidencia y la confianza por separado. El score y el gestor de copias de seguridad se mantienen como referencias de diseño para otras iteraciones. [Guía de triaje](https://github.com/marcmarti9/Hack-2026-27/blob/9ddb430/Triaje%20SOC%20Tarvia%20-%20tags%20y%20score__(TRIATGE).pdf) · [Boceto de copias de seguridad](https://github.com/marcmarti9/Hack-2026-27/blob/9ddb430/BACKUP%20MANAGER.png)
 
 ## Equipo
 

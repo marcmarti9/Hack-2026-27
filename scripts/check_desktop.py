@@ -7,9 +7,9 @@ from tempfile import TemporaryDirectory
 from time import monotonic
 from unittest.mock import patch
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QPlainTextEdit, QPushButton, QTabWidget
+from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QPlainTextEdit, QPushButton, QTabWidget, QTextBrowser, QLabel
 
 
 def wait_for(condition, description: str, timeout: float = 60) -> None:
@@ -60,6 +60,14 @@ def check(app, window, home, password, output):
         window.grab().save(str(output.with_name("vigia-carga.png")))
     wait_for(lambda: hasattr(window, "workbench"), "importación y mesa")
     work = window.workbench
+    window.resize(990, 690)
+    app.processEvents()
+    assert not work.chat_panel.isVisible() and not work.chat_toggle.isChecked()
+    if output:
+        window.grab().save(str(output.with_name("vigia-cola-compacta.png")))
+    window.resize(1440, 850)
+    app.processEvents()
+    assert work.chat_panel.isVisible() and work.chat_toggle.isChecked()
     assert work.dataset_total == 11061 and work.schedule == (11061, 3503)
     data = archive()
     assert len(data["tickets"]) == 17 and len(data["incidents"]) == 13 and len(data["closed"]) == 10974
@@ -111,17 +119,35 @@ def check(app, window, home, password, output):
                 wait_for(lambda: window.job is None, "precarga de datos")
                 controls["Analizar y contrastar con OpenAI"].click()
                 wait_for(lambda: window.job is None, "segunda pasada")
-                text = dialog.findChild(QPlainTextEdit, "reviewProcess").toPlainText()
+                text = dialog.findChild(QTextBrowser, "reviewProcess").toPlainText()
                 assert "Confianza estimada por test-model: 77%" in text
                 assert "Contraste simulado." in text and "EDR-0123412" in text
                 assert "Fiscal de la demo" in text and "TKT-20261009-011790" in text
                 assert "¿Se confirmó el acceso inicial?" in text and "Total " in text
                 tabs = dialog.findChild(QTabWidget)
                 assert [tabs.tabText(i) for i in range(tabs.count())] == [
-                    "Proceso de revisión", "Datos consultados", "Entidades", "Línea de tiempo", "Acciones", "Historial"
+                    "Resumen", "Evidencias", "Entidades", "Línea de tiempo", "Acciones", "Historial"
                 ]
                 assert "INC-20261009-011790" in tabs.widget(3).toPlainText()
                 assert "Verificar el equipo con N2." in tabs.widget(4).toPlainText()
+                guidance_failures = []
+
+                def verify_guidance():
+                    viewer = app.activeModalWidget()
+                    try:
+                        guide_tabs = viewer.findChild(QTabWidget)
+                        assert guide_tabs.count() == 2
+                        assert guide_tabs.tabText(0) == "RB-02 · v0"
+                        assert guide_tabs.tabText(1) == "SKILL · v1"
+                    except BaseException as error:
+                        guidance_failures.append(error)
+                    finally:
+                        viewer.close()
+
+                QTimer.singleShot(60, verify_guidance)
+                controls["Ver guías"].click()
+                if guidance_failures:
+                    raise guidance_failures[0]
                 proposal, adversary = [call.args[1] for call in transport.call_args_list]
                 assert proposal["guía_editable"]["SKILL"]["revision"] == 1
                 assert "Añadido de prueba" in proposal["guía_editable"]["SKILL"]["text"]
@@ -138,9 +164,11 @@ def check(app, window, home, password, output):
                 dialog.close()
 
         QTimer.singleShot(100, drive_detail)
-        work.table.cellWidget(0, 6).findChildren(QPushButton)[0].click()
+        work.table.setFocus()
+        QTest.keyClick(work.table, Qt.Key.Key_Return)
         if failures:
             raise failures[0]
+        assert transport.call_count == 2
 
     with patch("apps.desktop.review.openai_message", side_effect=[
         json.dumps(response), json.dumps({**challenge, "verdict": "false_positive"})
@@ -160,7 +188,7 @@ def check(app, window, home, password, output):
     stored_intel = window.reviews.all()[intelligence_id]["analysis"]["context"]["inteligencia"]
     assert any(isinstance(record["tip"]["first_seen"], str) for record in stored_intel if record["tip"])
 
-    work.table.cellWidget(0, 6).findChildren(QPushButton)[1].click()
+    work.queue_accept.click()
     assert work.table.item(0, 3).text() == "Validada"
     assert work.table.item(0, 4).text() == "Verdadero positivo"
     assert not window.reviews.decide(work.selected["alert_id"], "false_negative", "corrected", "Otro")
@@ -174,6 +202,10 @@ def check(app, window, home, password, output):
     work.day_filter.setChecked(True)
     wait_for(lambda: window.job is None, "filtro de fecha")
     assert work.total == 0
+    assert work.empty_queue.isVisible() and work.reset_filters.isVisible()
+    assert not work.queue_accept.isEnabled() and not work.queue_correct.isEnabled()
+    work.reset_filters.click()
+    wait_for(lambda: work.total == 11061, "limpiar filtros")
     work._navigate(1)
     wait_for(lambda: work.stats_loaded, "estadísticas")
     assert "1 decisión registrada" in work.stats_total.text()
@@ -238,7 +270,7 @@ def check(app, window, home, password, output):
              if control.text() == "Registrar decisión").click()
 
     QTimer.singleShot(100, correct)
-    work.table.cellWidget(0, 6).findChildren(QPushButton)[2].click()
+    work.queue_correct.click()
     assert work.table.item(0, 3).text() == "Corregida"
     assert work.table.item(0, 4).text() == "Falso positivo"
     window.close()
@@ -251,8 +283,10 @@ def check_demo(app, window, normal_profile, output):
     assert window.username.text() == DEMO_USER
     assert not Account(normal_profile).verify(DEMO_PASSWORD)
     failures = []
+    completed = False
 
     def replay():
+        nonlocal completed
         dialog = app.activeModalWidget()
         if not isinstance(dialog, QDialog):
             QTimer.singleShot(50, replay)
@@ -266,8 +300,9 @@ def check_demo(app, window, normal_profile, output):
             assert not controls["Aceptar"].isEnabled()
             controls["Reproducir análisis de la demo"].click()
             wait_for(lambda: window.job is None, "reproducción del expediente")
-            text = dialog.findChild(QPlainTextEdit, "reviewProcess").toPlainText()
-            assert "REPRODUCCIÓN DE LA DEMO" in text and "85%" in text and "EDR-0123412" in text
+            text = dialog.findChild(QTextBrowser, "reviewProcess").toPlainText()
+            assert "85%" in text and "EDR-0123412" in text
+            assert any("Reproducción de la demo" in node.text() for node in dialog.findChildren(QLabel))
             if output:
                 dialog.grab().save(str(output.with_name("vigia-demo-lsass.png")))
             assert controls["Aceptar"].isEnabled()
@@ -281,13 +316,14 @@ def check_demo(app, window, normal_profile, output):
         except BaseException as error:
             failures.append(error)
         finally:
+            completed = True
             dialog.close()
 
     window.show()
     with patch("apps.desktop.review.openai_message") as transport:
         QTimer.singleShot(100, replay)
         window.enter_demo()
-        wait_for(lambda: hasattr(window, "workbench") and window.job is None, "mesa demo")
+        wait_for(lambda: completed, "reproducción y decisión de la demo")
         transport.assert_not_called()
     if failures:
         raise failures[0]

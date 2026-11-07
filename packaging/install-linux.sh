@@ -2,7 +2,7 @@
 set -eu
 source_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 data_dir=${XDG_DATA_HOME:-"$HOME/.local/share"}
-install_dir="$data_dir/vigia-desktop/app-0.4.1"
+install_dir="$data_dir/vigia-desktop/app-0.5.0"
 desktop_dir="$data_dir/applications"
 case "$install_dir" in
     /*) ;;
