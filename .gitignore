@@ -1,0 +1,10 @@
+.agentit/
+.env
+.venv/
+__pycache__/
+*.pyc
+data/dataset/
+data/cache/
+out/
+*.duckdb
+*.duckdb.wal

@@ -1,277 +1,80 @@
-# Hack-2026-27 | Agentic SOC para Tarvia Group
+# Vigía · Analista SOC de Tarvia
 
-> **UAB Hackathon 2026 · Reto Deloitte: IA para ciberseguridad**  
-> **Estado del proyecto:** especificación inicial. La aplicación todavía no está implementada.
+UAB The Hack 2026 · Reto Deloitte de IA para ciberseguridad · Marc's & Co.
 
-## TL;DR
+Vigía será una aplicación de escritorio en español con instaladores para Linux, Windows y macOS. El flujo confirmado empieza con el inicio de sesión, muestra el estado de carga y abre el área de trabajo con las alertas y el chat con la IA. El diseño detallado de las pantallas lo facilita el equipo.
 
-Construiremos un sistema de **triaje de alertas de ciberseguridad asistido por agentes de IA** para el Security Operations Center (SOC) de la empresa ficticia Tarvia Group.
+Tarvia es una empresa ficticia. Su SOC necesita investigar alertas y mantener cobertura fuera de horario. Vigía prepara evidencias, un veredicto, una prioridad y una recomendación para el analista. El reto exige mostrar el triaje en directo con las alertas comunes de la defensa. [Enunciado, datos y presentación de Deloitte](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/5d7569232756eaf0a8723b22c428b70e8f67824f)
 
-Por cada alerta, el sistema consultará las fuentes disponibles, reunirá evidencias, correlacionará actividad, determinará un veredicto, calculará la prioridad según la política del SOC y propondrá qué hacer. El analista verá **qué ha investigado la IA, en qué datos se basa y qué decisión recomienda**.
+## Motor disponible
 
-El objetivo del reto es atender alertas **24/7** con una investigación consistente y auditable. **Las decisiones sensibles y cualquier contención requieren aprobación humana**.
+La primera entrega de esta rama contiene la ingesta del dataset oficial, las consultas de solo lectura y las funciones de severidad y aprobación. Aún no hay un ejecutable de escritorio ni un flujo N1 completo. Docker sirve para reproducir el entorno de desarrollo y sus pruebas.
 
----
+1. Coloca el dataset oficial en `data/dataset`, con `01_contexto` a `06_herramientas` en ese nivel. Puedes usar otra carpeta con `VIGIA_DATA_DIR` o `--dataset`.
+2. Desde la raíz, con Python 3.11, ejecuta:
 
-## 1. El problema
+   ```bash
+   python -m pip install -r requirements.txt
+   python -m apps.backend.ingest
+   python -m scripts.check_data
+   python -m scripts.check_policy
+   ```
 
-Tarvia Group se prepara para Black Friday. Su SOC recibe unas **400 alertas diarias**, cuenta con **3 analistas N1 y 2 N2**, y opera de **lunes a viernes, de 08:00 a 20:00**. Parte del trabajo de nivel 1 consiste en consultar varias herramientas, copiar indicadores, buscar actividad relacionada, documentar un ticket y decidir si cerrar o escalar.
+La ingesta genera `out/tarvia.duckdb`. Construye una base temporal y sustituye la anterior al terminar. Los comandos de consulta abren la base en solo lectura. El directorio del dataset y las salidas se excluyen de Git.
 
-En el escenario presentado por Deloitte, una alerta sencilla requiere aproximadamente **15 minutos** de triaje manual. El equipo no llega a investigar todo el volumen de alertas y deja periodos sin cobertura humana.
+Para verificar el motor en Docker desde Linux, con el dataset en `data/dataset`:
 
-**La petición de la CISO:** desarrollar un piloto en el que agentes de IA realicen la investigación preliminar las 24 horas y el analista conserve la decisión final.
+```bash
+mkdir -p out
+docker build -t vigia-engine:dev .
+docker run --rm --network none --read-only --user "$(id -u):$(id -g)" \
+  -v "$PWD/data/dataset:/dataset:ro" -v "$PWD/out:/vigia/out" \
+  vigia-engine:dev python -m apps.backend.ingest --dataset /dataset
+docker run --rm --network none --read-only -v "$PWD/out:/vigia/out:ro" \
+  vigia-engine:dev python -m scripts.check_data
+docker run --rm --network none --read-only -v "$PWD/out:/vigia/out:ro" \
+  vigia-engine:dev python -m scripts.check_policy
+```
 
-### Qué queremos conseguir
+### Resultados verificados
 
-- Reducir el tiempo dedicado a recopilar contexto y evidencias por alerta.
-- Clasificar correctamente amenazas reales, actividad legítima y falsos positivos.
-- Priorizar según el riesgo del activo y la política de Tarvia, no solo según la severidad de la regla SIEM.
-- Explicar cada veredicto mediante datos verificables.
-- Facilitar que una persona confirme, corrija, escale o autorice la acción propuesta.
-
-## 2. Contexto de negocio
-
-| Dato | Tarvia Group |
+| Comprobación | Resultado |
 | --- | --- |
-| Sector | Moda y hogar |
-| Empleados | 2.100 |
-| Tiendas físicas | 64 |
-| Negocio online | 38 % |
-| Clientes | 1,3 millones |
-| Operaciones relevantes | E-commerce, logística automatizada y asistente de compras con IA |
-| SOC | 3 analistas N1 + 2 N2 |
-| Horario actual | Lunes a viernes, 08:00–20:00 |
-| Alertas habituales | ~400/día |
-| Fuentes de logs | 18 |
+| Ingesta de logs y alertas | 814.471 eventos, 2.467.451 entidades indexadas y 11.061 alertas en 18 fuentes. |
+| Consultas de la guía | CVE-2024-23897 para Jenkins, 100 eventos del equipo de control y familia Latrodectus en el TIP. |
+| Referencias | Recuperación de `EDR-0123412` por ID. Los IDs inexistentes no devuelven eventos. |
+| Severidad | `ALR-20261005-000172` da `low` en el escenario de prueba con bloqueo sin efecto. La prueba comprueba la denegación 403 en WAF e introduce la premisa de ausencia de efecto para probar el ajuste. |
+| Aprobaciones | OT bloqueada por hostname o subred, doble aprobación según el activo y revisión N2 para servicios de uso dual. La función devuelve requisitos; la autenticación y la ejecución quedan pendientes. |
 
-### Activos y criticidad
+## Contraste de las guías con el reto
 
-La solución debe consultar la matriz oficial de criticidad y severidad proporcionada por el reto. La siguiente tabla resume el contexto de la presentación:
+La guía técnica define la estructura y el orden de trabajo del motor. En caso de discrepancia, prevalecen los datos, los esquemas y la política oficiales. La indicación más reciente del equipo prevalece para el producto de escritorio y sus pantallas.
 
-| Activo | Motivo | Criticidad |
-| --- | --- | --- |
-| Tienda online y app | 120.000 € por hora de caída | Crítica |
-| CRM y copias de seguridad | Una brecha puede requerir notificación en 72 h | Crítica |
-| Identidad (AD e IdP) | Permite acceder al resto del entorno | Crítica |
-| Cobros online | PCI DSS y continuidad de las ventas | Crítica |
-| Clasificador logístico | Su parada impide despachar pedidos | Alta |
-| Asistente de IA «Vela» | Accede a pedidos de clientes | Alta |
-| Puestos de trabajo | Vector de entrada habitual | Media |
-
-## 3. Datos y herramientas del reto
-
-Deloitte proporciona un **entorno ficticio**, con cuatro semanas de actividad. Los datos pueden contener alertas duplicadas, reglas mal ajustadas y acciones legítimas que se parecen a ataques. Las pistas pueden estar fuera de la alerta original.
-
-| Recurso | Volumen o contenido |
+| Pieza | Decisión o verificación que falta |
 | --- | --- |
-| Alertas SIEM | **11.061** |
-| Eventos | **814.471**, procedentes de 18 fuentes |
-| Casos de uso de detección | **44** |
-| Activos | **1.185** |
-| Identidades | **1.224** |
-| Contexto | Ficha de empresa, política SOC, matriz de severidad, SLA, 9 runbooks y esquema de ticket |
-| Inventario | CMDB, directorio, servicios, red, vulnerabilidades, RR. HH. y calendario de cambios |
-| Inteligencia | TIP interno, GeoIP, ASN, sandbox, logs de Active Directory y CI/CD |
-| Integración | API del SOC para consultar datos y solicitar contención **simulada** |
+| Datos y runbooks | El repositorio oficial contiene diez runbooks y 44 entradas de catálogo. La presentación enumera nueve runbooks y la guía completa habla de 46 reglas. Usaremos el catálogo y los ficheros presentes en el dataset. |
+| Filtro de ruido | Las cifras 10.974/87 y 17 grupos son referencias de reproducción. La guía completa excluye el cierre automático de positivos y el código de la guía técnica marca como cerrados algunos positivos bloqueados. Separaremos clasificación, recomendación y decisión. Un dominio corporativo exige igualdad o sufijo con límite de etiqueta. Una lista vacía, una alerta marcada por Vela o un número de cambio citado en el texto no bastan para cerrar. |
+| Severidad y SLA | La matriz parte de la entidad más crítica identificada. El ajuste total queda acotado a un nivel y requiere hechos verificados. El orquestador de la guía recorta algunas severidades a `low` al cerrar y eso puede ocultar la prioridad calculada. Conservaremos el cálculo y su explicación. |
+| N1 y fiscal | Usar los esquemas oficiales, registrar consultas y verificar que cada referencia se recuperó y corresponde a la fuente citada. Que el ID exista no demuestra el hallazgo. Las discrepancias se muestran al analista. El modo offline debe ejecutar consultas reales y distinguir los hechos recuperados de las conclusiones pendientes. |
+| Escudo, agrupación y caza | Evaluar el escudo antes del filtro y tratar sus coincidencias como señales. Agrupar por entidades tipadas y ventana temporal. Los 18 avisos, 17 grupos y cinco hallazgos son resultados de la guía pendientes de reproducir en esta rama. |
+| N2 | Validar el informe y su línea temporal. Las fechas se recuperan del evento citado. La guía produce un informe incompleto sin campos obligatorios si el modelo agota sus turnos; la aplicación debe mostrar un estado pendiente en ese caso. |
+| Chat | Consultas de solo lectura, respuestas con referencias y distinción entre hechos y dudas. Mostrar herramientas y resultados observables como traza. |
+| Contención | El ejemplo de la guía acepta el nombre del aprobador en el cuerpo y construye una ruta con el ID del ticket. La aplicación debe verificar identidad, roles, acción y objetivo contra una propuesta registrada antes de pedir el token al simulador. Toda ejecución queda vinculada a la decisión humana. OT solo se escala. |
+| Escritorio | Login, carga y área de trabajo con alertas y chat. Los detalles de mapa, bandeja, caso, métricas y navegación se decidirán con las pantallas del equipo. Los scripts que abren un navegador en la guía se consideran herramientas de desarrollo. |
+| Métricas y defensa | Comparar con etiquetas revisadas y registrar tiempos medidos. Los 15 minutos de las diapositivas son una estimación del proceso manual. El contador de la demo debe distinguir una estimación de una medición. |
 
-**Importante:** el esquema real de la API, sus endpoints, credenciales y límites deben verificarse al recibir la documentación técnica. Este README no presupone que ya tengamos acceso ni que las integraciones funcionen.
+La política de prioridad y los permisos se implementan con los apartados 2 a 5 de la política del SOC. El simulador ofrece un contrato propio de aprobación y contención. El código de esta rama aún carece de operaciones contra ese simulador. [Política del SOC](https://github.com/dttdfr/DTT-UAB-The-Hack/blob/5d7569232756eaf0a8723b22c428b70e8f67824f/01_contexto/politica_soc.md) · [API simulada](https://github.com/dttdfr/DTT-UAB-The-Hack/blob/5d7569232756eaf0a8723b22c428b70e8f67824f/06_herramientas/LEEME_herramientas.md)
 
-## 4. Cómo debe investigar una alerta
+Los indicadores reales del dataset solo se pueden consultar en servicios de reputación. Durante las comprobaciones de esta rama, los contenedores que leen los datos se ejecutan sin red y con el dataset montado en solo lectura.
 
-Reproduciremos el proceso de triaje exigido por la política del SOC:
+## Equipo
 
-| Paso | Etapa | Qué hace el sistema |
-| --- | --- | --- |
-| 01 | **Entender** | Identifica qué regla ha saltado, qué detectó y a qué IP, usuario, host, proceso o dominio afecta. |
-| 02 | **Contextualizar** | Consulta criticidad del activo, rol del usuario, inventario, cambios autorizados y otros datos de negocio. |
-| 03 | **Enriquecer** | Obtiene reputación e inteligencia de indicadores mediante TIP, OSINT/GeoIP/ASN o sandbox cuando estén disponibles. |
-| 04 | **Correlacionar** | Busca eventos y alertas relacionados para reconstruir lo sucedido. |
-| 05 | **Decidir** | Emite un veredicto fundamentado y un nivel de confianza; si faltan pruebas, solicita revisión. |
-| 06 | **Priorizar** | Aplica la matriz de severidad y criticidad, con los SLA y reglas oficiales del caso. |
-| 07 | **Actuar** | Genera o actualiza el ticket, recomienda cierre/escalado y solicita aprobación para contención simulada cuando proceda. |
+| Integrante | Responsabilidades |
+| --- | --- |
+| Mark Piazuelo | Presentación y comunicación del proyecto |
+| Marc Sánchez | Infraestructura e IA nocturna |
+| Arnau Paz | IA nocturna y desarrollo web |
+| Marc Martí | Diseño del frontend |
+| Sergi Mena | Coordinación general del proyecto |
 
-### Veredictos que debemos distinguir
-
-- **True positive (TP):** actividad maliciosa real que requiere tratamiento como incidente.
-- **Benign true positive (BTP):** la detección es correcta, pero la actividad está autorizada o es legítima.
-- **False positive (FP):** la regla ha identificado erróneamente actividad sospechosa; no hay la condición que pretendía detectar.
-
-Un resultado con pruebas insuficientes **no debe transformarse en una clasificación inventada**: la alerta queda pendiente de revisión humana y el sistema explica qué información falta.
-
-## 5. Arquitectura propuesta
-
-Para la hackathon conviene construir un **orquestador central con herramientas especializadas**, no siete agentes independientes que intercambian mensajes sin control. Los siete pasos son responsabilidades lógicas; podemos ejecutarlos mediante funciones deterministas y llamadas al modelo solo donde aporten valor.
-
-```mermaid
-flowchart TD
-    A["Alertas del SIEM"] --> B["Orquestador de triaje"]
-    B <--> C["Conector a la API del SOC"]
-    C <--> D["Logs · CMDB · Directorio · TIP · Cambios"]
-
-    B --> E["1. Entender y contextualizar"]
-    E --> F["2. Enriquecer y correlacionar"]
-    F --> G["3. Veredicto y prioridad"]
-    G --> H["Informe con evidencias"]
-    H --> I["Interfaz del analista"]
-    I --> J{"¿Qué decide la persona?"}
-    J --> K["Cerrar o escalar ticket"]
-    J --> L["Autorizar contención"]
-    L --> M["API de contención simulada"]
-
-    B --> N["Trazas y registro de consultas"]
-    H --> N
-```
-
-### Componentes previstos
-
-1. **Conector del SOC:** encapsula autenticación, consultas, paginación, errores y límites de la API facilitada por Deloitte.
-2. **Motor de triaje:** coordina los siete pasos, aplica runbooks y registra el estado de cada alerta.
-3. **Herramientas de investigación:** consultas tipadas para recuperar entidades, reputación, eventos, inventario y cambios. El modelo no debe inventar datos de las herramientas.
-4. **Motor de decisión:** combina evidencias con reglas de negocio; las matrices de severidad, permisos y SLA deben aplicarse mediante lógica verificable.
-5. **Registro de evidencias:** conserva las consultas, hallazgos, referencias y motivos que sustentan cada recomendación.
-6. **Dashboard:** permite seguir la cola, abrir un expediente, revisar los pasos del agente y tomar decisiones humanas.
-7. **Acciones del SOC:** crea tickets y ejecuta **únicamente** las operaciones simuladas permitidas, respetando el token de aprobación humana.
-
-La elección de lenguaje, framework, base de datos, proveedor LLM y despliegue sigue **pendiente**. Antes de escogerlos debemos ver el contrato de la API y los recursos disponibles en la hackathon.
-
-## 6. Contrato lógico de salida
-
-Cada investigación debe producir un resultado estructurado y consumible por la interfaz. Ejemplo **orientativo**, no esquema oficial de Deloitte:
-
-```json
-{
-  "alert_id": "ID_DE_LA_ALERTA",
-  "verdict": "true_positive",
-  "confidence": 0.91,
-  "severity": "critical",
-  "summary": "Resumen basado en lo observado",
-  "affected_entities": ["HOST_O_USUARIO"],
-  "evidence": [
-    {
-      "source": "soc_api",
-      "reference": "ID_DEL_EVENTO",
-      "finding": "Hallazgo respaldado por ese evento"
-    }
-  ],
-  "recommended_action": "escalate",
-  "requires_human_approval": true,
-  "status": "pending_human_review"
-}
-```
-
-Los valores de este JSON son ilustrativos. En la implementación definiremos tipos y validaciones, trazabilidad de las evidencias y tratamiento explícito de errores o campos desconocidos.
-
-## 7. Qué verá el jurado
-
-El domingo debemos presentar **una demostración en directo y visual**, sobre **las mismas 10 alertas que reciben todos los equipos**.
-
-La interfaz debería mostrar:
-
-1. **Cola de alertas:** estado, prioridad y progreso del triaje.
-2. **Investigación de una alerta:** qué consultó el agente, qué encontró y por qué importa.
-3. **Resultado explicable:** veredicto TP/BTP/FP, confianza, severidad, evidencias y recomendación.
-4. **Control humano:** aceptar, corregir o escalar; aprobar expresamente la contención simulada.
-5. **Vista de resultados:** alertas procesadas, tiempos observados y un resumen ejecutivo de una página para Tarvia.
-
-### Qué se valorará
-
-Según las diapositivas del reto:
-
-- Triaje **correcto y bien argumentado**.
-- Funcionamiento **real con los datos entregados**.
-- Separación clara entre las tareas de la IA y la decisión humana.
-- Honestidad respecto a lo que funciona, lo que falla y lo que todavía no se ha construido.
-
-El propio reto indica que **un nivel 1 sólido y demostrable tiene más valor que aparentar un nivel 4 que no funciona**.
-
-## 8. MVP para las 24 horas
-
-Priorizamos una **vertical completa**, de alerta a decisión humana, antes de añadir funciones secundarias.
-
-### P0 — Imprescindible
-
-- [ ] Obtener la documentación de la API y probar una consulta real contra el entorno simulado.
-- [ ] Leer las alertas y recuperar sus entidades y eventos relacionados.
-- [ ] Aplicar los siete pasos del runbook a **una alerta de principio a fin**.
-- [ ] Emitir un veredicto trazable y calcular la prioridad con la matriz del caso.
-- [ ] Mostrar el expediente y la recomendación en una interfaz mínima.
-- [ ] Extender el flujo a las **10 alertas de la demo**, sin inventar resultados.
-- [ ] Mantener la aprobación humana en las acciones sensibles.
-
-### P1 — Si la vertical ya funciona
-
-- [ ] Procesamiento en cola, estados y reintentos controlados.
-- [ ] Enriquecimiento cruzado y correlación entre varias alertas.
-- [ ] Comparación visible de resultados, tiempos y decisiones.
-- [ ] Generación de tickets y resumen ejecutivo.
-
-### P2 — Solo si sobra tiempo
-
-- [ ] Visualización avanzada de relaciones entre entidades.
-- [ ] Ejecución concurrente y optimización de coste/latencia del modelo.
-- [ ] Análisis agregado de las cuatro semanas completas.
-
-**Orden recomendado:** API y datos → una alerta verificable → clasificación y prioridad → interfaz → las 10 alertas → ensayar demo. La parte visual no debe ocultar si las consultas o los veredictos fallan.
-
-## 9. Criterios de aceptación y pruebas
-
-Consideraremos que el MVP está listo para demostrar cuando:
-
-- [ ] Las 10 alertas asignadas pueden cargarse y procesarse con identificadores correctos.
-- [ ] Cada conclusión referencia datos recuperados del entorno, no suposiciones del modelo.
-- [ ] La IA distingue TP, BTP y FP de acuerdo con las evidencias disponibles.
-- [ ] La prioridad respeta la matriz y los SLA entregados por Deloitte.
-- [ ] Los fallos de API, respuestas vacías y datos contradictorios quedan visibles y no generan un cierre automático injustificado.
-- [ ] Una petición de contención **no se ejecuta** sin aprobación humana y token válido.
-- [ ] La demo muestra el proceso completo en directo y reconoce los casos no resueltos.
-
-Las métricas de tiempo, acierto, cobertura y coste se calcularán **sobre ejecuciones medidas**. No afirmaremos porcentajes de mejora sin una comparación reproducible.
-
-## 10. Seguridad y límites
-
-El ejercicio utiliza **datos y sistemas ficticios**. No está autorizado probar ataques contra infraestructura real ni ejecutar contenciones reales.
-
-- Tratar los logs, alertas y resultados externos como **datos no confiables**: pueden contener texto de inyección de instrucciones.
-- Dar a los agentes acceso de **solo lectura por defecto** y restringir cada herramienta a su función.
-- Solicitar consentimiento humano explícito para una operación de contención.
-- No guardar tokens, credenciales, claves de modelos ni datos sensibles en Git.
-- Validar entradas y salidas de herramientas; registrar errores, fuentes e incertidumbre.
-- Aplicar las políticas y permisos que entregue Deloitte en lugar de inventar reglas operativas.
-
-## 11. Organización prevista del repositorio
-
-Estructura **propuesta, todavía no creada**:
-
-```text
-Hack-2026-27/
-├── README.md
-├── frontend/             # Dashboard y revisión humana
-├── backend/
-│   ├── integrations/     # Cliente de la API del SOC
-│   ├── triage/           # Orquestación e investigación
-│   ├── policies/         # Runbooks, severidad y autorización
-│   └── models/           # Contratos y validaciones
-├── tests/                # Fixtures y pruebas de las alertas
-├── docs/                 # Contrato de API y decisiones técnicas
-└── .env.example          # Nombres de variables, nunca secretos
-```
-
-No hay comandos de instalación ni de ejecución todavía porque **no se ha elegido ni implementado un stack**. Cuando exista la primera vertical, esta sección recogerá comandos reales y comprobados para instalar dependencias, configurar el entorno y ejecutar la demo.
-
-## 12. Primeras decisiones pendientes
-
-- [ ] Revisar documentación, datos de ejemplo y autenticación de la API de Deloitte.
-- [ ] Identificar los campos de alerta, activos, identidades, logs y tickets.
-- [ ] Elegir un stack que el equipo domine y pueda ejecutar localmente durante la demo.
-- [ ] Decidir el proveedor/modelo LLM y sus límites de uso.
-- [ ] Definir el contrato exacto de respuesta del motor de triaje.
-- [ ] Confirmar formato, mecanismo de aprobación y restricciones de la API de contención.
-- [ ] Repartir responsabilidades entre integración, triaje, frontend y pruebas.
-
----
-
-## Referencia del reto
-
-README elaborado a partir de las diapositivas del **reto de Deloitte en la UAB Hackathon 2026** compartidas por el equipo. Tarvia Group y su infraestructura son un **caso ficticio** del ejercicio.
-
-Este documento recoge **requisitos del reto** y una **propuesta inicial de implementación**. Actualizaremos las secciones técnicas conforme comprobemos el funcionamiento de la API y construyamos el proyecto.
+El reporte inicial del equipo define una investigación modular, con flags para clasificar señales y enrutar consultas, ajuste de profundidad según carga e inteligencia externa de amenazas. La supervisión humana cubre evidencias, decisiones y acciones sensibles. El plan contempla skills con actualizaciones restringidas y auditables, así como un agente de auditoría y red teaming para pruebas en un entorno controlado. Estas líneas pertenecen al diseño del proyecto. La prioridad de implementación es completar primero el flujo de alerta, investigación, evidencia, ticket y revisión humana.
