@@ -19,6 +19,28 @@ def _proof(verdict, events, summary, *, actions=(), questions=(), basis=""):
             "questions": list(questions), "actions": list(actions), "confidence": None, "basis": basis}
 
 
+def _possible_disclosure(direct):
+    for event in direct:
+        if event["source"] != "dlp" or "Datos personales" not in event.get("policy", ""):
+            continue
+        transfers = [log for log in direct if log["source"] == "proxy" and log.get("method") == "POST"
+                     and log.get("action") == "allowed" and str(log.get("status")) in {"200", "201", "204"}
+                     and log.get("hostname") == event.get("hostname") and log.get("user") == event.get("user")
+                     and log.get("domain") == event.get("destination")
+                     and str(log.get("bytes_out", "")).isdigit() and int(log["bytes_out"]) > 0]
+        if not transfers:
+            continue
+        total = sum(int(log["bytes_out"]) for log in transfers)
+        return {**_proof("needs_more_info", [event, *transfers],
+                         f"DLP marcó posible información personal y el proxy registró {len(transfers)} "
+                         f"envíos aceptados al mismo destino ({total:,} bytes). "
+                         "Los registros no confirman el contenido ni la transferencia completa.",
+                         questions=("¿Qué datos contenía el archivo y qué parte llegó al destino?",),
+                         actions=("Preservar registros y pedir a N2 y DPO que determinen alcance y notificación.",)),
+                "escalate": ["N2", "DPO"]}
+    return None
+
+
 def _same_host(event, hosts):
     return event.get("hostname", "").lower() in hosts
 
@@ -116,6 +138,25 @@ def local_finding(alert, analysis):
                 return _proof("false_positive", [event], "El registro contiene una corrección de talla completa. "
                               "Vela marcó el mensaje pero el registro no muestra llamadas a herramientas.",
                               basis="Corrección de talla acotada, validada con el registro del asistente.")
+    if alert["rule_id"] == "UC-AI-002":
+        for event in direct:
+            if event["source"] != "ai_gateway" or not event.get("session_id"):
+                continue
+            response = event.get("response_summary", "")
+            if response.startswith("El asistente enumeró ") and "códigos internos" in response:
+                denials = [log for log in direct if log["source"] == "ai_gateway"
+                           and log.get("session_id") == event["session_id"]
+                           and (log.get("guardrail") or {}).get("category") == "authz_mismatch"
+                           and (log.get("guardrail") or {}).get("action") == "blocked"]
+                if denials:
+                    return {**_proof("true_positive", [*denials, event],
+                                     "Una consulta entre clientes fue denegada. En la misma sesión, "
+                                     "el registro indica exposición de códigos internos en otra respuesta. "
+                                     "El bloqueo de la primera consulta no acredita que toda la sesión fuera segura.",
+                                     actions=("Escalar a N2 y al equipo de IA. Revisar los códigos expuestos.",)),
+                            "escalate": ["N2", "Equipo de IA"]}
+    if alert["rule_id"] in {"UC-DLP-001", "UC-DLP-002"} and (disclosure := _possible_disclosure(direct)):
+        return disclosure
     if alert["rule_id"] == "UC-OT-001":
         for asset in analysis["context"]["activos"]:
             if asset["hostname"] != "ENG-WS01":
@@ -127,6 +168,14 @@ def local_finding(alert, analysis):
                     return _proof("benign_true_positive", [event], "La CMDB identifica el puesto de ingeniería "
                                   "y el firewall registra una conexión permitida a OT por un puerto previsto en RB-08.",
                                   basis="Origen de ingeniería, puerto y regla de red autorizados en RB-08.")
+    if alert["rule_id"] != "UC-OT-001":
+        for report in analysis.get("context", {}).get("sandbox", []):
+            if report.get("verdict") == "malicious" and report.get("sha256"):
+                return {**_proof("true_positive", [], "El SHA-256 de la alerta coincide con un informe de sandbox "
+                                 "que clasifica el archivo como malicioso. Falta confirmar exposición y ejecución en Tarvia.",
+                                 questions=("¿Dónde apareció el archivo y se llegó a ejecutar?",),
+                                 actions=("Buscar el hash en correo y EDR. Preservar el expediente para N2.",)),
+                        "sandbox_refs": [report["sha256"]], "escalate": ["N2"]}
     return None
 
 
@@ -155,11 +204,23 @@ def route(alert, analysis, mode, finding):
                 and alert["rule_id"] in {"UC-EDR-002", "UC-AI-001"}
                 and alert["severity"] in {"informational", "low", "medium"} and severity != "high"):
             result["automatic"] = True
-    if any(asset["zone"] == "LOGISTICS-OT" for asset in analysis["context"]["activos"]):
+    ot_asset = any(asset["zone"] == "LOGISTICS-OT" for asset in analysis["context"]["activos"])
+    ot_alert = alert["rule_id"] == "UC-OT-001" or any(
+        event.get("source") == "firewall" and "LOGISTICS-OT" in {event.get("zone_src"), event.get("zone_dst")}
+        and event["event_id"] in analysis["requested"] for event in analysis["events"]
+    )
+    ot_authorized = alert["rule_id"] == "UC-OT-001" and finding and finding["verdict"] == "benign_true_positive"
+    if ot_asset or (ot_alert and not ot_authorized):
         result["recommendation"] = "escalate"
         result["automatic"] = False
         result["recipients"] = list(dict.fromkeys([*result["recipients"], "N2", "Responsable de Operaciones"]))
         result["reason"] = "La alerta afecta a OT. Preparar el escalado a Operaciones y N2."
+    elif finding and finding.get("escalate"):
+        result["recommendation"] = "escalate"
+        result["automatic"] = False
+        result["recipients"] = list(dict.fromkeys([*result["recipients"], *finding["escalate"]]))
+        if severity != "critical":
+            result["reason"] = "La evidencia justifica preparar el aviso y preservar los datos para revisión."
     minutes = {"critical": 15, "high": 30, "medium": 240, "low": 1440}
     deadline = 15 if alert["severity"] == "critical" else minutes.get(analysis["severity"])
     if deadline is not None:

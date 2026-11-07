@@ -87,6 +87,10 @@ def evidence_sections(alert: dict, analysis: dict, ticket: dict) -> list[tuple[s
         sections.append(("Registros recuperados del índice", "\n".join(_event_line(row) for row in events)))
     elif analysis:
         sections.append(("Registros del índice", "No se recuperaron eventos."))
+    for report in analysis.get("context", {}).get("sandbox", []):
+        sections.append(("Informe de sandbox · " + (report.get("file_name") or "Archivo"),
+                         f"SHA-256: {report['sha256']}\nVeredicto: {report.get('verdict', 'Sin dato')}\n"
+                         f"Familia: {report.get('malware_family') or 'Sin identificar'}"))
     if "sent_events" in analysis:
         sections.append(("Registros incluidos en la propuesta al modelo", ", ".join(sent) or "Ninguno"))
     if "challenge_events" in analysis:

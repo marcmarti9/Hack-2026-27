@@ -64,4 +64,15 @@ La diferenciación que se puede defender en dos minutos es enseñar, con dos ale
 
 El ensayo offline repitió una selección determinista de diez alertas, una por runbook, con prioridad a una crítica cuando la familia la contiene. Produjo diez expedientes sin leer el archivo de referencia. Tras añadir comprobaciones de WAF, identidad, Vela y OT, obtuvo tres verdaderos positivos, un falso positivo, un positivo benigno y cinco abstenciones. Tres casos se marcaron para escalado. Estos recuentos describen lo que devolvió el motor, sin etiquetado de referencia ni estimación de precisión. La alerta externa produjo un expediente y quedó fuera del cierre automático. [Ensayo reproducible](../scripts/check_defense.py)
 
-La revisión Qt contrastó LSASS archivado, LSASS analizado en guardia y el autocierre de SCCM con un cambio aprobado. El expediente de lote abre el análisis de esa ejecución aunque el perfil ya contenga una revisión del mismo ID. La contención de nivel 4, la medición de OpenAI con una clave válida y la defensa con las diez entradas del jurado siguen sin acreditarse.
+La revisión Qt contrastó LSASS archivado, LSASS analizado en guardia y el autocierre de SCCM con un cambio aprobado. El expediente de lote abre el análisis de esa ejecución aunque el perfil ya contenga una revisión del mismo ID. En este primer ciclo quedaban pendientes la contención, la prueba real de OpenAI y las diez entradas del jurado.
+
+
+## Segundo ciclo y límites de la defensa
+
+La revisión independiente detectó un escalado OT perdido al figurar la zona en el destino del firewall, una posible fuga personal sin destino DPO y un lote que podía mostrar como actual un cierre histórico. Se corrigieron esas rutas. El expediente separa las hipótesis de los modelos de la base registrada para la decisión. Una prueba de Vela diferencia una herramienta bloqueada de otra respuesta que sí expuso códigos. Una alerta externa con solo el SHA-256 puede mostrar la coincidencia en sandbox y escalar sin afirmar que el archivo se ejecutó.
+
+La primera pasada completa del motor local investigó 11.061 alertas en 559,59 s, sin errores. Generó 1.331 cierres automáticos, 100 escalados, 109 recomendaciones de cierre sujetas a revisión y 9.521 expedientes de revisión. Mediana 45 ms y percentil 95 de 84 ms por alerta, en el índice local y sin API. Es una medición del ciclo previo a la segunda ronda de reglas, sin comparar con etiquetas independientes. Cobertura de procesamiento y corrección de veredictos son métricas distintas.
+
+La guardia ofrece un relevo con los escalados y el plazo histórico de cada alerta. Puede procesar el índice o vigilar una carpeta donde se depositan lotes JSONL completos. La respuesta oficial se demuestra con un solo recorrido, aislamiento de un puesto con evidencia LSASS. Exige autorización y contraseña de N2 de práctica, registra el efecto en el simulador y bloquea repeticiones dentro del perfil. No se acreditan otros tipos de contención, N2 generado completo ni funcionamiento de guardia con el equipo apagado.
+
+Los modelos Luna y Sol se probaron con transporte simulado. La latencia real, el uso de créditos y la calidad en las entradas inéditas del jurado quedan para el ensayo final. [Prueba de triaje](../scripts/check_triage.py) · [Prueba de defensa](../scripts/check_defense.py) · [Prueba del simulador](../scripts/check_sim_response.py)

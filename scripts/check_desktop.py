@@ -146,6 +146,7 @@ def check(app, window, home, password, output):
     work.search.click()
     wait_for(lambda: work.total == 1, "búsqueda de alerta")
     assert work.selected["alert_id"] == "ALR-20261010-011795"
+    work.triage_mode.setCurrentIndex(work.triage_mode.findData("guardia"))
     work.question.setText("¿Qué pasó en EDR-0123412?")
     work.send.click()
     wait_for(lambda: window.job is None, "consulta en chat")
@@ -370,6 +371,33 @@ def check(app, window, home, password, output):
     wait_for(lambda: finished, "lote de defensa en la mesa")
     if failures:
         raise failures[0]
+
+    def verify_handover():
+        dialog = app.activeModalWidget()
+        try:
+            assert dialog.windowTitle() == "Relevo de guardia"
+            assert dialog.findChild(QTableWidget).rowCount() > 0
+            if output:
+                dialog.grab().save(str(output.with_name("vigia-relevo-guardia.png")))
+        except BaseException as error:
+            failures.append(error)
+        finally:
+            dialog.close()
+
+    QTimer.singleShot(70, verify_handover)
+    work._guard_handover()
+    if failures:
+        raise failures[0]
+    with TemporaryDirectory(prefix="vigia-inbox-qa-") as directory:
+        work._start_monitor(Path(directory))
+        external_id = "ALR-20991231-999998"
+        incoming = {**db.get_alert("ALR-20261005-000301"), "alert_id": external_id}
+        pending_file = Path(directory) / "nueva.tmp"
+        pending_file.write_text(json.dumps(incoming), encoding="utf-8")
+        pending_file.rename(pending_file.with_suffix(".jsonl"))
+        wait_for(lambda: external_id in work.reviews, "nueva alerta de la carpeta")
+        assert work.reviews[external_id]["analysis"]["input_alert"]["external"]
+        work._stop_monitor("Vigilancia detenida.")
     window.close()
 
 

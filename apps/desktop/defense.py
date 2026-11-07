@@ -168,13 +168,14 @@ def _ticket(alert, analysis):
     identifier = alert["alert_id"]
     proposal = analysis["proposal"] or {}
     challenge = analysis["challenge"] or {}
-    cited = set(proposal.get("citations", ())) | set(challenge.get("citations", ()))
+    basis = analysis.get("decision_basis") or analysis.get("verified_finding") or {}
+    cited = set(proposal.get("citations", ())) | set(challenge.get("citations", ())) | set(basis.get("citations", ()))
     confidence = analysis["confidence"]
     routing = analysis["routing"]
     if analysis["verdict"] == "needs_more_info":
-        summary = analysis["proposal_error"] or analysis["review_error"] or routing["reason"]
+        summary = basis.get("summary") or analysis["proposal_error"] or analysis["review_error"] or routing["reason"]
     else:
-        summary = proposal["summary"]
+        summary = basis.get("summary") or proposal["summary"]
     return {
         "ticket_id": f"VIG-{identifier}", "alert_ids": [identifier], "title": alert["rule_name"],
         "verdict": analysis["verdict"], "severity": analysis["severity"],
@@ -190,6 +191,8 @@ def _ticket(alert, analysis):
                        "to": ", ".join(routing["recipients"]), "reason": routing["reason"]},
         "external": alert.get("external", False), "provider": analysis["provider"],
         "routing": routing, "timing_ms": analysis["timing"]["total_ms"],
+        "consultas": analysis["trace"], "propuesta": proposal, "contraste": challenge,
+        "criterio_verificado": basis,
     }
 
 

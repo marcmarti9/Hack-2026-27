@@ -1,0 +1,6 @@
+FROM python:3.11-slim-bookworm
+
+RUN python -m pip install --no-cache-dir fastapi==0.162.1 uvicorn==0.54.0
+COPY scripts/serve_simulator.py /srv/serve_simulator.py
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+ENTRYPOINT ["python", "/srv/serve_simulator.py"]

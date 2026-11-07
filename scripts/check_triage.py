@@ -71,6 +71,17 @@ def main():
         assert investigate(db.get_alert(key), triage=True)["verdict"] == "true_positive"
     ot = investigate(db.get_alert("ALR-20261009-002231"), triage=True)
     assert ot["verdict"] == "benign_true_positive" and not ot["routing"]["automatic"]
+    ot_unknown = investigate(db.get_alert("ALR-20261017-011876"), triage=True, mode="guardia")
+    assert "Responsable de Operaciones" in ot_unknown["routing"]["recipients"]
+    disclosure = investigate(db.get_alert("ALR-20261014-011817"), triage=True, mode="guardia")
+    assert disclosure["verdict"] == "needs_more_info" and "DPO" in disclosure["routing"]["recipients"]
+    assert "72,000,000 bytes" in disclosure["verified_finding"]["summary"]
+    vela = investigate(db.get_alert("ALR-20261008-011823"), triage=True, mode="guardia")
+    assert vela["verdict"] == "true_positive" and "Equipo de IA" in vela["routing"]["recipients"]
+    sandbox = investigate({**routine, "external": True, "rule_id": "UC-EML-001", "related_events": [],
+                           "entities": {"files": [{"sha256": "6f395de68a4888c4f7ac579e3a8a844f4b1dd89db7b97274ca346af0ac67b466"}]}},
+                          triage=True)
+    assert sandbox["verified_finding"]["sandbox_refs"] and sandbox["routing"]["recommendation"] == "escalate"
 
     web = db.get_alert("ALR-20261005-000172")
     ordinary = {**wrong, "verdict": "true_positive", "confidence": 93, "citations": ["WAF-0001840"]}

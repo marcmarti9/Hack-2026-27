@@ -12,9 +12,9 @@ Tarvia es una empresa ficticia. Su SOC necesita investigar alertas y mantener co
 
 | Sistema | Paquete |
 | --- | --- |
-| Linux x86-64 | `Vigia-0.7.0-linux-amd64.deb` para Debian/Ubuntu y derivados. Instala con `sudo apt install ./Vigia-0.7.0-linux-amd64.deb`. |
-| Linux x86-64, instalación por usuario | Extrae `Vigia-0.7.0-linux-x86_64.tar.gz` y ejecuta `sh vigia/install.sh`. Crea una entrada en el menú. |
-| Windows x64 | Ejecuta `Vigia-0.7.0-windows-x64.exe`, generado por el workflow de instaladores. |
+| Linux x86-64 | `Vigia-0.8.0-linux-amd64.deb` para Debian/Ubuntu y derivados. Instala con `sudo apt install ./Vigia-0.8.0-linux-amd64.deb`. |
+| Linux x86-64, instalación por usuario | Extrae `Vigia-0.8.0-linux-x86_64.tar.gz` y ejecuta `sh vigia/install.sh`. Crea una entrada en el menú. |
+| Windows x64 | Ejecuta `Vigia-0.8.0-windows-x64.exe`, generado por el workflow de instaladores. |
 | macOS Apple Silicon e Intel | Abre el `.dmg` de tu arquitectura y arrastra Vigía a Aplicaciones. Los builds de desarrollo carecen de firma de distribución y notarización. |
 
 En el primer inicio, crea la cuenta local y selecciona la carpeta raíz del [dataset de Tarvia](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/5d7569232756eaf0a8723b22c428b70e8f67824f). La importación corre en segundo plano y deja un índice reutilizable en el perfil del sistema operativo. El instalador lleva su runtime de Python y Qt. El dataset se descarga por separado.
@@ -32,7 +32,7 @@ El inicio de sesión protege la mesa dentro del perfil del usuario del sistema. 
 ### Triaje y defensa
 
 - **Cargar lote de defensa** acepta de uno a diez IDs JSON, o registros de alerta completos, uno por línea en un JSONL. Un ID conocido se resuelve desde el índice. Una alerta nueva completa se contrasta contra los datos disponibles y queda excluida del cierre automático. El expediente de lote muestra el resultado de esa ejecución, separado del archivo de práctica.
-- **Preparar 5** trabaja sobre las filas visibles. **Vigilar índice** investiga en segundo plano las alertas pendientes del índice, de mayor a menor prioridad y con persistencia por perfil. Se puede detener desde Inicio. Se ejecuta mientras está abierta la sesión y usa el horario de Madrid. El selector **Con analista / Guardia** permite ensayar los dos escenarios en los lotes.
+- **Preparar 5** trabaja sobre las filas visibles. **Vigilar índice** investiga en segundo plano las alertas pendientes del índice, de mayor a menor prioridad y con persistencia por perfil. Se puede detener desde Inicio. **Vigilar carpeta** recoge JSONL que lleguen mientras la sesión esté abierta. Usa el mismo formato del lote y deposita el archivo completo mediante renombrado. Los resultados de ambos flujos quedan disponibles en **Relevo de guardia**, con escalados, responsables y plazo. El selector **Con analista / Guardia** permite ensayar los dos escenarios en los lotes.
 - Cada expediente visual reúne hechos, consultas con resultados y límites, veredicto, criterio de severidad, contraste, evidencia original, cronología, acciones e historial. Las correcciones humanas guardan el motivo; los autocierres conservan el criterio y el evento que los respaldan.
 - El motor local cubre patrones comprobables de SCCM, LSASS, WAF, password spraying, Vela y tráfico OT autorizado. Si faltan hechos, muestra **Sin veredicto**. Las críticas se escalan en ambos turnos, con destino a N2 de guardia, responsable SOC y CISO y plazo visible. Los avisos se preparan en el expediente.
 - La agrupación actual enumera alertas relacionadas por entidad tipada y tiempo. Los grupos de incidentes y los informes N2 del archivo son referencias históricas.
@@ -48,6 +48,21 @@ Abre **Vigía · Práctica** desde el menú en Linux o Windows. En macOS, ejecut
 3. En **Informe diario**, pulsa **Presentar** para enseñar la reproducción de la jornada. Para abrir directamente el caso desde terminal, añade `--present` a `--demo`.
 
 El entorno de práctica funciona sin red ni clave de API. Usa un índice independiente y guarda el usuario, los cambios de playbook y las decisiones durante esa ejecución. Al volver a abrirla se puede repetir el recorrido. Para probar el análisis en vivo, inicia **Vigía** en modo normal con tu propia clave OpenAI configurada.
+
+### Respuesta en el simulador oficial
+
+El modo de práctica permite aprobar el aislamiento de un puesto con evidencia verificada de acceso a LSASS. El botón requiere el simulador habilitado, justificación y contraseña del operador N2 de práctica. El expediente registra la aprobación y el resultado. Los servidores, OT, las alertas externas y los casos sin evidencia quedan fuera de este recorrido. Un resultado incierto queda registrado para revisión y no se reenvía automáticamente.
+
+Con `VIGIA_DATA_DIR` apuntando al checkout oficial, arranca el simulador en otro terminal:
+
+```bash
+docker build -f packaging/Dockerfile.simulator -t vigia-tarvia-sim .
+docker run --rm --read-only --tmpfs /tmp:size=10m \
+  -p 127.0.0.1:8765:8765 -v "$VIGIA_DATA_DIR:/dataset:ro" \
+  vigia-tarvia-sim --bind 0.0.0.0
+```
+
+Configura `VIGIA_SIM_PORT=8765` en el entorno o en el fichero de configuración de Vigía. Abre **Vigía · Práctica**, entra en **Caso LSASS**, pulsa **Triar con datos locales** y abre **Acciones**. **Aprobar aislamiento simulado** registra el efecto en el log temporal del contenedor. El expediente de referencia se puede consultar por separado.
 
 ### Copias de seguridad
 
@@ -79,7 +94,7 @@ En Windows el flujo ejecuta `python packaging/build.py` y compila `packaging/win
 
 ## Motor disponible
 
-El motor contiene la ingesta del dataset oficial, las consultas de solo lectura y las funciones de severidad y aprobación. El flujo N1 recorre el índice y genera expedientes. La cobertura del veredicto depende de las pruebas disponibles y del modo elegido. La ejecución contra el simulador queda pendiente. Docker reproduce el entorno de desarrollo y compilación.
+El motor contiene la ingesta del dataset oficial, las consultas de solo lectura y las funciones de severidad y aprobación. El flujo N1 recorre el índice y genera expedientes. La cobertura del veredicto depende de las pruebas disponibles y del modo elegido. El simulador admite un recorrido acotado de aislamiento de un puesto tras aprobación N2 de práctica. Docker reproduce el entorno de desarrollo y compilación.
 
 1. Coloca el dataset oficial en `data/dataset`, con `01_contexto` a `06_herramientas` en ese nivel. Puedes usar otra carpeta con `VIGIA_DATA_DIR` o `--dataset`.
 2. Desde la raíz, con Python 3.11, ejecuta:

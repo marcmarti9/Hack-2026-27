@@ -122,7 +122,7 @@ class Reviews:
         return {name: {"revision": revision, "text": body}
                 for name in names for revision, body in [self.document(name)]}
 
-    def save_analysis(self, alert_id: str, analysis: dict) -> None:
+    def save_analysis(self, alert_id: str, analysis: dict) -> bool:
         with closing(sqlite3.connect(self.path)) as connection, connection:
             update = connection.execute("""
                 INSERT INTO reviews(alert_id, analysis) VALUES (?, ?)
@@ -141,6 +141,7 @@ class Reviews:
                         "verdict": analysis["verdict"], "reason": analysis["routing"]["reason"],
                         "citations": analysis["proposal"]["citations"],
                     })
+            return bool(update.rowcount)
 
     def decide(self, alert_id: str, verdict: str, decision: str, reviewer: str,
                expected: dict | None = None, reason: str = "") -> bool:
@@ -155,7 +156,7 @@ class Reviews:
                     WHERE alert_id = ? AND decision IS NULL AND analysis = ?
                 """, (verdict, decision, reviewer, now(), alert_id, json.dumps(expected, ensure_ascii=False)))
                 if update.rowcount:
-                    proposal = expected.get("proposal") or {}
+                    proposal = expected.get("decision_basis") or expected.get("proposal") or {}
                     self._record(connection, alert_id, "Aceptada", reviewer, {
                         "verdict": verdict, "reason": proposal.get("summary", ""),
                         "citations": proposal.get("citations", []),
@@ -296,6 +297,7 @@ def investigate(alert: dict, remote: bool = False, guidance: dict | None = None,
         analysis["proposal"] = finding
         if finding:
             analysis["verdict"] = finding["verdict"]
+            analysis["decision_basis"] = finding
             analysis["challenge"] = {
                 "verdict": finding["verdict"], "confidence": None, "citations": finding["citations"],
                 "summary": "La regla exige un evento original compatible y comprueba entidad, tipo y contexto. "
@@ -403,5 +405,10 @@ def _analyze(alert: dict, analysis: dict, guidance: dict, finding: dict | None) 
     if challenge["verdict"] == proposal["verdict"] and (corroborated or independent_positive):
         analysis["verdict"] = proposal["verdict"]
         analysis["confidence"] = min(proposal["confidence"], challenge["confidence"])
+        analysis["decision_basis"] = finding if corroborated else {
+            "summary": "Dos pasadas coinciden y la segunda cita evidencia adicional recuperada. "
+                       "La interpretación del modelo requiere revisión humana.",
+            "citations": list(dict.fromkeys([*proposal["citations"], *challenge["citations"]])),
+        }
     elif challenge["verdict"] == proposal["verdict"]:
         analysis["review_error"] = "El acuerdo no basta: falta corroboración independiente para ese veredicto."

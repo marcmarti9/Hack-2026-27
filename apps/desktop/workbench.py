@@ -27,6 +27,7 @@ from apps.desktop.defense import load_alerts
 from apps.desktop.operations import Operations
 from apps.desktop.reports import imported_summary, read_report
 from apps.desktop.review import CLASSIFICATIONS, PLAYBOOKS, VERDICTS, investigate, replay_demo, reviewed_proposal
+from apps.desktop.sim_response import execute_isolation, isolation_proposal, isolation_status
 from apps.desktop.widgets import Article, button, fade_in, label, palette_for, set_primary, text_area
 
 PAGE_SIZE = 50
@@ -363,12 +364,18 @@ class Workbench(QWidget):
         self.monitor.setInterval(2000)
         self.monitor.timeout.connect(self._monitor_tick)
         self.monitor_failures = set()
+        self.inbox_path = None
+        self.inbox_seen = {}
         self.monitor_button = button("Vigilar índice", self._toggle_monitor,
                                      tip="Investiga el índice en segundo plano, de mayor a menor prioridad")
-        self.operations.extend((self.triage_mode, self.defense_button))
+        inbox = button("Vigilar carpeta…", self._select_inbox)
+        handover = button("Relevo de guardia", self._guard_handover)
+        self.operations.extend((self.triage_mode, self.defense_button, handover, inbox))
         shift.addWidget(self.triage_mode)
         shift.addWidget(self.defense_button)
         shift.addWidget(self.monitor_button)
+        shift.addWidget(inbox)
+        shift.addWidget(handover)
         shift.addStretch()
         layout.addLayout(shift)
 
@@ -389,7 +396,8 @@ class Workbench(QWidget):
             self.severity.addItem(SEVERITY[level][0], level)
         self.verdict = QComboBox()
         self.verdict.setAccessibleName("Filtrar por veredicto o estado")
-        for text, key in [("Todos los estados", "all"), ("Sin decisión", "pending"), ("Revisadas", "done")]:
+        for text, key in [("Todos los estados", "all"), ("Sin decisión", "pending"),
+                          ("Escaladas", "escalated"), ("Revisadas", "done")]:
             self.verdict.addItem(text, key)
         for key in CLASSIFICATIONS:
             self.verdict.addItem(VERDICTS[key][0], key)
@@ -499,6 +507,9 @@ class Workbench(QWidget):
         selected_ids = None
         if state == "done":
             selected_ids = reviewed
+        elif state == "escalated":
+            selected_ids = [key for key, item in self.reviews.items()
+                            if (item.get("analysis") or {}).get("routing", {}).get("recommendation") == "escalate"]
         elif state in CLASSIFICATIONS:
             selected_ids = [key for key, item in self.reviews.items() if self._verdict(item) == state]
 
@@ -555,8 +566,18 @@ class Workbench(QWidget):
         if self.monitor.isActive():
             self._stop_monitor("Vigilancia detenida.")
             return
+        self._start_monitor()
+
+    def _select_inbox(self):
+        path = QFileDialog.getExistingDirectory(self, "Seleccionar carpeta de alertas JSONL")
+        if path:
+            self._start_monitor(Path(path))
+
+    def _start_monitor(self, inbox=None):
+        self.inbox_path = inbox
+        self.inbox_seen.clear()
         self.monitor_failures.clear()
-        self.monitor.start()
+        self.monitor.start(2000)
         self.monitor_button.setText("Detener vigilancia")
         self._monitor_tick()
 
@@ -565,6 +586,54 @@ class Workbench(QWidget):
         self.monitor_button.setText("Vigilar índice")
         self.status.setText(message)
 
+    def _guard_handover(self):
+        entries = [(key, row, row["analysis"]["routing"]) for key, row in self.reviews.items()
+                   if (row.get("analysis") or {}).get("routing", {}).get("mode") == "guardia"]
+        escalations = [(key, row, routing) for key, row, routing in entries if routing["recommendation"] == "escalate"]
+        escalations.sort(key=lambda item: (-LEVELS.index(item[1]["analysis"]["severity"]),
+                                          item[2].get("deadline_at", ""), item[0]))
+        automatic = sum(row.get("decision") == "automatic" for _, row, _ in entries)
+        pending = sum(not row.get("decision") and routing["recommendation"] != "escalate"
+                      for _, row, routing in entries)
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Relevo de guardia")
+        dialog.resize(910, 585)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(26, 22, 26, 24)
+        layout.addWidget(label("Relevo de guardia", "title"))
+        layout.addWidget(label(f"{number(len(entries))} investigadas · {number(len(escalations))} escaladas · "
+                               f"{number(automatic)} cierres automáticos · {number(pending)} por decidir", "muted"))
+        layout.addWidget(label("Resultados guardados en este perfil. Los avisos se preparan aquí para N2.", "muted"))
+        grid = table(["Alerta", "Prioridad", "Plazo de triaje", "Responsables"])
+        grid.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        rows = []
+        for key, row, routing in escalations:
+            deadline = routing.get("deadline_at")
+            rows.append((key, SEVERITY[row["analysis"]["severity"]][0],
+                         f"{madrid(deadline):%d/%m %H:%M %Z}" if deadline else "—",
+                         ", ".join(routing["recipients"])))
+        self._fill_summary(grid, rows)
+        grid.setAccessibleName("Escalados de guardia")
+        layout.addWidget(grid, 1)
+        if rows:
+            grid.selectRow(0)
+        else:
+            layout.addWidget(label("Todavía no hay alertas escaladas en guardia.", "muted"))
+
+        def open_case(row):
+            if 0 <= row < len(rows):
+                self._open_by_id(rows[row][0])
+
+        controls = QHBoxLayout()
+        controls.addStretch()
+        open_button = button("Ver expediente", lambda: open_case(grid.currentRow()), primary=True)
+        open_button.setEnabled(bool(rows))
+        controls.addWidget(open_button)
+        controls.addWidget(button("Cerrar", dialog.reject))
+        layout.addLayout(controls)
+        grid.cellActivated.connect(lambda row, _: open_case(row))
+        dialog.exec()
+
     def _monitor_tick(self):
         if self.window.job:
             return
@@ -572,10 +641,29 @@ class Workbench(QWidget):
                      if item.get("decision") or (item.get("analysis") or {}).get("routing")}
         exclusions = completed | self.monitor_failures
         mode = "guardia" if soc_status() == "SOC cerrado" else "diurno"
+        if self.inbox_path:
+            try:
+                for path in sorted(self.inbox_path.glob("*.jsonl")):
+                    if path.is_symlink() or not path.is_file():
+                        continue
+                    info = path.stat()
+                    signature = (info.st_ino, info.st_size, info.st_mtime_ns)
+                    if self.inbox_seen.get(path) == signature:
+                        continue
+                    self.inbox_seen[path] = signature
+                    self._triage_batch(lambda: [alert for alert in load_alerts(path) if alert["alert_id"] not in exclusions],
+                                       monitor=True, mode=mode, inbox=path.name)
+                    return
+            except OSError:
+                self.status.setText("No se pudo leer la carpeta de entrada. La vigilancia seguirá intentando.")
+                return
+            if not self.inbox_path.is_dir():
+                self.status.setText("La carpeta de entrada ya no está disponible.")
+            return
         self._triage_batch(lambda: db.alert_page("", 0, 10, sort="severity", exclude_ids=list(exclusions))[0],
                            monitor=True, mode=mode)
 
-    def _triage_batch(self, source, *, remote=False, present=False, monitor=False, mode=None):
+    def _triage_batch(self, source, *, remote=False, present=False, monitor=False, mode=None, inbox=""):
         mode = mode or self.triage_mode.currentData()
 
         def operation():
@@ -590,7 +678,9 @@ class Workbench(QWidget):
                     alert_id = pending[task]
                     try:
                         result = task.result()
-                        self.store.save_analysis(alert_id, result)
+                        stored = self.store.save_analysis(alert_id, result)
+                        if stored and result["routing"]["automatic"]:
+                            result["persisted_decision"] = "automatic"
                         results[alert_id] = (result, "")
                     except Exception as error:
                         results[alert_id] = (None, str(error))
@@ -600,6 +690,9 @@ class Workbench(QWidget):
             self.reviews = self.store.all()
             self._render_rows()
             if error:
+                if inbox:
+                    self.status.setText(f"No se pudo procesar {inbox}: {error}")
+                    return
                 if monitor:
                     self._stop_monitor("Vigilancia interrumpida. Vuelve a intentarlo.")
                 self._error("Se interrumpió el análisis de la cola.", error)
@@ -609,10 +702,13 @@ class Workbench(QWidget):
                 self.monitor_failures.update(item["alert_id"] for item, _, failure in result if failure)
                 if not result:
                     failure_count = len(self.monitor_failures)
-                    self._stop_monitor(f"Vigilancia al día · {failure_count} alertas con error por revisar.")
+                    self.monitor.setInterval(12_000)
+                    self.status.setText(f"Vigilancia al día · {failure_count} alertas con error por revisar.")
                     return
+                self.monitor.setInterval(2_000)
             processed = sum(bool(analysis) for _, analysis, _ in result)
-            self.status.setText(f"{processed}/{len(result)} investigadas · {len(result) - processed} errores")
+            prefix = f"{inbox} · " if inbox else ""
+            self.status.setText(f"{prefix}{processed}/{len(result)} investigadas · {len(result) - processed} errores")
             if present:
                 self._batch_results(result)
             elif not monitor and (failures := [f"{item['alert_id']} · {message}" for item, _, message in result if message]):
@@ -637,8 +733,7 @@ class Workbench(QWidget):
             else:
                 routing = analysis["routing"]
                 disposition = routes[routing["recommendation"]]
-                saved = self.reviews.get(alert["alert_id"], {})
-                if saved.get("decision") == "automatic":
+                if analysis.get("persisted_decision") == "automatic":
                     disposition = "Cierre automático"
                 values = (alert["alert_id"], SEVERITY[analysis["severity"]][0], VERDICTS[analysis["verdict"]][0],
                           disposition, f"{analysis['timing']['total_ms']} ms")
@@ -845,6 +940,9 @@ class Workbench(QWidget):
         if self.window.job:
             return
         alert_id = alert["alert_id"]
+        isolation = None if defense_result is not None or alert.get("external") else isolation_proposal(
+            alert_id, practice=self.demo
+        )
         inspection = defense_result is not None
         hide_archive = inspection or bool(alert.get("external"))
         ticket, incident, closed = ({}, {}, {}) if hide_archive else for_alert(alert_id)
@@ -857,6 +955,9 @@ class Workbench(QWidget):
         layout.setSpacing(10)
         heading = QHBoxLayout()
         heading.addWidget(label(f"{alert_id}  ·  {alert['source_product']}  ·  {alert['runbook']}", "muted"), 1)
+        approve = button("Aprobar aislamiento simulado")
+        approve.hide()
+        heading.addWidget(approve)
         heading.addWidget(button("Ver guías", lambda: self._view_guidance(dialog, alert["runbook"])))
         layout.addLayout(heading)
         layout.addWidget(label(alert["rule_name"], "title"))
@@ -958,7 +1059,7 @@ class Workbench(QWidget):
             sections = []
             event_ids = list(alert.get("related_events", []))
             routing = analysis.get("routing") or {}
-            automatic = item.get("decision") == "automatic"
+            automatic = (analysis.get("persisted_decision") if inspection else item.get("decision")) == "automatic"
             if routing:
                 mode = {"guardia": "Guardia", "diurno": "Horario atendido"}.get(routing.get("mode"), "Modo sin registrar")
                 step = {"close": "Cierre recomendado", "escalate": "Escalar", "review": "Revisión humana"}.get(
@@ -1000,7 +1101,8 @@ class Workbench(QWidget):
                 else:
                     feedback.setText(f"{contrast} · Sin decisión registrada")
                 sections.extend([
-                    ("Propuesta", self._result_text(proposal, analysis.get("proposal_error", ""))),
+                    ("Hipótesis del modelo" if analysis.get("review_provider") else "Propuesta",
+                     self._result_text(proposal, analysis.get("proposal_error", ""))),
                     ("Comprobación local" if is_local else "Revisión adversarial",
                      self._result_text(challenge, analysis.get("review_error", ""))),
                 ])
@@ -1058,6 +1160,19 @@ class Workbench(QWidget):
                                 "kind": "Cierre automático" if automatic else "Decisión humana",
                                 "actor": item["reviewer"], "data": {"verdict": item["verdict"]}})
             for name, content in case_panels(alert, analysis, history, hide_archive=hide_archive).items():
+                if name == "Acciones" and isolation:
+                    result = isolation_status(self.store, alert_id)
+                    prepared = bool(routing and analysis.get("verified_finding"))
+                    state = {"reserved": "Aprobación reservada", "executed": "Ejecutado en el simulador",
+                             "failed": "Ejecución rechazada", "unknown": "Resultado sin confirmar"}
+                    if result:
+                        content.insert(0, (state[result["status"]], f"{result['target']} · {result['actor']} (N2 de práctica)\n"
+                                           f"{result['result']}\nMotivo: {result['justification']}"))
+                    elif prepared:
+                        content.insert(0, ("Contención preparada", f"Aislar {isolation['target']} en el simulador. "
+                                           f"Requiere aprobación humana de N2. Evidencia: {', '.join(isolation['citations'])}."))
+                    approve.setVisible(prepared and not result)
+                    approve.setEnabled(self.window.job is None)
                 extra[name].show_sections(content)
             can_accept = self._can_accept(item)
             accept.setEnabled(can_accept)
@@ -1141,6 +1256,59 @@ class Workbench(QWidget):
             if selected == QMessageBox.StandardButton.Yes:
                 analyze("provider")
 
+        def approve_isolation():
+            if not isolation or self.window.job:
+                return
+            confirmation = QDialog(dialog)
+            confirmation.setWindowTitle("Aprobar aislamiento simulado")
+            content = QVBoxLayout(confirmation)
+            content.setContentsMargins(24, 20, 24, 22)
+            content.addWidget(label(f"Aislar {isolation['target']}", "sectionTitle"))
+            content.addWidget(label("N2 de práctica · El simulador registrará el aislamiento del puesto.", "muted"))
+            justification = QLineEdit()
+            justification.setAccessibleName("Justificación del aislamiento")
+            justification.setPlaceholderText("Motivo basado en el expediente")
+            justification.setMaxLength(500)
+            password = QLineEdit()
+            password.setAccessibleName("Contraseña de N2 de práctica")
+            password.setPlaceholderText("Contraseña de práctica")
+            password.setEchoMode(QLineEdit.EchoMode.Password)
+            content.addWidget(justification)
+            content.addWidget(password)
+            controls = QHBoxLayout()
+            controls.addStretch()
+            controls.addWidget(button("Cancelar", confirmation.reject))
+            confirm = button("Aprobar y simular", confirmation.accept, primary=True)
+            confirm.setEnabled(False)
+
+            def validate():
+                confirm.setEnabled(bool(justification.text().strip() and password.text()))
+
+            justification.textChanged.connect(validate)
+            password.textChanged.connect(validate)
+            controls.addWidget(confirm)
+            content.addLayout(controls)
+            if confirmation.exec() != QDialog.DialogCode.Accepted:
+                return
+            supplied, reason = password.text(), justification.text()
+            password.clear()
+            approve.setEnabled(False)
+
+            def finished(result, error):
+                if dialog.isVisible():
+                    render()
+                    if error:
+                        feedback.setText(str(error))
+                    else:
+                        feedback.setText(result["result"])
+                        tabs.setCurrentIndex(4)
+
+            self._run(lambda: execute_isolation(self.store, self.window.account, alert_id, practice=self.demo,
+                                                target=isolation["target"], confirmed=True, password=supplied,
+                                                justification=reason), finished, "Registrando contención en el simulador…")
+
+        approve.clicked.connect(approve_isolation)
+
         def export_case():
             name, _ = QFileDialog.getSaveFileName(dialog, "Exportar expediente", f"{alert_id}.json", "JSON (*.json)")
             if not name:
@@ -1193,6 +1361,8 @@ class Workbench(QWidget):
         text = [f"{VERDICTS[result['verdict']][0]} · "
                 + (f"{confidence}% estimado" if confidence is not None else "sin estimación propia"), result["summary"],
                 f"Evidencias citadas: {', '.join(result['citations']) or 'ninguna'}"]
+        if result.get("sandbox_refs"):
+            text.append("SHA-256 consultados en sandbox: " + ", ".join(result["sandbox_refs"]))
         if result.get("questions"):
             text.extend(["Preguntas abiertas:", *result["questions"]])
         return "\n".join(text)
