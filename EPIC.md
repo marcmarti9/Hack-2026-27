@@ -11,6 +11,7 @@ Entregar Vigía como aplicación de escritorio para el SOC de Tarvia. La mesa re
 | Fuente | Uso |
 | --- | --- |
 | [Aplicación de escritorio](apps/desktop), [README](README.md) y [PR #2](https://github.com/marcmarti9/Hack-2026-27/pull/2) | Aplicación Qt e instaladores para Linux, Windows y macOS. |
+| [Revisión adversarial](docs/revision-adversarial.md) y [página del comité](docs/comite-tarvia.md) | Requisitos del reto, evidencia, límites de la guardia y criterios de defensa. |
 | [PR #1](https://github.com/marcmarti9/Hack-2026-27/pull/1) y el ZIP en `main` | Prototipo previo y contexto técnico del equipo. |
 | [Repositorio de Deloitte](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/5d7569232756eaf0a8723b22c428b70e8f67824f) | Dataset, política del SOC y diez runbooks oficiales. |
 | [Boceto original de escritorio](docs/diseno-escritorio.pdf), guías y archivos de diseño en `main` | Referencias para triaje, puntuación y copias de seguridad. El estado de cada función se comprueba en el código y sus pruebas. |

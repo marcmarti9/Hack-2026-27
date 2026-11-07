@@ -2,6 +2,8 @@
 
 [Épico y registro de coordinación](https://github.com/marcmarti9/Hack-2026-27/blob/main/EPIC.md) · [Instrucciones para agentes](AGENTS.md)
 
+[Revisión adversarial y matriz de requisitos](docs/revision-adversarial.md) · [Una página para el comité de Tarvia](docs/comite-tarvia.md)
+
 Vigía es una aplicación de escritorio en español. El flujo empieza con el inicio de sesión, muestra el estado de carga y abre la mesa de trabajo con alertas, expedientes y chat.
 
 Tarvia es una empresa ficticia. Su SOC necesita investigar alertas y mantener cobertura fuera de horario. Vigía prepara evidencias, un veredicto, una prioridad y una recomendación para el analista. [Enunciado, datos y presentación de Deloitte](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/5d7569232756eaf0a8723b22c428b70e8f67824f)
