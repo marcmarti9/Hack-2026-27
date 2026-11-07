@@ -90,3 +90,10 @@ En 0.8.1 las pruebas de regresión cubren cuatro escalados que faltaban. El phis
 Al repetir las mismas 15 entradas con 0.8.1, el motor escaló los cinco casos indicados por el revisor y mantuvo un escalado adicional pendiente de confirmar la identidad en Backup Operators. Se abstuvo en diez casos y conservó el cierre comprobado de SCCM. Esta repetición valida la corrección de la muestra; todavía hace falta medir la cobertura del modelo con entradas nuevas.
 
 El lote de ensayo de la mesa reúne diez casos elegidos para enseñar resultados distintos. En Docker sin red produjo seis verdaderos positivos, dos positivos benignos y dos abstenciones, con seis escalados. Los casos se seleccionaron para presentar el flujo y no se usan para estimar la precisión. [Lote de ensayo](../eval/lote-ensayo.jsonl)
+
+
+### Barrido de Vigía 0.8.1
+
+Con las fuentes de `756b573`, el motor offline procesó las **11.061 alertas sin errores**. La política indicó **1.331 cierres automáticos**, 267 escalados, 109 recomendaciones de cierre que requieren revisión y 9.354 revisiones. Hubo 8.657 abstenciones de veredicto. En este barrido se midieron disposiciones, sin persistir miles de decisiones en el perfil. La persistencia del cierre se comprobó por separado.
+
+La mediana fue 52 ms por alerta y el percentil 95, 105 ms. El barrido tardó 655,02 s y no llamó a OpenAI. No equivale a una medida de precisión ni a la latencia de los modelos. Para repetirlo sobre el dataset y el índice oficiales configurados, ejecuta `python -m scripts.bench_triage`. [Benchmark reproducible](../scripts/bench_triage.py) · [Instaladores de 0.8.1](https://github.com/marcmarti9/Hack-2026-27/actions/runs/42424325479)
