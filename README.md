@@ -1,10 +1,10 @@
 # Vigía · Analista SOC de Tarvia
 
-UAB The Hack 2026 · Reto Deloitte de IA para ciberseguridad · Marc's & Co.
+[Épico y registro de coordinación](https://github.com/marcmarti9/Hack-2026-27/blob/main/EPIC.md) · [Instrucciones para agentes](AGENTS.md)
 
 Vigía es una aplicación de escritorio en español. El flujo empieza con el inicio de sesión, muestra el estado de carga y abre la mesa de trabajo con alertas, expedientes y chat.
 
-Tarvia es una empresa ficticia. Su SOC necesita investigar alertas y mantener cobertura fuera de horario. Vigía prepara evidencias, un veredicto, una prioridad y una recomendación para el analista. El reto exige mostrar el triaje en directo con las alertas comunes de la defensa. [Enunciado, datos y presentación de Deloitte](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/5d7569232756eaf0a8723b22c428b70e8f67824f)
+Tarvia es una empresa ficticia. Su SOC necesita investigar alertas y mantener cobertura fuera de horario. Vigía prepara evidencias, un veredicto, una prioridad y una recomendación para el analista. [Enunciado, datos y presentación de Deloitte](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/5d7569232756eaf0a8723b22c428b70e8f67824f)
 
 ## Instalar Vigía
 
@@ -17,9 +17,9 @@ Tarvia es una empresa ficticia. Su SOC necesita investigar alertas y mantener co
 
 En el primer inicio, crea la cuenta local y selecciona la carpeta raíz del [dataset de Tarvia](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/5d7569232756eaf0a8723b22c428b70e8f67824f). La importación corre en segundo plano y deja un índice reutilizable en el perfil del sistema operativo. El instalador lleva su runtime de Python y Qt. El dataset se descarga por separado.
 
-La cola SIEM permite buscar y filtrar por fecha, severidad y veredicto. Cada expediente muestra el proceso de revisión, los registros originales, las entidades, la línea de tiempo, las acciones y el historial. **Tickets** abre tanto los casos locales como los 17 expedientes de la demo. Los 13 informes N2 y los descartes de la demo aparecen como referencias históricas separadas de las decisiones nuevas. Desde el detalle se puede exportar el expediente en JSON.
+En **Inicio**, la cola SIEM permite buscar y filtrar por fecha, severidad y veredicto. El botón junto al logo pliega la navegación y deja accesibles las vistas mediante sus iconos. El chat se puede mostrar, ocultar y redimensionar. Cada expediente muestra el proceso de revisión, los registros originales, las entidades, la línea de tiempo, las acciones y el historial. **Tickets** abre tanto los casos locales como los 17 expedientes de la demo. Los 13 informes N2 y los descartes de la demo aparecen como referencias históricas separadas de las decisiones nuevas. Desde el detalle se puede exportar el expediente en JSON.
 
-`✓` acepta una propuesta cuando el contraste coincide y ambas respuestas citan eventos recuperados. `×` registra la clasificación humana, incluidos falsos y verdaderos negativos. **Historial** guarda las justificaciones basadas en evidencias, la revisión adversarial, las decisiones y las versiones de guía utilizadas. **Playbooks** permite editar y versionar los diez runbooks y la skill de triaje. Las modificaciones se aplican al siguiente análisis. **Ver guías** abre el runbook correspondiente a la alerta y la skill vigente. La severidad indica la prioridad según la matriz del SOC. La confianza describe el grado de certeza de un análisis disponible. **Positivo benigno** permite registrar que la regla detectó actividad autorizada.
+**Aceptar propuesta** acepta una propuesta cuando el contraste coincide y ambas respuestas citan eventos recuperados. **Corregir** registra la clasificación humana, incluidos falsos y verdaderos negativos. **Historial** guarda las justificaciones basadas en evidencias, la revisión adversarial, las decisiones y las versiones de guía utilizadas. **Playbooks** permite editar y versionar los diez runbooks y la skill de triaje. Las modificaciones se aplican al siguiente análisis. **Ver guías** abre el runbook correspondiente a la alerta y la skill vigente. La severidad indica la prioridad según la matriz del SOC. La confianza describe el grado de certeza de un análisis disponible. **Positivo benigno** permite registrar que la regla detectó actividad autorizada.
 
 El chat funciona en modo local y admite adjuntos de texto de hasta 16 KB. Para activar el agente, inicia Vigía con `OPENAI_API_KEY` en el entorno. `OPENAI_MODEL` permite elegir el modelo y por defecto usa `gpt-5.4-mini`. Las acciones de OpenAI indican cuándo envían datos fuera del perfil. El análisis envía la alerta, hasta doce eventos, el contexto local y las guías aplicables. El agente propone un resultado y una segunda llamada intenta refutarlo. Si falta evidencia o las pasadas discrepan, Vigía deja el resultado pendiente. La confianza es la menor de las estimaciones de ambas pasadas. El detalle registra el tiempo de recuperación, propuesta, contraste y total. **Preparar 5** puede investigar hasta dos alertas a la vez.
 
@@ -27,15 +27,15 @@ El chat funciona en modo local y admite adjuntos de texto de hasta 16 KB. Para a
 
 El inicio de sesión protege la mesa dentro del perfil del usuario del sistema. La cuenta se guarda con una derivación PBKDF2 y sal aleatoria. Quien controla los archivos del perfil también controla el acceso al índice. Esta versión tiene una cuenta local por perfil y carece de aprobación de contenciones desde la interfaz.
 
-### Presentación del hackathon
+### Entorno de práctica
 
-Abre **Vigía Demo** desde el menú en Linux o Windows. En macOS, ejecuta `open -na /Applications/Vigia.app --args --demo` después de instalar la aplicación. En desarrollo, usa `python -m apps.desktop.entry --demo`.
+Abre **Vigía · Práctica** desde el menú en Linux o Windows. En macOS, ejecuta `open -na /Applications/Vigia.app --args --demo` después de instalar la aplicación. En desarrollo, usa `python -m apps.desktop.entry --demo`.
 
-1. En el acceso, usa `analista.demo` y `VigiaDemo2026`, o pulsa **Entrar a la demo**. En el primer ensayo, selecciona el dataset oficial si la app lo solicita.
-2. En **Alertas**, abre **Caso LSASS** y pulsa **Reproducir análisis de la demo**. La propuesta, el fiscal y la confianza vienen del expediente archivado. Los eventos se recuperan del índice en ese momento. Pulsa **Aceptar** o **Corregir** y abre **Historial** para mostrar el registro de la decisión.
+1. En el acceso, usa `analista.demo` y `VigiaDemo2026`, o pulsa **Entrar en modo de práctica**. En el primer ensayo, selecciona el dataset oficial si la app lo solicita.
+2. En **Inicio**, abre **Caso LSASS** y pulsa **Cargar análisis de referencia**. La propuesta, el fiscal y la confianza vienen del expediente archivado. Los eventos se recuperan del índice en ese momento. Pulsa **Aceptar** o **Corregir** y abre **Historial** para mostrar el registro de la decisión.
 3. En **Informe diario**, pulsa **Presentar** para enseñar la reproducción de la jornada. Para abrir directamente el caso desde terminal, añade `--present` a `--demo`.
 
-La demo funciona sin red ni clave de API. Usa un índice independiente y guarda el usuario, los cambios de playbook y las decisiones durante esa ejecución. Al volver a abrirla se puede repetir el recorrido. Para probar el análisis en vivo, inicia **Vigía** en modo normal con tu propia clave OpenAI configurada.
+El entorno de práctica funciona sin red ni clave de API. Usa un índice independiente y guarda el usuario, los cambios de playbook y las decisiones durante esa ejecución. Al volver a abrirla se puede repetir el recorrido. Para probar el análisis en vivo, inicia **Vigía** en modo normal con tu propia clave OpenAI configurada.
 
 ### Desarrollo y empaquetado
 
