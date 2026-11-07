@@ -1,9 +1,8 @@
-"""Identidad de Vigía y animaciones decorativas del escritorio."""
+"""Logotipo de Vigía e iconos de navegación del escritorio."""
 from pathlib import Path
-from random import Random
 
 from PySide6.QtCore import QElapsedTimer, QRectF, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter
+from PySide6.QtGui import QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QWidget
 
@@ -13,7 +12,7 @@ BRAND = Path(__file__).with_name("brand")
 class Mark(QWidget):
     def __init__(self, width: int, icon: bool = False):
         super().__init__()
-        self.renderer = QSvgRenderer(str(BRAND / ("vigia_icon_dark.svg" if icon else "vigia_logo_dark.svg")))
+        self.renderer = QSvgRenderer(str(BRAND / ("vigia_icon_light.svg" if icon else "vigia_logo_light.svg")))
         self.setFixedSize(width, width if icon else round(width * 207 / 768))
         self.setAccessibleName("Vigía")
         self.opening = 1.0
@@ -70,42 +69,29 @@ class OpeningMark(Mark):
         super().hideEvent(event)
 
 
-class MatrixPanel(QWidget):
-    def __init__(self, reduced_motion: bool):
-        super().__init__()
-        self.setMinimumWidth(270)
-        rng = Random(41)
-        self.columns = [(rng.randrange(95), rng.uniform(.19, .54), rng.randrange(100)) for _ in range(56)]
-        self.frame = 0
-        self.timer = QTimer(self, interval=90)
-        self.timer.timeout.connect(self._advance)
-        if not reduced_motion:
-            self.timer.start()
+_NAV_PATHS = {
+    "menu": "M3 4h14v12H3z M8 4v12",
+    "alerts": "M3 9l7-6 7 6v8H5V9 M8 17v-5h4v5",
+    "statistics": "M3 17h14 M6 14v-4 M10 14V5 M14 14V8",
+    "report": "M5 3h7l3 3v11H5z M12 3v4h3 M8 10h4 M8 13h4",
+    "tickets": "M3 5h14v3a2 2 0 0 0 0 4v3H3v-3a2 2 0 0 0 0-4z M10 8v4",
+    "history": "M5 5a7 7 0 1 1-2 6 M3 3v4h4 M10 6v5l3 2",
+    "guides": "M10 6c-2-2-4-2-7-2v11c3 0 5 0 7 2 2-2 4-2 7-2V4c-3 0-5 0-7 2z M10 6v11",
+    "notices": "M5 14h10l-1-2V8a4 4 0 0 0-8 0v4z M8 17h4",
+    "profile": "M10 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M4 17v-1c0-2 2-4 6-4s6 2 6 4v1",
+}
 
-    def _advance(self):
-        self.frame = (self.frame + 1) % 10000
-        self.update()
 
-    def paintEvent(self, _event):
-        p = QPainter(self)
-        p.fillRect(self.rect(), QColor("#081812"))
-        font = QFont("monospace", 11)
-        font.setStyleHint(QFont.StyleHint.Monospace)
-        p.setFont(font)
-        chars = "01△∷⟐A9E"
-        rows = self.height() // 21 + 12
-        for col, (offset, speed, seed) in enumerate(self.columns):
-            x = 9 + col * 22
-            if x > self.width():
-                break
-            head = int(offset + self.frame * speed) % rows
-            for tail in range(11):
-                y = ((head - tail) % rows) * 21 - 120
-                if 0 < y <= self.height():
-                    p.setPen(QColor(101, 192, 125, max(8, 86 - tail * 7)))
-                    p.drawText(x, y, chars[(seed + head + tail * 11) % len(chars)])
-        shade = QLinearGradient(0, 0, 0, self.height())
-        shade.setColorAt(0, QColor(5, 17, 12, 40))
-        shade.setColorAt(.49, QColor(5, 17, 12, 218))
-        shade.setColorAt(1, QColor(5, 17, 12, 90))
-        p.fillRect(self.rect(), shade)
+def navigation_icon(name: str) -> QIcon:
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+        <path d="{_NAV_PATHS[name]}" fill="none" stroke="#405467" stroke-width="1.45"
+        stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>"""
+    pixmap = QPixmap(40, 40)
+    pixmap.setDevicePixelRatio(2)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    renderer = QSvgRenderer(svg.encode())
+    renderer.render(painter, QRectF(0, 0, 20, 20))
+    painter.end()
+    return QIcon(pixmap)

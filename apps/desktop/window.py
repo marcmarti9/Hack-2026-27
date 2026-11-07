@@ -4,13 +4,13 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QRunnable, QSettings, QThreadPool, QTimer, Qt, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QFileDialog, QFormLayout, QHBoxLayout, QLineEdit, QMainWindow, QVBoxLayout, QWidget,
+    QFileDialog, QFormLayout, QLineEdit, QMainWindow, QVBoxLayout, QWidget,
 )
 
 from apps.backend.config import DATA, DB
 from apps.backend.ingest import ingest
 from apps.backend.tools import db
-from apps.desktop.brand_widgets import BRAND, Mark, MatrixPanel, OpeningMark
+from apps.desktop.brand_widgets import BRAND, Mark, OpeningMark
 from apps.desktop.demo import DEMO_ALERT, DEMO_PASSWORD, DEMO_USER
 from apps.desktop.review import Reviews
 from apps.desktop.session import Account
@@ -47,8 +47,8 @@ class Window(QMainWindow):
             self.account.create(DEMO_USER, DEMO_PASSWORD)
         self.reviews = Reviews(home)
         self.settings = QSettings(str(home / "settings.ini"), QSettings.Format.IniFormat)
-        self.setWindowTitle("Vigía | Demo de Tarvia" if demo else "Vigía | SOC de Tarvia")
-        self.setWindowIcon(QIcon(str(BRAND / "vigia_icon_dark.svg")))
+        self.setWindowTitle("Vigía | SOC de Tarvia")
+        self.setWindowIcon(QIcon(str(BRAND / "vigia_icon_light.svg")))
         self.resize(1440, 850)
         self.setMinimumSize(990, 600)
         self.job = None
@@ -76,40 +76,24 @@ class Window(QMainWindow):
         existing = self.account.name()
         page = QWidget()
         self.setCentralWidget(page)
-        split = QHBoxLayout(page)
-        split.setContentsMargins(0, 0, 0, 0)
-        split.setSpacing(0)
-        story = MatrixPanel(self.reduced_motion())
-        story_layout = QVBoxLayout(story)
-        story_layout.setContentsMargins(54, 42, 46, 42)
-        story_layout.addWidget(Mark(150), alignment=Qt.AlignmentFlag.AlignLeft)
-        story_layout.addStretch()
-        story_layout.addWidget(label("Cada alerta,\ncon su evidencia.", "matrixTitle"))
-        story_layout.addWidget(label("Revisa el contexto y toma la decisión desde la mesa del SOC.", "matrixCopy"))
-        story_layout.addStretch()
-        story_layout.addWidget(label("TARVIA GROUP  /  CENTRO DE OPERACIONES", "matrixCopy"))
-        split.addWidget(story, 1)
-
-        right = QWidget()
-        right.setObjectName("loginSide")
-        pane = QVBoxLayout(right)
-        pane.setContentsMargins(32, 28, 32, 28)
+        pane = QVBoxLayout(page)
+        pane.setContentsMargins(32, 24, 32, 24)
         pane.addStretch()
         card = QWidget()
         card.setObjectName("authSurface")
-        card.setFixedWidth(410)
+        card.setFixedWidth(420)
         pane.addWidget(card, alignment=Qt.AlignmentFlag.AlignHCenter)
         pane.addStretch()
-        split.addWidget(right, 1)
         form = QVBoxLayout(card)
-        form.setContentsMargins(28, 27, 28, 26)
-        form.setSpacing(12)
-        form.addWidget(label("DEMO DEL HACKATHON" if self.demo else "ACCESO AL EQUIPO", "accentText"))
+        form.setContentsMargins(32, 29, 32, 30)
+        form.setSpacing(13)
+        form.addWidget(Mark(157), alignment=Qt.AlignmentFlag.AlignLeft)
+        form.addSpacing(8)
         form.addWidget(label("Iniciar sesión", "title"))
-        if self.demo:
-            form.addWidget(label(f"Usuario {DEMO_USER} · Contraseña {DEMO_PASSWORD}", "muted"))
-        elif not existing:
-            form.addWidget(label("En el primer acceso, tus credenciales inicializan el perfil local.", "muted"))
+        description = "Entorno de práctica" if self.demo else "SOC de Tarvia"
+        if not existing:
+            description = "Configura tu acceso local al SOC de Tarvia."
+        form.addWidget(label(description, "muted"))
         fields = QFormLayout()
         fields.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         fields.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
@@ -135,7 +119,7 @@ class Window(QMainWindow):
         self.login_button = button("Iniciar sesión", lambda: self._login(bool(existing)), primary=True)
         form.addWidget(self.login_button)
         if self.demo:
-            form.addWidget(button("Entrar a la demo", self.enter_demo))
+            form.addWidget(button("Entrar en modo de práctica", self.enter_demo))
         self.password.returnPressed.connect(self.login_button.click if existing else self.confirm.setFocus)
         self.confirm.returnPressed.connect(self.login_button.click)
         (self.password if existing else self.username).setFocus()

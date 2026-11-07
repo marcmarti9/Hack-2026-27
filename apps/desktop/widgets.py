@@ -5,66 +5,73 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QPlainTextEdit, QPushButton, QTextBrowser
 
 
-# Hallmark · mesa de triaje · tinta fría y verde de Vigía · tipografía nativa
-INK = "#e6eceb"
-MUTED = "#a3b2b6"
-PAPER = "#10171a"
-RAIL = "#0c1315"
-PANEL = "#151f22"
-HOVER = "#1b292d"
-RULE = "#2d3c41"
-SELECTION = "#253b37"
-ACCENT = "#b0e081"
-WARNING = "#f1c580"
+# Mesa de trabajo de Vigía. El azul del logotipo marca las acciones principales.
+INK = "#202b36"
+MUTED = "#536272"
+PAPER = "#f7f8fa"
+RAIL = "#f0f2f5"
+PANEL = "#ffffff"
+HOVER = "#eef2f6"
+RULE = "#d8dfe6"
+SELECTION = "#e1ebf4"
+ACCENT = "#173e5c"
+ACCENT_HOVER = "#245475"
+FOCUS = "#326b9a"
+WARNING = "#79521c"
+POSITIVE = "#2d644b"
 
 STYLE = f"""
 QMainWindow, QDialog, QWidget {{ background: {PAPER}; color: {INK}; font-size: 13px; }}
 QLabel {{ background: transparent; }}
 QToolTip {{ background: {HOVER}; color: {INK}; border: 1px solid {RULE}; }}
-#title {{ font-size: 30px; font-weight: 700; }}
+#title {{ font-size: 26px; font-weight: 700; }}
 #sectionTitle {{ font-size: 17px; font-weight: 700; }}
 #muted {{ color: {MUTED}; }}
 #notice {{ color: {WARNING}; }}
 #accentText {{ color: {ACCENT}; font-weight: 700; }}
 #rail {{ background: {RAIL}; border-right: 1px solid {RULE}; }}
-#railBrand {{ background: {RAIL}; font-size: 21px; font-weight: 700; }}
-#railCaption {{ background: {RAIL}; color: {MUTED}; font-size: 12px; }}
-#navItem {{ background: {RAIL}; border-color: transparent; border-left-width: 2px; text-align: left; }}
+#navItem {{ background: {RAIL}; border-color: transparent; text-align: left; min-height: 22px; }}
 #navItem:hover {{ background: {HOVER}; }}
-#navItem:checked {{ background: {SELECTION}; border-left-color: {ACCENT}; color: {INK}; font-weight: 700; }}
-#navItem:focus {{ border-color: {ACCENT}; }}
+#navItem:checked {{ background: {SELECTION}; color: {ACCENT}; font-weight: 700; }}
+#navItem[compact="true"] {{ padding: 7px; text-align: center; }}
+#navItem:focus, #menuToggle:focus {{ border-color: {FOCUS}; }}
+#menuToggle {{ background: transparent; border-color: transparent; padding: 4px; }}
+#menuToggle:hover {{ background: {HOVER}; }}
+#workspaceHeader {{ background: {PANEL}; }}
+#mainCanvas {{ background: {PAPER}; }}
 #workspaceHeader, #queueFooter {{ border-bottom: 1px solid {RULE}; }}
 #queueFooter {{ border-top: 1px solid {RULE}; border-bottom: 0; }}
-#chatPanel {{ border-left: 1px solid {RULE}; }}
-#loginSide {{ background: {PAPER}; }}
-#authSurface {{ background: {PAPER}; }}
-#matrixTitle {{ background: transparent; color: {INK}; font-size: 42px; font-weight: 700; }}
-#matrixCopy {{ background: transparent; color: {MUTED}; font-size: 15px; }}
+#chatPanel {{ background: {PANEL}; }}
+#chatPanel QPlainTextEdit {{ background: {PANEL}; }}
+#authSurface {{ background: {PANEL}; border: 1px solid {RULE}; border-radius: 8px; }}
 QLineEdit, QPlainTextEdit, QTextBrowser, QComboBox, QDateEdit {{
     background: {PANEL}; border: 1px solid {RULE}; border-radius: 4px;
-    padding: 7px; selection-background-color: {SELECTION};
+    padding: 7px; selection-background-color: {SELECTION}; selection-color: {INK};
 }}
 #authSurface QLineEdit {{ min-height: 27px; }}
-QTableWidget {{ background: {PAPER}; alternate-background-color: {PANEL};
+QComboBox::drop-down {{ subcontrol-origin: padding; subcontrol-position: top right; width: 19px; border: 0; }}
+QComboBox QAbstractItemView {{ background: {PANEL}; selection-background-color: {SELECTION}; selection-color: {INK}; }}
+QTableWidget {{ background: {PANEL};
     border: 1px solid {RULE}; gridline-color: {RULE}; selection-background-color: {SELECTION};
     selection-color: {INK}; }}
-QTableWidget::item {{ padding: 4px 8px; }}
+QTableWidget::item {{ padding: 4px 8px; border-bottom: 1px solid {RULE}; }}
 QLineEdit:focus, QPlainTextEdit:focus, QTextBrowser:focus, QTableWidget:focus,
-QPushButton:focus, QComboBox:focus, QDateEdit:focus {{ border: 1px solid {ACCENT}; }}
+QPushButton:focus, QComboBox:focus, QDateEdit:focus {{ border: 1px solid {FOCUS}; }}
 QPushButton {{ background: {PANEL}; padding: 7px 10px; border: 1px solid {RULE}; border-radius: 4px; }}
 QPushButton:hover {{ background: {HOVER}; }}
 QPushButton:pressed, QPushButton:checked {{ background: {SELECTION}; color: {ACCENT}; }}
 QPushButton:disabled {{ color: {MUTED}; background: {PAPER}; }}
-QPushButton#primary {{ background: {ACCENT}; color: {RAIL}; border-color: {ACCENT}; font-weight: 700; }}
-QPushButton#primary:hover {{ background: {INK}; }}
-QPushButton#primary:pressed {{ background: {MUTED}; }}
-QPushButton#primary:focus {{ border-color: {INK}; }}
+QPushButton#primary {{ background: {ACCENT}; color: {PANEL}; border-color: {ACCENT}; font-weight: 700; }}
+QPushButton#primary:hover {{ background: {ACCENT_HOVER}; }}
+QPushButton#primary:pressed {{ background: {INK}; }}
+QPushButton#primary:focus {{ border-color: {FOCUS}; }}
 QPushButton#primary:disabled {{ background: {PANEL}; color: {MUTED}; border-color: {RULE}; }}
-#rowAction {{ padding: 4px 9px; background: {PAPER}; }}
+#rowAction {{ padding: 4px 9px; color: {ACCENT}; background: {PANEL}; }}
 #rowAction:hover {{ background: {HOVER}; color: {ACCENT}; }}
 QHeaderView::section {{ background: {PANEL}; color: {MUTED}; padding: 9px 8px;
     border: 0; border-bottom: 1px solid {RULE}; font-weight: 600; }}
-QSplitter::handle {{ background: {PAPER}; width: 7px; }}
+QSplitter::handle {{ background: {RULE}; width: 4px; }}
+QSplitter::handle:hover {{ background: {FOCUS}; }}
 QMenu {{ background: {PANEL}; border: 1px solid {RULE}; padding: 4px; }}
 QMenu::item {{ padding: 7px 14px; }}
 QMenu::item:selected {{ background: {SELECTION}; }}

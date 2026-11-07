@@ -6,10 +6,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
-from PySide6.QtCore import QDate, QSignalBlocker, Qt, QTimer
+from PySide6.QtCore import QDate, QSignalBlocker, QSize, Qt, QTimer
 from PySide6.QtGui import QBrush, QColor, QFontDatabase
 from PySide6.QtWidgets import (
-    QButtonGroup, QCheckBox, QComboBox, QDateEdit, QDialog, QFileDialog, QGridLayout,
+    QBoxLayout, QButtonGroup, QCheckBox, QComboBox, QDateEdit, QDialog, QFileDialog, QGridLayout,
     QHBoxLayout, QHeaderView, QLineEdit, QMenu, QMessageBox, QProgressBar, QSlider,
     QSplitter, QStackedWidget, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
@@ -17,19 +17,19 @@ from PySide6.QtWidgets import (
 from apps.backend.rules.engine import LEVELS, fuera_de_horario, madrid
 from apps.backend.tools import db
 from apps.desktop.assistant import available_model, context_for, local_answer, openai_answer
-from apps.desktop.brand_widgets import Mark
+from apps.desktop.brand_widgets import Mark, navigation_icon
 from apps.desktop.case_data import SECTION_NAMES, case_sections, demo_process, fraction, pretty, soc_status
 from apps.desktop.demo import DEMO_ALERT, archive, for_alert
 from apps.desktop.operations import Operations
 from apps.desktop.reports import imported_summary, read_report
 from apps.desktop.review import CLASSIFICATIONS, PLAYBOOKS, VERDICTS, investigate, replay_demo
-from apps.desktop.widgets import ACCENT, WARNING, Article, button, label, set_primary, text_area
+from apps.desktop.widgets import POSITIVE, WARNING, Article, button, label, set_primary, text_area
 
 PAGE_SIZE = 50
 SEVERITY = {
-    "critical": ("Crítica", "#ff8f9b"), "high": ("Alta", "#ffad82"),
-    "medium": ("Media", "#f3cf80"), "low": ("Baja", "#9bda9a"),
-    "informational": ("Info", "#a9b8cd"),
+    "critical": ("Crítica", "#9d302d"), "high": ("Alta", "#92412a"),
+    "medium": ("Media", "#78551f"), "low": ("Baja", "#35614d"),
+    "informational": ("Info", "#536272"),
 }
 
 
@@ -42,7 +42,6 @@ def table(headers: list[str]) -> QTableWidget:
     widget.setHorizontalHeaderLabels(headers)
     widget.verticalHeader().hide()
     widget.verticalHeader().setDefaultSectionSize(41)
-    widget.setAlternatingRowColors(True)
     widget.setShowGrid(False)
     widget.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
     widget.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -86,14 +85,15 @@ class Workbench(QWidget):
         self._rail()
 
         body = QWidget()
+        body.setObjectName("mainCanvas")
         layout = QVBoxLayout(body)
         layout.setContentsMargins(20, 14, 18, 16)
         self.root.addWidget(body, 1)
         masthead = QWidget()
         masthead.setObjectName("workspaceHeader")
         top = QHBoxLayout(masthead)
-        top.setContentsMargins(0, 0, 0, 9)
-        brand = label("Demo del hackathon" if self.demo else "Centro de operaciones", "muted")
+        top.setContentsMargins(12, 5, 7, 5)
+        brand = label("Entorno de práctica" if self.demo else "SOC de Tarvia", "muted")
         brand.setWordWrap(False)
         top.addWidget(brand)
         top.addStretch()
@@ -146,37 +146,78 @@ class Workbench(QWidget):
     def _update_soc(self):
         state = soc_status()
         self.soc.setText(state)
-        self.soc.setStyleSheet("color: " + (WARNING if state == "SOC cerrado" else ACCENT))
+        self.soc.setStyleSheet("color: " + (WARNING if state == "SOC cerrado" else POSITIVE))
 
     def _remote_model(self):
         return "" if self.demo else available_model()
 
     def _rail(self):
-        rail = QWidget()
-        rail.setObjectName("rail")
-        rail.setFixedWidth(150)
-        layout = QVBoxLayout(rail)
-        layout.setContentsMargins(12, 18, 12, 12)
-        identity = QHBoxLayout()
-        identity.addWidget(Mark(26, icon=True))
-        identity.addWidget(label("Vigía", "railBrand"), 1)
-        layout.addLayout(identity)
-        layout.addWidget(label("SOC de Tarvia", "railCaption"))
-        layout.addSpacing(20)
+        self.rail = QWidget()
+        self.rail.setObjectName("rail")
+        layout = QVBoxLayout(self.rail)
+        layout.setContentsMargins(8, 14, 8, 12)
+        layout.setSpacing(5)
+        self.rail_identity = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        self.rail_identity.setSpacing(5)
+        self.rail_logo = Mark(116)
+        self.rail_eye = Mark(24, icon=True)
+        for mark in (self.rail_logo, self.rail_eye):
+            self.rail_identity.addWidget(mark, alignment=Qt.AlignmentFlag.AlignHCenter)
+        self.menu_toggle = button("", self._toggle_menu)
+        self.menu_toggle.setObjectName("menuToggle")
+        self.menu_toggle.setFixedSize(34, 34)
+        self.menu_toggle.setIcon(navigation_icon("menu"))
+        self.menu_toggle.setIconSize(QSize(18, 18))
+        self.rail_identity.addWidget(self.menu_toggle, alignment=Qt.AlignmentFlag.AlignHCenter)
+        layout.addLayout(self.rail_identity)
+        layout.addSpacing(16)
         self.nav = QButtonGroup(self)
-        for index, title in enumerate(("Alertas", "Estadísticas", "Informe diario", "Tickets", "Historial", "Playbooks")):
-            control = button(title, lambda _checked=False, idx=index: self._navigate(idx))
-            control.setObjectName("navItem")
+        self.rail_controls = {}
+        destinations = (
+            ("Inicio", "alerts"), ("Estadísticas", "statistics"), ("Informe diario", "report"),
+            ("Tickets", "tickets"), ("Historial", "history"), ("Playbooks", "guides"),
+        )
+        for index, (title, icon) in enumerate(destinations):
+            control = self._rail_button(title, icon, lambda _checked=False, idx=index: self._navigate(idx))
             control.setCheckable(True)
             control.setChecked(index == 0)
             self.nav.addButton(control, index)
             self.operations.append(control)
             layout.addWidget(control)
         layout.addStretch()
-        layout.addWidget(button("Avisos", self._notifications, tip="Notificaciones de la cola"))
-        self.profile = button("Perfil ▾", self._profile)
+        layout.addWidget(self._rail_button("Avisos", "notices", self._notifications))
+        self.profile = self._rail_button("Perfil", "profile", self._profile)
         layout.addWidget(self.profile)
-        self.root.addWidget(rail)
+        self.root.addWidget(self.rail)
+        self._set_menu_expanded(self.window.settings.value("menu_expanded", True, type=bool))
+
+    def _rail_button(self, title, icon, callback):
+        control = button(title, callback, tip=title)
+        control.setObjectName("navItem")
+        control.setAccessibleName(title)
+        control.setIcon(navigation_icon(icon))
+        control.setIconSize(QSize(18, 18))
+        self.rail_controls[control] = title
+        return control
+
+    def _toggle_menu(self):
+        self._set_menu_expanded(not self.menu_expanded)
+        self.window.settings.setValue("menu_expanded", self.menu_expanded)
+
+    def _set_menu_expanded(self, expanded):
+        self.menu_expanded = expanded
+        self.rail.setFixedWidth(178 if expanded else 57)
+        self.rail_logo.setVisible(expanded)
+        self.rail_eye.setVisible(not expanded)
+        self.rail_identity.setDirection(QBoxLayout.Direction.LeftToRight if expanded else QBoxLayout.Direction.TopToBottom)
+        action = "Plegar menú" if expanded else "Desplegar menú"
+        self.menu_toggle.setAccessibleName(action)
+        self.menu_toggle.setToolTip(action)
+        for control, title in self.rail_controls.items():
+            control.setText(title if expanded else "")
+            control.setProperty("compact", not expanded)
+            control.style().unpolish(control)
+            control.style().polish(control)
 
     def _navigate(self, index: int):
         self.nav.button(index).setChecked(True)
@@ -214,14 +255,14 @@ class Workbench(QWidget):
         motion.setChecked(self.window.reduced_motion())
         motion.toggled.connect(lambda value: self.window.settings.setValue("reduced_motion", value))
         layout.addWidget(motion)
-        layout.addWidget(label("Modo demo · expedientes archivados" if self.demo else
+        layout.addWidget(label("Entorno de práctica · expedientes archivados" if self.demo else
                                f"Modelo de OpenAI: {self._remote_model() or 'sin configurar'}", "muted"))
         layout.addWidget(button("Cerrar", dialog.accept))
         dialog.exec()
 
     def _manual(self):
         QMessageBox.information(self, "Manual de Vigía",
-            "Alertas: busca o filtra alertas y abre su detalle. Una propuesta que supera la segunda "
+            "Inicio: busca o filtra alertas y abre su detalle. Una propuesta que supera la segunda "
             "pasada puede aceptarse. Si la corriges, elige el veredicto y Vigía registra tu decisión.\n\n"
             "Estadísticas: consulta severidades, fuentes y decisiones locales.\n\n"
             "Informe diario: elige una fecha, importa un archivo JSON o JSONL de alertas y reproduce "
@@ -444,7 +485,7 @@ class Workbench(QWidget):
             if identifier == selected:
                 next_row = row
             verdict, color, _ = VERDICTS[self._verdict(item)]
-            level, level_color = SEVERITY.get(analysis.get("severity", alert["severity"]), ("Info", "#a9b8cd"))
+            level, level_color = SEVERITY.get(analysis.get("severity", alert["severity"]), ("Info", "#536272"))
             state = {"accepted": "Validada", "corrected": "Corregida"}.get(item.get("decision"))
             state = state or ("Por decidir" if self._can_accept(item) else
                               "Sin consenso" if analysis.get("proposal") else "Pendiente")
@@ -636,7 +677,7 @@ class Workbench(QWidget):
 
         footer = QHBoxLayout()
         if self.demo:
-            remote = button("Reproducir análisis de la demo", primary=True,
+            remote = button("Cargar análisis de referencia", primary=True,
                             tip="Abre la propuesta y el contraste del expediente archivado")
             remote.setVisible(bool(ticket))
         else:
@@ -673,7 +714,7 @@ class Workbench(QWidget):
             event_ids = list(alert["related_events"])
             if analysis:
                 if analysis.get("origin") == "demo":
-                    feedback.setText("Reproducción de la demo · propuesta y contraste archivados")
+                    feedback.setText("Análisis de referencia · propuesta y contraste archivados")
                 elif analysis.get("review_error") or analysis.get("proposal_error"):
                     feedback.setText("Análisis pendiente de revisión")
                 elif self._can_accept(item):
@@ -718,7 +759,7 @@ class Workbench(QWidget):
             if archived := demo_process(ticket, closed):
                 sections.append(("Expediente de referencia", "\n".join(archived).strip()))
             if ticket:
-                sources.extend(["Evidencias y hallazgos citados en la demo", pretty(ticket.get("evidence", []))])
+                sources.extend(["Evidencias y hallazgos del expediente archivado", pretty(ticket.get("evidence", []))])
                 event_ids.extend(event["event_id"] for event in ticket.get("evidence", []))
             event_ids.extend(point["event_id"] for point in incident.get("timeline", []))
             detail.show_sections(sections)

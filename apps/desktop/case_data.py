@@ -20,20 +20,20 @@ def case_sections(alert: dict, analysis: dict, history: list[dict]) -> dict:
         "Contexto recuperado en Vigía", pretty(analysis.get("context", {})),
     ]
     if demo:
-        entities.extend(["Entidades y servicios del ticket de la demo", pretty(demo.get("affected", {})),
+        entities.extend(["Entidades y servicios del ticket archivado", pretty(demo.get("affected", {})),
                          "Enriquecimiento", pretty(demo.get("enrichment", [])),
                          "Alertas vinculadas", "\n".join(demo["alert_ids"]),
                          "Técnicas MITRE", ", ".join(demo.get("mitre", []))])
     if scope:
-        entities.extend(["Alcance e impacto (N2, demo)", pretty(scope)])
+        entities.extend(["Alcance e impacto (informe N2)", pretty(scope)])
 
     timeline = [
         f"{event.get('timestamp', 'Fecha desconocida')} · {event['event_id']} · {event['source']}"
         for event in sorted(analysis.get("events", []), key=lambda item: item.get("timestamp", ""))
     ]
     if incident:
-        timeline.extend(["", f"Informe N2 de la demo · {incident['incident_id']}",
-                         f"{incident.get('title', '')} · confianza de la demo {incident.get('confidence', 0):.0%}",
+        timeline.extend(["", f"Informe N2 archivado · {incident['incident_id']}",
+                         f"{incident.get('title', '')} · confianza del archivo {incident.get('confidence', 0):.0%}",
                          f"Paciente cero: {incident.get('patient_zero', 'Sin determinar')}",
                          f"Acceso inicial: {incident.get('initial_access', 'Sin determinar')}"])
         timeline.extend(f"{point['timestamp']} · {point['event_id']} · {point.get('mitre', '')}\n{point['description']}"
@@ -49,9 +49,9 @@ def case_sections(alert: dict, analysis: dict, history: list[dict]) -> dict:
     actions = ["Sugerencias de la propuesta", *proposal.get("actions", []),
                "", "Sugerencias del contraste", *challenge.get("actions", [])]
     if demo:
-        actions.extend(["", "Acciones propuestas en la demo", pretty(demo.get("recommended_actions", [])),
+        actions.extend(["", "Acciones propuestas en el expediente de referencia", pretty(demo.get("recommended_actions", [])),
                         "Escalado", pretty(demo.get("escalation", {})),
-                        "Ejecuciones registradas en la demo", pretty(demo.get("executed_actions", []))])
+                        "Ejecuciones registradas en el expediente de referencia", pretty(demo.get("executed_actions", []))])
     if incident:
         actions.extend(["", "Plan N2 de contención", pretty(incident.get("containment_plan", [])),
                         "Erradicación y recuperación", "\n".join(incident.get("eradication_and_recovery", []))])
@@ -63,7 +63,7 @@ def case_sections(alert: dict, analysis: dict, history: list[dict]) -> dict:
         ) for entry in history
     ]
     if closed:
-        activity.extend(["", "Descarte de referencia en la demo", pretty(closed)])
+        activity.extend(["", "Descarte de referencia en el expediente de referencia", pretty(closed)])
 
     return {
         "Entidades": "\n\n".join(entities),
@@ -76,32 +76,32 @@ def case_sections(alert: dict, analysis: dict, history: list[dict]) -> dict:
 def demo_process(ticket: dict, closed: dict) -> list[str]:
     if not ticket:
         if closed:
-            return ["", "Referencia de la demo · descarte por regla", closed.get("reason", "")]
+            return ["", "Expediente de referencia · descarte por regla", closed.get("reason", "")]
         return []
     fiscal = ticket.get("fiscal") or {}
     confidence = ticket.get("confidence")
     return [
-        "", f"Referencia de la demo · {ticket['ticket_id']} (agentes simulados)", ticket["title"],
+        "", f"Expediente de referencia · {ticket['ticket_id']} (agentes simulados)", ticket["title"],
         ticket.get("summary", ""), ticket.get("severity_rationale", ""),
-        f"Severidad de la demo: {ticket.get('severity', '')} · "
+        f"Severidad del expediente: {ticket.get('severity', '')} · "
         f"{len(ticket['alert_ids'])} alertas · "
         + ("SOC cerrado al inicio del grupo" if ticket.get("out_of_hours") else "SOC abierto al inicio del grupo"),
-        f"Tiempo de triaje registrado en la demo: {ticket.get('triage_seconds', 0):g} s",
-        f"Resultado de la demo: {ticket.get('verdict', '')}  ·  "
-        + (f"{confidence:.0%} de confianza en la demo" if isinstance(confidence, (int, float)) else "Sin estimación"),
+        f"Tiempo de triaje registrado en el expediente de referencia: {ticket.get('triage_seconds', 0):g} s",
+        f"Resultado del expediente: {ticket.get('verdict', '')}  ·  "
+        + (f"{confidence:.0%} de confianza en el expediente de referencia" if isinstance(confidence, (int, float)) else "Sin estimación"),
         "Manipulación detectada: " + (
             ticket["manipulation_detected"].get("where") or "Sí"
-            if ticket.get("manipulation_detected", {}).get("detected") else "Sin señal registrada en la demo"
+            if ticket.get("manipulation_detected", {}).get("detected") else "Sin señal registrada en el expediente de referencia"
         ),
-        "", "Traza de investigación de la demo",
+        "", "Traza de investigación archivada",
         *[f"{step.get('nombre', 'Resumen')} · {step.get('texto') or pretty(step.get('entrada', {}))}"
           + (f"\nResultado de herramienta: {step['resultado']}" if step.get("resultado") else "")
           for step in ticket.get("trace", [])],
-        "", "Fiscal de la demo", fiscal.get("comment", "Sin contraste en este ticket."),
+        "", "Contraste archivado", fiscal.get("comment", "Sin contraste en este ticket."),
         ("El fiscal coincidió con el veredicto." if fiscal.get("agrees")
          else "El fiscal presentó objeciones.") if fiscal else "",
         f"Veredicto alternativo: {fiscal['alternative_verdict']}" if fiscal.get("alternative_verdict") else "",
-        *fiscal.get("objections", []), "", "Preguntas abiertas de la demo", *display_questions(ticket),
+        *fiscal.get("objections", []), "", "Preguntas abiertas del expediente", *display_questions(ticket),
     ]
 
 

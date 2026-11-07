@@ -14,7 +14,7 @@ class Operations:
         self.history_rows = []
 
     def tickets(self, table_factory):
-        widget, layout = self.work._panel("Tickets", "Casos del índice local y expedientes de referencia de la demo.")
+        widget, layout = self.work._panel("Tickets", "Casos del índice local y expedientes archivados de referencia.")
         self.ticket_table = table_factory(["Ticket", "Origen", "Alerta o grupo", "Estado"])
         self.ticket_table.horizontalHeader().setStretchLastSection(True)
         self.ticket_table.cellDoubleClicked.connect(lambda row, _: self._open_ticket(row))
@@ -27,7 +27,7 @@ class Operations:
             ((f"VIG-{key}", "Local", key, "Decidido" if record["decision"] else "Por revisar"), key)
             for key, record in sorted(self.work.reviews.items(), reverse=True)
         ] + [
-            ((ticket["ticket_id"], "Demo", f"{len(ticket['alert_ids'])} alertas · {ticket['title']}", "Referencia"),
+            ((ticket["ticket_id"], "Archivo", f"{len(ticket['alert_ids'])} alertas · {ticket['title']}", "Referencia"),
              ticket["alert_ids"][0])
             for ticket in archive()["tickets"] if ticket["alert_ids"]
         ]

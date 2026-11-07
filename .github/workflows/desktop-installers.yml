@@ -25,7 +25,7 @@ jobs:
             -e HOME=/tmp -v "$PWD/out:/vigia/out" vigia-desktop-builder sh packaging/linux.sh
           docker run --rm --network none -e QT_QPA_PLATFORM=offscreen -e HOME=/tmp/vigia-profile \
             -v "$PWD/out/installers:/installers:ro" vigia-desktop-builder sh -ec '
-              dpkg -i /installers/Vigia-0.5.0-linux-amd64.deb
+              dpkg -i /installers/Vigia-0.6.0-linux-amd64.deb
               status=0; timeout 5s /usr/bin/vigia || status=$?
               test "$status" -eq 124
               test -f "$HOME/.local/share/Vigia/session.sqlite"
@@ -72,7 +72,7 @@ jobs:
           & $compiler.FullName packaging/windows.iss
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $installPath = Join-Path $env:RUNNER_TEMP "vigia-installed"
-          $setup = Start-Process out/installers/Vigia-0.5.0-windows-x64.exe -ArgumentList @(
+          $setup = Start-Process out/installers/Vigia-0.6.0-windows-x64.exe -ArgumentList @(
             '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$installPath`""
           ) -Wait -PassThru
           if ($setup.ExitCode) { exit $setup.ExitCode }

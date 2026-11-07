@@ -2,7 +2,7 @@
 set -eu
 source_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 data_dir=${XDG_DATA_HOME:-"$HOME/.local/share"}
-install_dir="$data_dir/vigia-desktop/app-0.5.0"
+install_dir="$data_dir/vigia-desktop/app-0.6.0"
 desktop_dir="$data_dir/applications"
 case "$install_dir" in
     /*) ;;
@@ -25,6 +25,6 @@ mv -T "$stage" "$install_dir"
 exec_path=$(printf '%s' "$install_dir/Vigia" | sed 's/[%]/%%/g; s/["`$\\]/\\&/g; s/\\/\\\\/g')
 printf '[Desktop Entry]\nType=Application\nName=Vigía\nExec="%s"\nIcon=%s\nTerminal=false\nCategories=Utility;Security;\n' \
     "$exec_path" "$install_dir/_internal/apps/desktop/brand/vigia_icon_dark.svg" > "$desktop_dir/vigia.desktop"
-printf '[Desktop Entry]\nType=Application\nName=Vigía Demo\nExec="%s" --demo\nIcon=%s\nTerminal=false\nCategories=Utility;Security;\n' \
+printf '[Desktop Entry]\nType=Application\nName=Vigía · Práctica\nExec="%s" --demo\nIcon=%s\nTerminal=false\nCategories=Utility;Security;\n' \
     "$exec_path" "$install_dir/_internal/apps/desktop/brand/vigia_icon_dark.svg" > "$desktop_dir/vigia-demo.desktop"
 printf 'Vigía instalado en %s\n' "$install_dir"

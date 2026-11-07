@@ -13,12 +13,12 @@ from apps.desktop.assistant import available_model, openai_message
 from apps.desktop.demo import RESOURCES, display_questions
 
 VERDICTS = {
-    "true_positive": ("Verdadero positivo", "#ff8793", "#35222c"),
-    "benign_true_positive": ("Positivo benigno", "#b7d7a0", "#28362b"),
-    "false_positive": ("Falso positivo", "#83d99e", "#1b332d"),
-    "false_negative": ("Falso negativo", "#ffbd77", "#382c22"),
-    "true_negative": ("Verdadero negativo", "#79d6d7", "#1b333c"),
-    "needs_more_info": ("Sin veredicto", "#a9b8ca", "#253142"),
+    "true_positive": ("Verdadero positivo", "#9d302d", "#f8e9e8"),
+    "benign_true_positive": ("Positivo benigno", "#385e37", "#eaf0e7"),
+    "false_positive": ("Falso positivo", "#2b634d", "#e7f1eb"),
+    "false_negative": ("Falso negativo", "#79511f", "#f8eee0"),
+    "true_negative": ("Verdadero negativo", "#205f70", "#e5f0f2"),
+    "needs_more_info": ("Sin veredicto", "#536272", "#eef1f5"),
 }
 CLASSIFICATIONS = tuple(k for k in VERDICTS if k != "needs_more_info")
 MODEL_VERDICTS = {"true_positive", "false_positive", "needs_more_info"}
@@ -242,7 +242,7 @@ def investigate(alert: dict, remote: bool = False, guidance: dict | None = None)
 def replay_demo(alert: dict, ticket: dict) -> dict:
     """Reconstruye el expediente archivado dentro de la sesión de demostración."""
     if alert["alert_id"] not in ticket["alert_ids"]:
-        raise ValueError("El expediente de la demo no corresponde a esta alerta.")
+        raise ValueError("El expediente de referencia no corresponde a esta alerta.")
     started = perf_counter()
     references = list(dict.fromkeys(item["event_id"] for item in ticket["evidence"]))
     with db.read_session():
@@ -274,7 +274,7 @@ def replay_demo(alert: dict, ticket: dict) -> dict:
     checked = fiscal.get("agrees") and references and set(references) <= recovered and verdict in CLASSIFICATIONS
     elapsed = round((perf_counter() - started) * 1000)
     analysis.update({
-        "origin": "demo", "provider": "la demo archivada", "proposal": proposal, "challenge": challenge,
+        "origin": "demo", "provider": "el expediente archivado", "proposal": proposal, "challenge": challenge,
         "verdict": verdict if checked else "needs_more_info", "confidence": confidence if checked else None,
         "timing": {"evidence_ms": elapsed},
     })

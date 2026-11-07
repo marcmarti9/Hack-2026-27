@@ -29,10 +29,12 @@ def local_answer(alert: dict | None, events: list[dict]) -> str:
         lines += [f"{alert['alert_id']} · {alert['rule_name']}",
                   f"Prioridad preliminar: {priority.level} · {priority.sla}",
                   priority.rationale, alert["description"]]
+    fields = (("timestamp", "Fecha"), ("hostname", "Equipo"), ("user", "Usuario"),
+              ("action", "Acción"), ("status", "Estado"), ("event_type", "Tipo"),
+              ("eventName", "Evento"), ("detail", "Detalle"))
     for event in events:
-        fields = {k: event[k] for k in ("timestamp", "hostname", "user", "action", "status",
-                                        "event_type", "eventName", "detail") if k in event}
-        lines.append(f"{event['event_id']} ({event['source']}): {json.dumps(fields, ensure_ascii=False)}")
+        lines.extend(["", f"{event['event_id']} ({event['source']})"])
+        lines.extend(f"{label}: {event[key]}" for key, label in fields if key in event)
     if not events:
         lines.append("No se recuperaron eventos para la consulta. Selecciona una alerta o indica un ID de evento.")
     return "\n".join(lines)

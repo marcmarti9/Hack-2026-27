@@ -68,6 +68,18 @@ def check(app, window, home, password, output):
     window.resize(1440, 850)
     app.processEvents()
     assert work.chat_panel.isVisible() and work.chat_toggle.isChecked()
+    assert work.rail_logo.isVisible() and not work.rail_eye.isVisible()
+    work.menu_toggle.click()
+    app.processEvents()
+    assert work.rail.width() == 57 and work.rail_eye.isVisible() and not work.rail_logo.isVisible()
+    assert work.nav.button(0).accessibleName() == "Inicio" and not work.nav.button(0).text()
+    assert window.settings.value("menu_expanded", type=bool) is False
+    if output:
+        window.grab().save(str(output.with_name("vigia-menu-plegado.png")))
+    work.nav.button(0).click()
+    assert work.pages.currentIndex() == 0
+    work.menu_toggle.click()
+    assert work.rail_logo.isVisible() and work.nav.button(0).text() == "Inicio"
     assert work.dataset_total == 11061 and work.schedule == (11061, 3503)
     data = archive()
     assert len(data["tickets"]) == 17 and len(data["incidents"]) == 13 and len(data["closed"]) == 10974
@@ -122,7 +134,7 @@ def check(app, window, home, password, output):
                 text = dialog.findChild(QTextBrowser, "reviewProcess").toPlainText()
                 assert "Confianza estimada por test-model: 77%" in text
                 assert "Contraste simulado." in text and "EDR-0123412" in text
-                assert "Fiscal de la demo" in text and "TKT-20261009-011790" in text
+                assert "Contraste archivado" in text and "TKT-20261009-011790" in text
                 assert "¿Se confirmó el acceso inicial?" in text and "Total " in text
                 tabs = dialog.findChild(QTabWidget)
                 assert [tabs.tabText(i) for i in range(tabs.count())] == [
@@ -298,11 +310,11 @@ def check_demo(app, window, normal_profile, output):
             assert "Analizar y contrastar con OpenAI" not in controls
             assert window.workbench.model.findData(True) == -1
             assert not controls["Aceptar"].isEnabled()
-            controls["Reproducir análisis de la demo"].click()
+            controls["Cargar análisis de referencia"].click()
             wait_for(lambda: window.job is None, "reproducción del expediente")
             text = dialog.findChild(QTextBrowser, "reviewProcess").toPlainText()
             assert "85%" in text and "EDR-0123412" in text
-            assert any("Reproducción de la demo" in node.text() for node in dialog.findChildren(QLabel))
+            assert any("Análisis de referencia" in node.text() for node in dialog.findChildren(QLabel))
             if output:
                 dialog.grab().save(str(output.with_name("vigia-demo-lsass.png")))
             assert controls["Aceptar"].isEnabled()
@@ -344,7 +356,7 @@ def main() -> None:
     app.quit()
     print("Vigía: sesión, ojo durante carga, 11.061 alertas, búsqueda, fecha y veredicto, chat local, "
           "contraste adversarial simulado, decisiones persistentes, estadísticas, reproducción diaria "
-          "y modo hackathon sin OpenAI.")
+          "y modo de práctica sin OpenAI.")
 
 
 if __name__ == "__main__":
