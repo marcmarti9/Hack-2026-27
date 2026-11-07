@@ -82,6 +82,7 @@ QTableWidget {{ background: {PANEL};
     border: 1px solid {RULE}; gridline-color: {RULE}; selection-background-color: {SELECTION};
     selection-color: {INK}; }}
 QTableWidget::item {{ padding: 6px 12px; border-bottom: 1px solid {RULE}; }}
+#queueTable::item {{ padding: 6px 8px; }}
 QLineEdit:focus, QPlainTextEdit:focus, QTextBrowser:focus, QTableWidget:focus,
 QPushButton:focus, QComboBox:focus, QDateEdit:focus, QSpinBox:focus,
 QListWidget:focus {{ border: 1px solid {FOCUS}; }}
@@ -103,6 +104,7 @@ QCheckBox::indicator:checked {{ background: {ACCENT}; border: 2px solid {PANEL};
 QCheckBox::indicator:hover, QCheckBox::indicator:focus {{ border-color: {FOCUS}; }}
 QHeaderView::section {{ background: {PANEL}; color: {MUTED}; padding: 10px 12px;
     border: 0; border-bottom: 1px solid {RULE}; font-weight: 600; }}
+#queueTable QHeaderView::section {{ padding-left: 8px; padding-right: 8px; }}
 QSplitter::handle {{ background: {RULE}; width: 4px; }}
 QSplitter::handle:hover {{ background: {FOCUS}; }}
 QMenu {{ background: {PANEL}; border: 1px solid {RULE}; padding: 4px; }}

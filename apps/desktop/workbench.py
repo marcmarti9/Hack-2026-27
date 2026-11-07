@@ -386,14 +386,16 @@ class Workbench(QWidget):
         layout.addSpacing(7)
 
         self.table = table(["Hora UTC", "Alerta", "Severidad", "Estado", "Veredicto", "Analista", "Detalle"])
+        self.table.setObjectName("queueTable")
         self.table.setAccessibleName("Cola de alertas")
         self.table.verticalHeader().setDefaultSectionSize(50)
         self.table.setHorizontalScrollMode(QTableWidget.ScrollMode.ScrollPerPixel)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(6, 134)
+        self.table.setColumnWidth(6, 126)
         self.table.horizontalHeaderItem(6).setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        header.geometriesChanged.connect(self._fit_alert_table)
         self.table.currentCellChanged.connect(self._select)
         self.table.cellActivated.connect(lambda row, _: self._detail(self.rows[row]))
 
@@ -441,6 +443,12 @@ class Workbench(QWidget):
         self.operations += [self.search, self.prepare, self.day_filter, self.severity, self.verdict,
                             self.sort, self.reset_filters]
         return widget
+
+    def _fit_alert_table(self):
+        # En una mesa estrecha la identificación y el detalle tienen prioridad.
+        compact = self.table.viewport().width() < 840
+        if self.table.isColumnHidden(5) != compact:
+            self.table.setColumnHidden(5, compact)
 
     def _reset_filters(self):
         controls = (self.query, self.day_filter, self.severity, self.verdict, self.sort)
@@ -600,7 +608,10 @@ class Workbench(QWidget):
     def _selection_actions(self, busy):
         identifier = self.selected["alert_id"] if self.selected else ""
         item = self.reviews.get(identifier, {})
-        self.selected_alert.setText(f"Alerta seleccionada · {identifier}" if identifier else "Sin alerta seleccionada")
+        selection = f"Alerta seleccionada · {identifier}" if identifier else "Sin alerta seleccionada"
+        if item.get("reviewer"):
+            selection += f" · {item['reviewer']}"
+        self.selected_alert.setText(selection)
         self.selected_rule.setText(self.selected["rule_name"] if self.selected else "")
         self.selected_rule.setVisible(bool(identifier))
         self.queue_accept.setEnabled(not busy and bool(identifier) and self._can_accept(item))
@@ -1072,8 +1083,9 @@ class Workbench(QWidget):
             self.stats_loaded = True
             rows, analyzed, demo = result
             self.stats_schedule.setText(
-                f"Índice {fraction(*self.schedule)}  ·  "
-                f"Propuestas OpenAI {fraction(*analyzed)}  ·  Agente simulado {fraction(*demo)}"
+                f"Índice: {fraction(*self.schedule)}\n"
+                f"Propuestas OpenAI: {fraction(*analyzed)}\n"
+                f"Agente simulado: {fraction(*demo)}"
             )
             by_level, by_source = Counter(), Counter()
             for row in rows:
@@ -1143,6 +1155,7 @@ class Workbench(QWidget):
         timeline_header.addWidget(label("Actividad por hora", "sectionTitle"))
         timeline_header.addStretch()
         self.report_peak = label("", "muted")
+        self.report_peak.setWordWrap(False)
         timeline_header.addWidget(self.report_peak)
         timeline.addLayout(timeline_header)
 
@@ -1295,7 +1308,12 @@ class Workbench(QWidget):
 
     def _update_report_columns(self):
         peak = max(self.hour_totals.values(), default=0)
-        self.report_peak.setText(f"Máximo por hora: {number(peak)} · UTC")
+        if peak:
+            first_peak = min(hour for hour, count in self.hour_totals.items() if count == peak)
+            unit = "alerta" if peak == 1 else "alertas"
+            self.report_peak.setText(f"Pico: {number(peak)} {unit} · {first_peak:02d}:00 UTC")
+        else:
+            self.report_peak.clear()
         for hour, column in enumerate(self.report_columns):
             count = self.hour_totals.get(hour, 0)
             column.setMaximum(max(peak, 1))
