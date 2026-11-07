@@ -82,6 +82,18 @@ def main():
                            "entities": {"files": [{"sha256": "6f395de68a4888c4f7ac579e3a8a844f4b1dd89db7b97274ca346af0ac67b466"}]}},
                           triage=True)
     assert sandbox["verified_finding"]["sandbox_refs"] and sandbox["routing"]["recommendation"] == "escalate"
+    for key, evidence in (
+        ("ALR-20261007-011785", "SIGN-0083865"),
+        ("ALR-20261011-011877", "FW-0026536"),
+        ("ALR-20261006-011826", "EDR-0123424"),
+        ("ALR-20261018-005422", "ECA-0020447"),
+    ):
+        escalation = investigate(db.get_alert(key), triage=True, mode="guardia")
+        assert escalation["verdict"] == "true_positive" and escalation["routing"]["recommendation"] == "escalate"
+        assert evidence in escalation["verified_finding"]["citations"] and not escalation["routing"]["automatic"]
+    approved_group = investigate(db.get_alert("ALR-20261023-011915"), triage=True, mode="guardia")
+    assert "CHG-2026-1078" in approved_group["verified_finding"]["summary"]
+    assert not approved_group["routing"]["automatic"]
 
     web = db.get_alert("ALR-20261005-000172")
     ordinary = {**wrong, "verdict": "true_positive", "confidence": 93, "citations": ["WAF-0001840"]}

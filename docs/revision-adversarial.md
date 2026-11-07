@@ -76,3 +76,12 @@ La primera pasada completa del motor local investigó 11.061 alertas en 559,59 s
 La guardia ofrece un relevo con los escalados y el plazo histórico de cada alerta. Puede procesar el índice o vigilar una carpeta donde se depositan lotes JSONL completos. La respuesta oficial se demuestra con un solo recorrido, aislamiento de un puesto con evidencia LSASS. Exige autorización y contraseña de N2 de práctica, registra el efecto en el simulador y bloquea repeticiones dentro del perfil. No se acreditan otros tipos de contención, N2 generado completo ni funcionamiento de guardia con el equipo apagado.
 
 Los modelos Luna y Sol se probaron con transporte simulado. La latencia real, el uso de créditos y la calidad en las entradas inéditas del jurado quedan para el ensayo final. [Prueba de triaje](../scripts/check_triage.py) · [Prueba de defensa](../scripts/check_defense.py) · [Prueba del simulador](../scripts/check_sim_response.py)
+
+
+## Evaluación a ciegas y tercer ciclo
+
+Un revisor etiquetó 15 alertas de ocho runbooks de la muestra de desarrollo antes de leer las salidas de Vigía. Eligió extremos de severidad por familia y excluyó los IDs usados en el primer ensayo. Usó los registros, la política y los runbooks, sin consultar los expedientes archivados. Conservamos sus etiquetas como referencia de esta muestra pequeña. [Etiquetas y evidencias](../eval/etiquetas.csv)
+
+Vigía 0.8.0 se abstuvo en 14 casos. El único veredicto emitido coincidió con el revisor y correspondía a un cierre de SCCM respaldado por un cambio aprobado. De los cinco casos que el revisor mandaría escalar, Vigía solo coincidió en uno. También escaló el alta en Backup Operators, cuyo grupo y ventana coincidían con un cambio que no identifica a la cuenta autorizada. El muestreo intencional y un solo revisor limitan cualquier estimación de precisión.
+
+En 0.8.1 las pruebas de regresión cubren cuatro escalados que faltaban. El phishing vincula un POST con un inicio de sesión desde la misma IP. La VPN vincula una sesión del proveedor fuera de contrato con tráfico RDP a WMS. El minero vincula firewall, proceso EDR, sandbox y persistencia. Los intentos automatizados contra el login de comercio se clasifican como intento observado y conservan la prioridad de un servicio crítico. En Backup Operators se muestra la coincidencia con el cambio y la identidad que falta por confirmar. La revisión de estos casos tras ajustar las reglas mide regresión. La comparación a ciegas corresponde a 0.8.0.

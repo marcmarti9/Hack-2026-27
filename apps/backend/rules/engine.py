@@ -71,7 +71,8 @@ def severidad(alerta: dict, verdict: str, *, verified_impact: str = "",
     if verdict in {"benign_true_positive", "false_positive"}:
         return Severity("informational", "Actividad autorizada o falsa alarma.", SLA["informational"])
     entities = alerta.get("entities", {})
-    criticality, affected = _criticality(entities)
+    criticality, affected = ((3, "login de clientes de la tienda (Crítica)") if alerta.get("rule_id") == "UC-WEB-002"
+                            else _criticality(entities))
     initial = alerta["severity"]
     base = MATRIX[initial][criticality]
     impact = [verified_impact] if verified_impact else []

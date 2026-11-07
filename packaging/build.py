@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "out" / "packaging"
-VERSION = "0.8.0"
+VERSION = "0.8.1"
 
 
 def main() -> None:

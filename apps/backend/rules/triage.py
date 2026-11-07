@@ -4,6 +4,7 @@ from datetime import datetime, time, timedelta
 import re
 
 from apps.backend.rules.engine import madrid, severidad
+from apps.backend.tools import db
 
 SCCM_CHANGE = "CHG-2026-1031"
 SCCM_SCRIPT = ("$inv = Get-CimInstance Win32_Product | Select Name,Version | ConvertTo-Json | "
@@ -45,6 +46,93 @@ def _same_host(event, hosts):
     return event.get("hostname", "").lower() in hosts
 
 
+def _phishing_session(alert, direct, events):
+    users = {row.get("upn", "") for row in alert["entities"].get("users", [])}
+    domains = set(alert["entities"].get("domains", []))
+    for post in direct:
+        user = str(post.get("user", "")).split("@", 1)[0] + "@tarvia.example"
+        if (post["source"] != "proxy" or post.get("method") != "POST" or post.get("action") != "allowed"
+                or user not in users or post.get("domain") not in domains or not post.get("dst_ip")):
+            continue
+        stamp = madrid(post["timestamp"])
+        for login in events:
+            if (login["source"] == "idp_signins" and login.get("user_upn") == user
+                    and login.get("src_ip") == post["dst_ip"] and login.get("result") == "success"
+                    and login.get("device_compliant") is False
+                    and timedelta(0) <= madrid(login["timestamp"]) - stamp <= timedelta(minutes=5)):
+                return {**_proof("true_positive", [post, login],
+                                 "Tras un POST al sitio señalado por phishing, la misma cuenta inició sesión "
+                                 "desde la IP del sitio con un dispositivo no conforme. La secuencia respalda un "
+                                 "posible robo de sesión. Los logs no contienen la contraseña enviada.",
+                                 actions=("Verificar la sesión y preparar su revocación para N2.",)),
+                        "escalate": ["N2"]}
+    return None
+
+
+def _vendor_access(direct, context):
+    account = next((user for user in context["usuarios"] if user["username"] == "ext.logisoft"
+                    and user["account_type"] == "external"), None)
+    if not account or any(change["id"] == "CHG-2026-1071" for change in context["cambios"]):
+        return None
+    for vpn in direct:
+        if vpn["source"] != "vpn" or vpn.get("user") != account["username"] or vpn.get("action") != "connect":
+            continue
+        stamp = madrid(vpn["timestamp"])
+        if stamp.weekday() < 5 and time(8) <= stamp.time() < time(18):
+            continue
+        target = db.asset("WMS01")
+        if not target:
+            continue
+        for log in direct:
+            if (log["source"] == "firewall" and vpn.get("assigned_ip") and log.get("src_ip") == vpn["assigned_ip"]
+                    and log.get("dst_ip") == target["ip"] and str(log.get("dst_port")) == "3389"
+                    and log.get("action") == "allow"
+                    and timedelta(0) <= madrid(log["timestamp"]) - stamp <= timedelta(minutes=15)):
+                return {**_proof("true_positive", [vpn, log], "El proveedor abrió la VPN y el firewall permitió "
+                                 "RDP hacia WMS01 fuera de la ventana contractual y del cambio aprobado. "
+                                 "La conexión está probada. Sigue por comprobar quién controlaba la cuenta.",
+                                 actions=("Escalar a N2 y Logística. Revisar la sesión del proveedor.",)),
+                        "escalate": ["N2", "Logística"]}
+    return None
+
+
+def _miner(direct, analysis, hosts):
+    suspicious = {entry["indicator"] for entry in analysis["context"]["inteligencia"]
+                  if (entry.get("tip") or {}).get("reputation") == "malicious"
+                  and "xmr" in (entry["tip"].get("malware_family") or "").lower()}
+    for flow in direct:
+        if (flow["source"] != "firewall" or flow.get("dst_ip") not in suspicious
+                or flow.get("action") != "allow" or str(flow.get("dst_port")) != "3333"):
+            continue
+        if not any(asset["ip"] == flow.get("src_ip") for asset in analysis["context"]["activos"]):
+            continue
+        stamp = madrid(flow["timestamp"])
+        for process in analysis["events"]:
+            if (process["source"] != "edr_events" or process.get("event_type") != "process_start"
+                    or not _same_host(process, hosts) or ":3333" not in process.get("command_line", "")
+                    or not process.get("sha256") or abs(madrid(process["timestamp"]) - stamp) > timedelta(minutes=10)):
+                continue
+            report = db.sandbox(process["sha256"])
+            if (not report or report.get("verdict") != "malicious"
+                    or flow["dst_ip"] not in (report.get("network") or {}).get("ips", [])):
+                continue
+            if report not in analysis["context"]["sandbox"]:
+                analysis["context"]["sandbox"].append(report)
+            analysis["trace"].append({"tool": "Sandbox del proceso", "query": process["sha256"],
+                                      "count": 1, "note": "Coincide el destino de red del informe."})
+            persistence = [event for event in analysis["events"] if event["source"] == "edr_events"
+                           and event.get("hostname") == process["hostname"]
+                           and process.get("process_path") and process["process_path"] in
+                           str((event.get("details") or {}).get("persistence", ""))]
+            return {**_proof("true_positive", [flow, process, *persistence],
+                             "EDR registra la ejecución del proceso. El destino permitido del firewall coincide "
+                             "con el pool del informe de sandbox y el TIP." +
+                             (" Otro registro muestra la persistencia del mismo ejecutable." if persistence else ""),
+                             actions=("Preparar investigación de persistencia y escalado a N2.",)),
+                    "sandbox_refs": [report["sha256"]], "escalate": ["N2"]}
+    return None
+
+
 def _sccm_match(alert, direct, context, hosts):
     change = next((row for row in context["cambios"] if row["id"] == SCCM_CHANGE), None)
     if not change or not hosts or not context["activos"]:
@@ -78,6 +166,38 @@ def local_finding(alert, analysis):
     direct = [event for event in analysis["events"] if event["event_id"] in analysis["requested"]]
     hosts = {host["hostname"].lower() for host in alert.get("entities", {}).get("hosts", [])
              if host.get("hostname")}
+    if alert["rule_id"] == "UC-EML-003":
+        if finding := _phishing_session(alert, direct, analysis["events"]):
+            return finding
+    if alert["rule_id"] == "UC-VPN-001":
+        if finding := _vendor_access(direct, analysis["context"]):
+            return finding
+    if alert["rule_id"] == "UC-NET-002":
+        if finding := _miner(direct, analysis, hosts):
+            return finding
+    if alert["rule_id"] == "UC-WEB-002":
+        for ip in alert["entities"].get("ips", []):
+            blocked = [event for event in direct if event["source"] == "ecom_auth" and event.get("src_ip") == ip
+                       and event.get("result") == "failure" and event.get("failure_reason") == "rate_limited"
+                       and event.get("captcha") == "challenge_failed" and event.get("device_fp") == "fp-bot"]
+            if len({event.get("email") for event in blocked if event.get("email")}) >= 3:
+                return _proof("true_positive", blocked, "El comercio registró intentos automatizados contra varias "
+                              "cuentas desde el mismo origen, frenados por CAPTCHA y limitación de frecuencia. "
+                              "Estos registros no prueban una toma de cuenta.",
+                              questions=("¿Hubo accesos aceptados del mismo origen, dispositivo o campaña?",))
+    if alert["rule_id"] == "UC-IDP-008":
+        change = next((row for row in analysis["context"]["cambios"] if row["id"] == "CHG-2026-1078"), None)
+        admins = {user["username"] for user in analysis["context"]["usuarios"] if user["privileged"] == "True"}
+        for event in direct:
+            if (not change or event["source"] != "ad_events" or event.get("src_host") != "JUMP01"
+                    or event.get("subject") not in admins or str(event.get("event_code")) != "4728"
+                    or (event.get("details") or {}).get("group") != "Backup Operators"):
+                continue
+            stamp = madrid(event["timestamp"]).replace(tzinfo=None)
+            if datetime.fromisoformat(change["inicio"]) <= stamp <= datetime.fromisoformat(change["fin"]):
+                return _proof("needs_more_info", [event], "El alta desde JUMP01 coincide con el grupo y la ventana "
+                              "del cambio CHG-2026-1078. El cambio no identifica al usuario añadido.",
+                              questions=("¿Es el usuario añadido el operador incluido en la autorización?",))
     if alert["rule_id"] == "UC-EDR-002":
         event = _sccm_match(alert, direct, analysis["context"], hosts)
         if event:

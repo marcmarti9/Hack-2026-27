@@ -235,8 +235,22 @@ def _collect(alert: dict, *, correlate: bool = True) -> dict:
                     if (value := item.get(key) if key else item))
     keys = list(dict.fromkeys(keys))
     candidates, linked = db.related_activity(keys[:16], alert["alert_id"], alert["created_at"]) if correlate else ([], [])
+    pivot = []
+    pivot_checked = False
+    if correlate and alert["rule_id"] == "UC-EML-003":
+        accounts = {row.get("upn", "") for row in entities.get("users", [])}
+        for event in events:
+            username = str(event.get("user", "")).split("@", 1)[0]
+            account = username + "@tarvia.example"
+            if (event["source"] == "proxy" and event.get("method") == "POST"
+                    and account in accounts and event.get("dst_ip") and event.get("action") == "allowed"):
+                pivot_checked = True
+                pivot = [log for log in db.events_for_entity(account, event["timestamp"], horas=1,
+                                                             source="idp_signins", limit=50)
+                         if log.get("user_upn") == account and log.get("src_ip") == event["dst_ip"]][:6]
+                break
     by_id = {event["event_id"]: event for event in events}
-    for event in candidates:
+    for event in [*pivot, *candidates]:
         by_id.setdefault(event["event_id"], event)
     context = {
         "activos": [{key: asset[key] for key in ("hostname", "ip", "type", "criticality", "zone", "business_service", "vulnerabilities")}
@@ -249,9 +263,9 @@ def _collect(alert: dict, *, correlate: bool = True) -> dict:
         "alertas_relacionadas": linked,
     }
     priority = severidad(alert, "needs_more_info")
-    return {
-        "created_at": now(), "events": list(by_id.values()), "requested": related, "context": context,
-        "trace": [
+    trace = []
+    if correlate:
+        trace = [
             {"tool": "Referencias del SIEM", "query": ", ".join(related) or "Sin referencias directas",
              "count": len(events), "note": f"{len(related) - len(events)} referencias sin recuperar."},
             {"tool": "Inventario", "query": "Equipos y usuarios de la alerta",
@@ -263,7 +277,13 @@ def _collect(alert: dict, *, correlate: bool = True) -> dict:
              "count": len(changes), "note": "Candidatos por hora. El cierre exige además identidad, acción y ámbito."},
             {"tool": "Correlación ±24 h", "query": ", ".join(f"{kind} {value}" for kind, value in keys[:16]) or "Sin entidades indexables",
              "count": len(candidates), "note": f"{len(linked)} alertas candidatas. Hasta 24 eventos y 12 alertas, sin inferir causalidad."},
-        ] if correlate else [],
+        ]
+    if pivot_checked:
+        trace.append({"tool": "Pivote de identidad", "query": "Cuenta e IP del POST en el IdP",
+                      "count": len(pivot), "note": "Se consultaron inicios de sesión en ±1 h."})
+    return {
+        "created_at": now(), "events": list(by_id.values()), "requested": related, "context": context,
+        "trace": trace,
         "severity": priority.level, "severity_rationale": priority.rationale, "sla": priority.sla,
         "proposal": None, "challenge": None, "proposal_error": "", "review_error": "",
         "verdict": "needs_more_info", "confidence": None, "provider": "", "timing": {},
@@ -285,9 +305,9 @@ def investigate(alert: dict, remote: bool = False, guidance: dict | None = None,
     started = perf_counter()
     with db.read_session():
         analysis = _collect(alert)
+        finding = local_finding(alert, analysis)
     analysis["timing"]["evidence_ms"] = round((perf_counter() - started) * 1000)
     analysis["guidance"] = {key: item["revision"] for key, item in (guidance or {}).items()}
-    finding = local_finding(alert, analysis)
     if finding:
         analysis["verified_finding"] = finding
     if remote and analysis["events"]:

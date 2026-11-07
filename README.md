@@ -12,9 +12,9 @@ Tarvia es una empresa ficticia. Su SOC necesita investigar alertas y mantener co
 
 | Sistema | Paquete |
 | --- | --- |
-| Linux x86-64 | `Vigia-0.8.0-linux-amd64.deb` para Debian/Ubuntu y derivados. Instala con `sudo apt install ./Vigia-0.8.0-linux-amd64.deb`. |
-| Linux x86-64, instalación por usuario | Extrae `Vigia-0.8.0-linux-x86_64.tar.gz` y ejecuta `sh vigia/install.sh`. Crea una entrada en el menú. |
-| Windows x64 | Ejecuta `Vigia-0.8.0-windows-x64.exe`, generado por el workflow de instaladores. |
+| Linux x86-64 | `Vigia-0.8.1-linux-amd64.deb` para Debian/Ubuntu y derivados. Instala con `sudo apt install ./Vigia-0.8.1-linux-amd64.deb`. |
+| Linux x86-64, instalación por usuario | Extrae `Vigia-0.8.1-linux-x86_64.tar.gz` y ejecuta `sh vigia/install.sh`. Crea una entrada en el menú. |
+| Windows x64 | Ejecuta `Vigia-0.8.1-windows-x64.exe`, generado por el workflow de instaladores. |
 | macOS Apple Silicon e Intel | Abre el `.dmg` de tu arquitectura y arrastra Vigía a Aplicaciones. Los builds de desarrollo carecen de firma de distribución y notarización. |
 
 En el primer inicio, crea la cuenta local y selecciona la carpeta raíz del [dataset de Tarvia](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/5d7569232756eaf0a8723b22c428b70e8f67824f). La importación corre en segundo plano y deja un índice reutilizable en el perfil del sistema operativo. El instalador lleva su runtime de Python y Qt. El dataset se descarga por separado.
@@ -34,7 +34,7 @@ El inicio de sesión protege la mesa dentro del perfil del usuario del sistema. 
 - **Cargar lote de defensa** acepta de uno a diez IDs JSON, o registros de alerta completos, uno por línea en un JSONL. Un ID conocido se resuelve desde el índice. Una alerta nueva completa se contrasta contra los datos disponibles y queda excluida del cierre automático. El expediente de lote muestra el resultado de esa ejecución, separado del archivo de práctica.
 - **Preparar 5** trabaja sobre las filas visibles. **Vigilar índice** investiga en segundo plano las alertas pendientes del índice, de mayor a menor prioridad y con persistencia por perfil. Se puede detener desde Inicio. **Vigilar carpeta** recoge JSONL que lleguen mientras la sesión esté abierta. Usa el mismo formato del lote y deposita el archivo completo mediante renombrado. Los resultados de ambos flujos quedan disponibles en **Relevo de guardia**, con escalados, responsables y plazo. El selector **Con analista / Guardia** permite ensayar los dos escenarios en los lotes.
 - Cada expediente visual reúne hechos, consultas con resultados y límites, veredicto, criterio de severidad, contraste, evidencia original, cronología, acciones e historial. Las correcciones humanas guardan el motivo; los autocierres conservan el criterio y el evento que los respaldan.
-- El motor local cubre patrones comprobables de SCCM, LSASS, WAF, password spraying, Vela y tráfico OT autorizado. Si faltan hechos, muestra **Sin veredicto**. Las críticas se escalan en ambos turnos, con destino a N2 de guardia, responsable SOC y CISO y plazo visible. Los avisos se preparan en el expediente.
+- El motor local cubre patrones comprobables de SCCM, LSASS, WAF, intentos de credenciales, phishing con inicio de sesión correlacionado, VPN de proveedor, minería, Vela y tráfico OT autorizado. Si faltan hechos, muestra **Sin veredicto**. Las críticas se escalan en ambos turnos, con destino a N2 de guardia, responsable SOC y CISO y plazo visible. Los avisos se preparan en el expediente.
 - La agrupación actual enumera alertas relacionadas por entidad tipada y tiempo. Los grupos de incidentes y los informes N2 del archivo son referencias históricas.
 
 Para ensayar desde terminal con el índice configurado en `VIGIA_OUT_DIR`, ejecuta `python -m apps.desktop.defense lote.jsonl --mode guardia`. Añade `--remote` únicamente al ensayo que deba usar OpenAI. La salida de ensayo incluye un ticket por alerta, con confianza vacía si no hubo estimación.
