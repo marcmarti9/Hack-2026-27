@@ -24,7 +24,10 @@ Entregar Vigía como aplicación de escritorio para el SOC de Tarvia. La mesa re
 
 ## Registro
 
+La última entrada de cada sesión indica su estado actual.
+
 | Fecha | Sesión | Estado | Trabajo y alcance | Evidencia o siguiente paso |
 | --- | --- | --- | --- | --- |
 | 2026-11-07 | Codex · Escritorio | Entregado | Vigía 0.5.0, cola de alertas, expediente LSASS, modo de práctica y guías. | [Commit 2cd0614](https://github.com/marcmarti9/Hack-2026-27/commit/2cd061429b69b619f0d77009a546e6d5d24e5c0e) y [CI de los cuatro instaladores](https://github.com/marcmarti9/Hack-2026-27/actions/runs/42412663833). |
 | 2026-11-07 | Codex · Producto | En curso | Estilo sin neón, logo original, navegación plegable y limpieza de textos del producto. Archivos en `apps/desktop/` y `packaging/`. | Rama `codex/vigia-desktop`. Verificar acceso, las tres vistas del boceto y la apertura del expediente. |
+| 2026-11-07 | Codex · Producto | Entregado | Vigía 0.6.0 con logo original, menú plegable, paleta clara y textos de producto. Boceto original y protocolo de coordinación en `main`. | [Código 71d1a29](https://github.com/marcmarti9/Hack-2026-27/commit/71d1a29e41c8bab24ead2839e5a14dd0e1f85f8c), [instaladores](https://github.com/marcmarti9/Hack-2026-27/actions/runs/42414893972) y acceso y navegación comprobados en Fedora. La demo y las decisiones de LSASS se probaron en Qt con las 11.061 alertas oficiales. |
