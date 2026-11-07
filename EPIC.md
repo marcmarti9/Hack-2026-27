@@ -10,7 +10,7 @@ Entregar Vigía como aplicación de escritorio para el SOC de Tarvia. La mesa re
 
 | Fuente | Uso |
 | --- | --- |
-| [Rama de escritorio](https://github.com/marcmarti9/Hack-2026-27/tree/codex/vigia-desktop) y [PR #2](https://github.com/marcmarti9/Hack-2026-27/pull/2) | Aplicación Qt e instaladores para Linux, Windows y macOS. |
+| [Aplicación de escritorio](apps/desktop), [README](README.md) y [PR #2](https://github.com/marcmarti9/Hack-2026-27/pull/2) | Aplicación Qt e instaladores para Linux, Windows y macOS. |
 | [PR #1](https://github.com/marcmarti9/Hack-2026-27/pull/1) y el ZIP en `main` | Prototipo previo y contexto técnico del equipo. |
 | [Repositorio de Deloitte](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/5d7569232756eaf0a8723b22c428b70e8f67824f) | Dataset, política del SOC y diez runbooks oficiales. |
 | [Boceto original de escritorio](docs/diseno-escritorio.pdf), guías y archivos de diseño en `main` | Referencias para triaje, puntuación y copias de seguridad. El estado de cada función se comprueba en el código y sus pruebas. |
@@ -32,3 +32,4 @@ La última entrada de cada sesión indica su estado actual.
 | 2026-11-07 | Codex · Producto | En curso | Estilo sin neón, logo original, navegación plegable y limpieza de textos del producto. Archivos en `apps/desktop/` y `packaging/`. | Rama `codex/vigia-desktop`. Verificar acceso, las tres vistas del boceto y la apertura del expediente. |
 | 2026-11-07 | Codex · Producto | Entregado | Vigía 0.6.0 con logo original, menú plegable, paleta clara y textos de producto. Boceto original y protocolo de coordinación en `main`. | [Código 71d1a29](https://github.com/marcmarti9/Hack-2026-27/commit/71d1a29e41c8bab24ead2839e5a14dd0e1f85f8c), [instaladores](https://github.com/marcmarti9/Hack-2026-27/actions/runs/42414893972) y acceso y navegación comprobados en Fedora. La demo y las decisiones de LSASS se probaron en Qt con las 11.061 alertas oficiales. |
 | 2026-11-07 | Codex · Copias y apariencia | En curso | Gestor de copias, temas claro y oscuro, espaciado y microanimaciones. Cambios en el escritorio y su empaquetado. | Rama `codex/vigia-desktop`. |
+| 2026-11-07 | Codex · Copias y apariencia | Entregado | Vigía 0.7.0 en main con los dos temas, microanimaciones, cola compacta y copias locales, USB y S3. Cinco subagentes trabajaron por vista y un revisor verificó el escritorio integrado. | [PR #2](https://github.com/marcmarti9/Hack-2026-27/pull/2), [instaladores](https://github.com/marcmarti9/Hack-2026-27/actions/runs/42417426562), recorrido Qt con 11.061 alertas, Fedora y recuperación de una copia SQLite. S3 comprobado con un doble de AWS CLI; queda por comprobar contra un bucket real. |
