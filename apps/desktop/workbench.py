@@ -841,7 +841,7 @@ class Workbench(QWidget):
         self.selected_rule.setText(self.selected["rule_name"] if self.selected else "")
         self.selected_rule.setVisible(bool(identifier))
         self.queue_accept.setEnabled(not busy and bool(identifier) and self._can_accept(item))
-        self.queue_correct.setEnabled(not busy and bool(identifier) and not item.get("decision"))
+        self.queue_correct.setEnabled(not busy and bool(identifier) and item.get("decision") in {None, "automatic"})
 
     def _controls(self, busy: bool):
         for control in self.operations:
@@ -880,7 +880,7 @@ class Workbench(QWidget):
             self._save_decision(alert, item["analysis"]["verdict"], "accepted", item["analysis"])
 
     def _correct(self, alert):
-        if self.window.job or self.reviews.get(alert["alert_id"], {}).get("decision"):
+        if self.window.job or self.reviews.get(alert["alert_id"], {}).get("decision") not in {None, "automatic"}:
             return
         dialog = QDialog(self)
         dialog.setWindowTitle("Corregir veredicto")
@@ -1130,6 +1130,8 @@ class Workbench(QWidget):
                     trace.append(f"Contraste: {analysis['review_provider']} · {analysis['review_reason']}")
                 if confidence is not None:
                     trace.append(f"Confianza estimada por {analysis.get('provider') or 'el análisis'}: {confidence}%")
+                elif is_local and (report := analysis.get("report")):
+                    trace.append(f"Evidencia {report['confidence']:.0%} · {report['confidence_basis']}")
                 sections.append(("Tiempos y guías", "\n".join(line for line in trace if line)))
             else:
                 feedback.setText("Cargando evidencias del índice…")
@@ -1179,8 +1181,9 @@ class Workbench(QWidget):
             primary = not can_accept and not item.get("decision")
             set_primary(remote, primary and not remote.isHidden())
             set_primary(local, primary and remote.isHidden())
-            for control in (local, remote, correct):
+            for control in (local, remote):
                 control.setEnabled(not item.get("decision") and self.window.job is None)
+            correct.setEnabled(item.get("decision") in {None, "automatic"} and self.window.job is None)
 
         def analyze(method):
             if inspection or self.window.job or not dialog.isVisible():
@@ -1317,7 +1320,13 @@ class Workbench(QWidget):
                 if inspection:
                     payload = {"alerta": alert, "resultado_lote": defense_result}
                 else:
-                    payload = {"alerta": alert, "revision_local": self.reviews.get(alert_id, {}), "contexto": baseline,
+                    review = self.reviews.get(alert_id, {})
+                    current = review.get("analysis") or baseline
+                    report = dict(current.get("report") or {})
+                    if report and isolation and (action := isolation_status(self.store, alert_id)):
+                        if action["status"] == "executed":
+                            report["executed_actions"] = [action]
+                    payload = {"alerta": alert, "informe": report, "revision_local": review, "contexto": baseline,
                                "historial": self.store.history(alert_id),
                                "demo": {"ticket": ticket, "n2": incident, "descarte": closed}}
                 Path(name).write_text(pretty(payload) + "\n", encoding="utf-8")

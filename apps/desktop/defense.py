@@ -165,35 +165,9 @@ def load_alerts(path: Path) -> list[dict]:
 
 
 def _ticket(alert, analysis):
-    identifier = alert["alert_id"]
-    proposal = analysis["proposal"] or {}
-    challenge = analysis["challenge"] or {}
-    basis = analysis.get("decision_basis") or analysis.get("verified_finding") or {}
-    cited = set(proposal.get("citations", ())) | set(challenge.get("citations", ())) | set(basis.get("citations", ()))
-    confidence = analysis["confidence"]
-    routing = analysis["routing"]
-    if analysis["verdict"] == "needs_more_info":
-        summary = basis.get("summary") or analysis["proposal_error"] or analysis["review_error"] or routing["reason"]
-    else:
-        summary = basis.get("summary") or proposal["summary"]
-    return {
-        "ticket_id": f"VIG-{identifier}", "alert_ids": [identifier], "title": alert["rule_name"],
-        "verdict": analysis["verdict"], "severity": analysis["severity"],
-        "severity_rationale": analysis["severity_rationale"],
-        "confidence": confidence / 100 if confidence is not None else None,
-        "summary": summary,
-        "evidence": [{"event_id": event["event_id"], "source": event["source"]}
-                     for event in analysis["events"] if event["event_id"] in cited],
-        "recommended_actions": [],
-        "action_notes": proposal.get("actions", []),
-        "open_questions": proposal.get("questions", []),
-        "escalation": {"escalate": routing["recommendation"] == "escalate",
-                       "to": ", ".join(routing["recipients"]), "reason": routing["reason"]},
-        "external": alert.get("external", False), "provider": analysis["provider"],
-        "routing": routing, "timing_ms": analysis["timing"]["total_ms"],
-        "consultas": analysis["trace"], "propuesta": proposal, "contraste": challenge,
-        "criterio_verificado": basis,
-    }
+    from apps.desktop.triage_report import build_report
+
+    return analysis.get("report") or build_report(alert, analysis)
 
 
 def main():

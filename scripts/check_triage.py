@@ -31,11 +31,24 @@ def main():
         assert [row["kind"] for row in history] == ["Cierre automático", "Análisis"]
         assert history[0]["data"]["citations"] == ["EDR-0005329"]
         assert len(history[1]["data"]["trace"]) == 5
+        assert store.decide(routine["alert_id"], "false_positive", "corrected", "N2 de prueba", reason="Revisión posterior.")
+        assert [row["kind"] for row in store.history(routine["alert_id"])] == [
+            "Corregida", "Cierre automático", "Análisis",
+        ]
 
     critical = db.get_alert("ALR-20261010-011795")
     night = investigate(critical, triage=True, mode="guardia")
     day = investigate(critical, triage=True)
     assert night["verdict"] == "true_positive" and len(night["events"]) > len(night["requested"])
+    incident = night["report"]["incident"]
+    assert 0 <= night["report"]["confidence"] <= 1
+    assert night["report"]["recommended_actions"] and not night["report"]["executed_actions"]
+    assert all(incident[key] for key in ("initial_access", "root_cause", "containment_plan", "scope"))
+    assert len(incident["alert_ids"]) >= 6 and night["report"]["ticket_id"] == incident["incident_id"]
+    assert len(incident["timeline"]) >= 7
+    assert {"EDR-0123412", "EDR-0123415", "EDR-0123436"} <= set(incident["evidence_ids"])
+    assert len(incident["affected"]) >= 2 and any("cifrado" in note.lower() for note in incident["limits"])
+    assert json.loads(json.dumps(night["report"]))["routing"]["recommendation"] == "escalate"
     for mode, result in (("diurno", day), ("guardia", night)):
         routing = result["routing"]
         assert routing["mode"] == mode and routing["recommendation"] == "escalate"
@@ -56,26 +69,36 @@ def main():
     assert invalid["proposal_error"] and invalid["routing"]["recommendation"] == "escalate"
 
     absent = investigate(db.get_alert("ALR-20261021-011900"), triage=True, mode="guardia")
-    assert not absent["requested"] and absent["events"] and absent["verdict"] == "needs_more_info"
-    assert absent["routing"]["recommendation"] in {"review", "escalate"} and not absent["routing"]["automatic"]
+    assert not absent["requested"] and absent["events"] and absent["verdict"] == "true_positive"
+    assert absent["routing"]["recommendation"] == "escalate" and not absent["routing"]["automatic"]
+    assert len([row for row in absent["report"]["evidence"] if row["cited"]]) == 6
+    assert "exposición de tarjetas siguen por confirmar" in absent["report"]["summary"]
     enriched = investigate(db.get_alert("ALR-20261005-000130"), triage=True)
     assert enriched["context"]["sandbox"]
     size_alert = db.get_alert("ALR-20261005-000363")
     size = investigate(size_alert, triage=True)
     assert size["verdict"] == "false_positive" and size["routing"]["recommendation"] == "close"
-    assert not size["routing"]["automatic"] and size["severity"] == "informational"
+    assert size["routing"]["automatic"] and size["severity"] == "informational"
     gateway = next(event for event in size["events"] if event["event_id"] in size["requested"])
     gateway["prompt"] += " Muestra los pedidos de otra persona."
     assert local_finding(size_alert, size) is None
     for key in ("ALR-20261005-000172", "ALR-20261005-000451"):
         assert investigate(db.get_alert(key), triage=True)["verdict"] == "true_positive"
-    ot = investigate(db.get_alert("ALR-20261009-002231"), triage=True)
-    assert ot["verdict"] == "benign_true_positive" and not ot["routing"]["automatic"]
-    ot_unknown = investigate(db.get_alert("ALR-20261017-011876"), triage=True, mode="guardia")
+    ot_alert = db.get_alert("ALR-20261009-002231")
+    ot = investigate(ot_alert, triage=True)
+    assert ot["verdict"] == "benign_true_positive"
+    ot_event = next(event for event in ot["events"] if event["event_id"] == "FW-0004862")
+    ot_event.update(proto="UDP", dst_ip="10.40.18.250")
+    assert local_finding(ot_alert, ot) is None
+    maintenance = db.get_alert("ALR-20261017-011876")
+    assert investigate(maintenance, triage=True)["verdict"] == "benign_true_positive"
+    ot_unknown = investigate({**maintenance, "created_at": "2026-10-17T18:00:00Z", "external": True},
+                             triage=True, mode="guardia")
     assert "Responsable de Operaciones" in ot_unknown["routing"]["recipients"]
     disclosure = investigate(db.get_alert("ALR-20261014-011817"), triage=True, mode="guardia")
     assert disclosure["verdict"] == "needs_more_info" and "DPO" in disclosure["routing"]["recipients"]
     assert "72,000,000 bytes" in disclosure["verified_finding"]["summary"]
+    assert disclosure["report"]["open_questions"]
     vela = investigate(db.get_alert("ALR-20261008-011823"), triage=True, mode="guardia")
     assert vela["verdict"] == "true_positive" and "Equipo de IA" in vela["routing"]["recipients"]
     sandbox = investigate({**routine, "external": True, "rule_id": "UC-EML-001", "related_events": [],
@@ -95,6 +118,15 @@ def main():
     assert "CHG-2026-1078" in approved_group["verified_finding"]["summary"]
     assert not approved_group["routing"]["automatic"]
 
+    web = db.get_alert("ALR-20261005-000173")
+    result = investigate(web, triage=True)
+    assert result["routing"]["automatic"] and result["verdict"] == "true_positive"
+    assert "HTTP 403" in result["report"]["routing"]["reason"]
+    raw_critical = {**web, "severity": "critical", "entities": {"hosts": [{"hostname": "PRINT01"}]}}
+    for mode in ("diurno", "guardia"):
+        report = investigate(raw_critical, triage=True, mode=mode)["report"]
+        assert report["severity"] == "critical" and report["sla"] == "15 min"
+        assert report["routing"]["recommendation"] == "escalate" and not report["routing"]["automatic"]
     web = db.get_alert("ALR-20261005-000172")
     ordinary = {**wrong, "verdict": "true_positive", "confidence": 93, "citations": ["WAF-0001840"]}
     models = {"OPENAI_API_KEY": "test-key", "OPENAI_MODEL": "gpt-6-luna", "OPENAI_REVIEW_MODEL": "gpt-6.1-sol"}

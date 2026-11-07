@@ -12,6 +12,7 @@ from apps.backend.rules.triage import local_finding, route
 from apps.backend.tools import db
 from apps.desktop.assistant import available_model, openai_message, review_model
 from apps.desktop.demo import RESOURCES, display_questions
+from apps.desktop.triage_report import build_report
 
 VERDICTS = {
     "true_positive": ("Verdadero positivo", "#9d302d", "#f8e9e8"),
@@ -131,7 +132,7 @@ class Reviews:
             """, (alert_id, json.dumps(analysis, ensure_ascii=False, default=str)))
             if update.rowcount:
                 self._record(connection, alert_id, "Análisis", analysis.get("provider") or "Local", analysis)
-                if analysis.get("routing", {}).get("automatic") and analysis["verdict"] in {"benign_true_positive", "false_positive"}:
+                if analysis.get("routing", {}).get("automatic"):
                     actor = "Vigía · política local"
                     connection.execute("""
                         UPDATE reviews SET verdict = ?, decision = 'automatic', reviewer = ?, reviewed_at = ?
@@ -168,7 +169,7 @@ class Reviews:
                 ON CONFLICT(alert_id) DO UPDATE SET verdict = excluded.verdict,
                     decision = excluded.decision, reviewer = excluded.reviewer,
                     reviewed_at = excluded.reviewed_at
-                WHERE reviews.decision IS NULL
+                WHERE reviews.decision IS NULL OR reviews.decision = 'automatic'
             """, (alert_id, verdict, decision, reviewer, now()))
             if update.rowcount:
                 self._record(connection, alert_id, "Corregida", reviewer, {"verdict": verdict, "reason": reason.strip()})
@@ -306,11 +307,18 @@ def investigate(alert: dict, remote: bool = False, guidance: dict | None = None,
     with db.read_session():
         analysis = _collect(alert)
         finding = local_finding(alert, analysis)
+        if finding and (incident := finding.get("incident")):
+            incident["alert_ids"] = list(dict.fromkeys([
+                *db.alerts_citing_events(incident["evidence_ids"]), alert["alert_id"],
+            ]))
     analysis["timing"]["evidence_ms"] = round((perf_counter() - started) * 1000)
     analysis["guidance"] = {key: item["revision"] for key, item in (guidance or {}).items()}
     if finding:
         analysis["verified_finding"] = finding
-    if remote and analysis["events"]:
+    local_closure = bool(triage and finding and not alert.get("external")
+                         and analysis["severity"] != "critical" and alert["severity"] != "critical"
+                         and (finding.get("auto_close") or finding.get("resolved")))
+    if remote and analysis["events"] and not local_closure:
         _analyze(alert, analysis, guidance or {}, finding)
     elif triage:
         analysis["provider"] = "Reglas locales"
@@ -330,7 +338,11 @@ def investigate(alert: dict, remote: bool = False, guidance: dict | None = None,
         analysis["routing"] = route(alert, analysis, mode, finding)
         if alert.get("external"):
             analysis["input_alert"] = alert
+        if finding and finding.get("incident"):
+            analysis["incident"] = finding["incident"]
     analysis["timing"]["total_ms"] = round((perf_counter() - started) * 1000)
+    if "routing" in analysis:
+        analysis["report"] = build_report(alert, analysis)
     return analysis
 
 

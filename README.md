@@ -10,13 +10,13 @@ Tarvia es una empresa ficticia. Su SOC necesita investigar alertas y mantener co
 
 ## Instalar Vigía
 
-[Descargar los instaladores verificados de Vigía 0.8.1](https://github.com/marcmarti9/Hack-2026-27/actions/runs/42424325479)
+[Instaladores de Vigía en GitHub Actions](https://github.com/marcmarti9/Hack-2026-27/actions/workflows/desktop-installers.yml)
 
 | Sistema | Paquete |
 | --- | --- |
-| Linux x86-64 | `Vigia-0.8.1-linux-amd64.deb` para Debian/Ubuntu y derivados. Instala con `sudo apt install ./Vigia-0.8.1-linux-amd64.deb`. |
-| Linux x86-64, instalación por usuario | Extrae `Vigia-0.8.1-linux-x86_64.tar.gz` y ejecuta `sh vigia/install.sh`. Crea una entrada en el menú. |
-| Windows x64 | Ejecuta `Vigia-0.8.1-windows-x64.exe`, generado por el workflow de instaladores. |
+| Linux x86-64 | `Vigia-0.9.0-linux-amd64.deb` para Debian/Ubuntu y derivados. Instala con `sudo apt install ./Vigia-0.9.0-linux-amd64.deb`. |
+| Linux x86-64, instalación por usuario | Extrae `Vigia-0.9.0-linux-x86_64.tar.gz` y ejecuta `sh vigia/install.sh`. Crea una entrada en el menú. |
+| Windows x64 | Ejecuta `Vigia-0.9.0-windows-x64.exe`, generado por el workflow de instaladores. |
 | macOS Apple Silicon e Intel | Abre el `.dmg` de tu arquitectura y arrastra Vigía a Aplicaciones. Los builds de desarrollo carecen de firma de distribución y notarización. |
 
 En el primer inicio, crea la cuenta local y selecciona la carpeta raíz del [dataset de Tarvia](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/5d7569232756eaf0a8723b22c428b70e8f67824f). La importación corre en segundo plano y deja un índice reutilizable en el perfil del sistema operativo. El instalador lleva su runtime de Python y Qt. El dataset se descarga por separado.
@@ -29,19 +29,19 @@ El chat funciona en modo local y admite adjuntos de texto de hasta 16 KB. Para h
 
 **Estadísticas** muestra la proporción de alertas disparadas fuera del horario de Madrid (lunes a viernes, 08:00–20:00) con sus denominadores para el índice, la demo y las propuestas OpenAI locales. **Informe diario** reproduce la jornada por horas UTC, indica el estado del SOC en cada hora y ofrece **Presentar** a pantalla completa. Admite un fichero JSON o JSONL de hasta 5 MB con `alert_id`, `created_at` con zona horaria, `severity` y, opcionalmente, `source_product`.
 
-El inicio de sesión protege la mesa dentro del perfil del usuario del sistema. La cuenta se guarda con una derivación PBKDF2 y sal aleatoria. Quien controla los archivos del perfil también controla el acceso al índice. Esta versión tiene una cuenta local por perfil y carece de aprobación de contenciones desde la interfaz.
+El inicio de sesión protege la mesa dentro del perfil del usuario del sistema. La cuenta se guarda con una derivación PBKDF2 y sal aleatoria. Quien controla los archivos del perfil también controla el acceso al índice. Hay una cuenta local por perfil y una aprobación N2 de práctica para el aislamiento en el simulador.
 
 ### Triaje y defensa
 
 - **Cargar lote de defensa** acepta de uno a diez IDs JSON, o registros de alerta completos, uno por línea en un JSONL. Un ID conocido se resuelve desde el índice. Una alerta nueva completa se contrasta contra los datos disponibles y queda excluida del cierre automático. El expediente de lote muestra el resultado de esa ejecución, separado del archivo de práctica.
 - **Preparar 5** trabaja sobre las filas visibles. **Vigilar índice** investiga en segundo plano las alertas pendientes del índice, de mayor a menor prioridad y con persistencia por perfil. Se puede detener desde Inicio. **Vigilar carpeta** recoge JSONL que lleguen mientras la sesión esté abierta. Usa el mismo formato del lote y deposita el archivo completo mediante renombrado. Los resultados de ambos flujos quedan disponibles en **Relevo de guardia**, con escalados, responsables y plazo. El selector **Con analista / Guardia** permite ensayar los dos escenarios en los lotes.
 - Cada expediente visual reúne hechos, consultas con resultados y límites, veredicto, criterio de severidad, contraste, evidencia original, cronología, acciones e historial. Las correcciones humanas guardan el motivo; los autocierres conservan el criterio y el evento que los respaldan.
-- El motor local cubre patrones comprobables de SCCM, LSASS, WAF, intentos de credenciales, phishing con inicio de sesión correlacionado, VPN de proveedor, minería, Vela y tráfico OT autorizado. Si faltan hechos, muestra **Sin veredicto**. Las críticas se escalan en ambos turnos, con destino a N2 de guardia, responsable SOC y CISO y plazo visible. Los avisos se preparan en el expediente.
-- La agrupación actual enumera alertas relacionadas por entidad tipada y tiempo. Los grupos de incidentes y los informes N2 del archivo son referencias históricas.
+- El motor local verifica patrones de EDR y ransomware, WAF, DNS y red, correo e identidad, AWS, CI/CD, DLP, fraude, Vela y OT. Los cierres rutinarios requieren evidencia de autorización, una detección errónea comprobada o, en casos acotados, prevención verificada. Si faltan hechos, muestra **Sin veredicto**. Las críticas se escalan en ambos turnos a N2 de guardia, responsable SOC y CISO con un plazo de 15 minutos. El expediente prepara el aviso.
+- Las alertas de la cadena de preransomware que citan evidencias compartidas se vinculan con un identificador de incidente estable. Su informe N2 muestra origen probable, fases con citas, alcance, propuestas de contención y preguntas abiertas. Las relaciones por entidad y tiempo aparecen como candidatas.
 
 Para ensayar la presentación, abre **Vigía · Práctica**, selecciona **Guardia** y carga el [lote de ensayo](eval/lote-ensayo.jsonl). Abre el cierre de SCCM para enseñar el cambio y el evento que lo respaldan. Luego abre el caso crítico de LSASS para enseñar los hechos, las dudas y la decisión que queda en manos de N2. **Relevo de guardia** reúne los escalados y plazos guardados. Cuando el jurado entregue sus alertas, carga su archivo como un lote nuevo.
 
-Para ensayar desde terminal con el índice configurado en `VIGIA_OUT_DIR`, ejecuta `python -m apps.desktop.defense lote.jsonl --mode guardia`. Añade `--remote` únicamente al ensayo que deba usar OpenAI. La salida de ensayo incluye un ticket por alerta, con confianza vacía si no hubo estimación.
+Para ensayar desde terminal con el índice configurado en `VIGIA_OUT_DIR`, ejecuta `python -m apps.desktop.defense lote.jsonl --mode guardia`. El expediente exportado contiene un indicador de evidencia local. Vale 0 si el motor se abstiene, 0,80 para un veredicto comprobado que requiere revisión y 0,95 para un cierre elegible. Esta escala describe el estado del análisis y carece de calibración estadística. Si se ejecuta y valida el contraste con OpenAI, se conserva la estimación declarada por el modelo.
 
 ### Entorno de práctica
 
@@ -112,6 +112,15 @@ El motor contiene la ingesta del dataset oficial, las consultas de solo lectura 
 
 La ingesta genera `out/tarvia.duckdb`. Construye una base temporal y sustituye la anterior al terminar. Los comandos de consulta abren la base en solo lectura. El directorio del dataset y las salidas se excluyen de Git.
 
+Para procesar todo el corpus sin API y generar un expediente por entrada en el orden original:
+
+```bash
+python -m scripts.run_corpus data/dataset/03_alertas/alertas.jsonl \
+  --output out/expedientes-tarvia.jsonl --jobs 4 --mode auto --progress-every 1000
+```
+
+El mismo comando reanuda un lote interrumpido mediante un punto de control SQLite junto a la salida. Si cambian el índice, las reglas o el fichero de entrada, usa una salida nueva. También admite IDs JSON y alertas nuevas completas. Cada línea inválida queda registrada como error y la ejecución devuelve un código distinto de cero. Los informes incluyen el criterio de la decisión, las consultas, las citas, la cronología y los pasos pendientes. Los números del barrido distinguen investigación, veredicto y cierre elegible.
+
 Para verificar el motor en Docker desde Linux, con el dataset en `data/dataset`:
 
 ```bash
@@ -135,6 +144,10 @@ docker run --rm --network none --read-only -v "$PWD/out:/vigia/out:ro" \
 | Referencias | Recuperación de `EDR-0123412` por ID. Los IDs inexistentes no devuelven eventos. |
 | Severidad | `ALR-20261005-000172` da `low` en el escenario de prueba con bloqueo sin efecto. La prueba comprueba la denegación 403 en WAF e introduce la premisa de ausencia de efecto para probar el ajuste. |
 | Aprobaciones | OT bloqueada por hostname o subred, doble aprobación según el activo y revisión N2 para servicios de uso dual. La función devuelve requisitos; la autenticación y la ejecución quedan pendientes. |
+| Barrido offline 0.9.0 | 11.061 expedientes sin errores. 9.820 veredictos y 1.241 abstenciones. 8.802 cierres elegibles, 2.029 revisiones y 230 escalados. Las 116 críticas finales escalaron sin autocierre. |
+| Tiempo del barrido | 300,41 s con cuatro trabajadores en Docker. Mediana 79 ms y p95 239 ms por expediente durante el barrido. |
+
+El corpus contiene ejemplos de 41 de las 44 reglas del catálogo. Tres reglas adicionales tienen pruebas sintéticas. Los cierres elegibles se calcularon sin escribir decisiones en el perfil de escritorio. Los resultados describen el comportamiento observado del motor offline. La exactitud general y la latencia con OpenAI siguen sin medir. [Pruebas adversariales y límites](docs/revision-adversarial.md)
 
 ## Contraste de las guías con el reto
 
@@ -153,7 +166,7 @@ La guía técnica define la estructura y el orden de trabajo del motor. En caso 
 | Escritorio | Inicio de sesión local, carga y área de trabajo con alertas, expediente y chat. Los detalles de mapa y métricas quedan pendientes del diseño del equipo. |
 | Métricas y defensa | Comparar con etiquetas revisadas y registrar tiempos medidos. Los 15 minutos de las diapositivas son una estimación del proceso manual. El contador de la demo debe distinguir una estimación de una medición. |
 
-La política de prioridad y los permisos se implementan con los apartados 2 a 5 de la política del SOC. El simulador ofrece un contrato propio de aprobación y contención. El código de esta rama aún carece de operaciones contra ese simulador. [Política del SOC](https://github.com/dttdfr/DTT-UAB-The-Hack/blob/5d7569232756eaf0a8723b22c428b70e8f67824f/01_contexto/politica_soc.md) · [API simulada](https://github.com/dttdfr/DTT-UAB-The-Hack/blob/5d7569232756eaf0a8723b22c428b70e8f67824f/06_herramientas/LEEME_herramientas.md)
+La política de prioridad y los permisos se implementan con los apartados 2 a 5 de la política del SOC. El recorrido de aislamiento de un puesto en el simulador registra la aprobación de N2 y el resultado. [Política del SOC](https://github.com/dttdfr/DTT-UAB-The-Hack/blob/5d7569232756eaf0a8723b22c428b70e8f67824f/01_contexto/politica_soc.md) · [API simulada](https://github.com/dttdfr/DTT-UAB-The-Hack/blob/5d7569232756eaf0a8723b22c428b70e8f67824f/06_herramientas/LEEME_herramientas.md)
 
 Los indicadores reales del dataset solo se pueden consultar en servicios de reputación. Durante las comprobaciones de esta rama, los contenedores que leen los datos se ejecutan sin red y con el dataset montado en solo lectura.
 

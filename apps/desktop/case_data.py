@@ -123,6 +123,25 @@ def case_panels(alert: dict, analysis: dict, history: list[dict], *,
         entities.append(("Alcance e impacto · informe N2", _display(incident["scope"])))
 
     timeline = []
+    live_incident = analysis.get("incident")
+    live_report = (analysis.get("report") or {}).get("incident") or {}
+    if live_incident:
+        scope = live_incident.get("scope")
+        if scope:
+            entities.append(("Alcance investigado · índice local", _display(scope)))
+        timeline.extend([
+            (live_incident.get("title") or "Cadena investigada", "\n\n".join(
+                f"{_event_line(point)} · {point.get('host') or 'Equipo sin determinar'}\n"
+                f"{point.get('stage') or 'Observación'} · {point.get('finding') or 'Consulta el evento original.'}"
+                for point in live_incident.get("timeline", [])) or "Sin eventos enlazados."),
+            ("Límites del análisis", "\n".join(live_incident.get("limits", [])) or "Alcance por confirmar."),
+        ])
+    if live_report:
+        timeline.insert(0, (f"Informe N2 · {live_report['incident_id']}", "\n".join([
+            live_report["patient_zero"], live_report["initial_access"], live_report["root_cause"],
+            "Alertas vinculadas", ", ".join(live_report["alert_ids"]),
+        ])))
+        timeline.append(("Preguntas abiertas de N2", "\n".join(live_report["open_questions"])))
     if incident:
         confidence = incident.get("confidence")
         timeline.append((f"Informe N2 archivado · {incident['incident_id']}", "\n".join([
@@ -142,7 +161,7 @@ def case_panels(alert: dict, analysis: dict, history: list[dict], *,
             ("Brechas de detección", "\n".join(incident.get("detection_gaps", [])) or "Sin brechas registradas"),
             ("Incidentes relacionados", ", ".join(incident.get("related_incidents", [])) or "Sin vínculos registrados"),
         ])
-    else:
+    elif not live_incident:
         timeline.append(("Informe N2", "No hay un informe N2 asociado a esta alerta."))
     events = sorted(analysis.get("events", []), key=lambda item: item.get("timestamp") or "")
     timeline.append(("Eventos recuperados del índice",
@@ -156,6 +175,15 @@ def case_panels(alert: dict, analysis: dict, history: list[dict], *,
         actions.append(("Sugerencias de la propuesta", "\n".join(proposal["actions"])))
     if challenge.get("actions"):
         actions.append(("Sugerencias del contraste", "\n".join(challenge["actions"])))
+    if live_report:
+        actions.extend([
+            ("Contención propuesta · requiere aprobación", "\n\n".join(
+                f"{row['action']} · {row['target']}\nAprueba {row['approver']}\n{row['business_impact']}"
+                for row in live_report["containment_plan"])),
+            ("Recuperación y notificaciones", "\n".join([
+                *live_report["eradication_and_recovery"], *live_report["notifications"],
+            ])),
+        ])
     if demo:
         recommendations = []
         for row in demo.get("recommended_actions", []):

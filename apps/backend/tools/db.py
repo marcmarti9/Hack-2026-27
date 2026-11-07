@@ -2,7 +2,8 @@
 import json
 from contextlib import contextmanager
 from contextvars import ContextVar
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 
 import duckdb
 
@@ -75,6 +76,17 @@ def get_alert(alert_id: str) -> dict | None:
     return json.loads(rows[0]["raw"]) if rows else None
 
 
+def alerts_citing_events(event_ids: list[str]) -> list[str]:
+    """Agrupa alertas que citan directamente registros de una cadena verificada."""
+    if not event_ids:
+        return []
+    return [row["alert_id"] for row in _rows("""
+        SELECT alert_id FROM alerts
+        WHERE list_has_any(json_extract_string(raw, '$.related_events[*]'), ?::VARCHAR[])
+        ORDER BY ts, alert_id
+    """, [event_ids])]
+
+
 def events_for_entity(value: str, around: str | None = None, horas: int = 24,
                       source: str | None = None, limit: int = 100) -> list[dict]:
     value = _normalize(value)
@@ -95,6 +107,20 @@ def events_for_entity(value: str, around: str | None = None, horas: int = 24,
         sql += " AND source = ?"
         params.append(source)
     return [_event(row) for row in _rows(sql + " ORDER BY ts, event_id LIMIT ?", [*params, _limit(limit)])]
+
+
+@lru_cache(maxsize=64)
+def _source_bounds(source: str, index_version: tuple) -> tuple[datetime, datetime] | None:
+    row = _rows("SELECT epoch(min(ts)) AS first, epoch(max(ts)) AS last FROM events WHERE source = ?", [source])[0]
+    if row["first"] is None or row["last"] is None:
+        return None
+    return datetime.fromtimestamp(row["first"], timezone.utc), datetime.fromtimestamp(row["last"], timezone.utc)
+
+
+def source_bounds(source: str) -> tuple[datetime, datetime] | None:
+    """Primer y último evento UTC de la fuente en la versión consultada del índice."""
+    index = DB.stat()
+    return _source_bounds(source, (str(DB), index.st_dev, index.st_ino, index.st_size, index.st_mtime_ns))
 
 
 def search_logs(text: str, source: str | None = None, desde: str | None = None,

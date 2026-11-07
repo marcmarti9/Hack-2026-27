@@ -3,6 +3,7 @@ from base64 import b64encode
 from datetime import datetime, time, timedelta
 import re
 
+from apps.backend.rules import coverage_edr, coverage_identidad, coverage_plataforma, coverage_ruido
 from apps.backend.rules.engine import madrid, severidad
 from apps.backend.tools import db
 
@@ -175,6 +176,10 @@ def local_finding(alert, analysis):
     if alert["rule_id"] == "UC-NET-002":
         if finding := _miner(direct, analysis, hosts):
             return finding
+    if "context" in analysis:
+        for coverage in (coverage_edr, coverage_identidad, coverage_plataforma, coverage_ruido):
+            if finding := coverage.check(alert, analysis, direct, _proof):
+                return finding
     if alert["rule_id"] == "UC-WEB-002":
         for ip in alert["entities"].get("ips", []):
             blocked = [event for event in direct if event["source"] == "ecom_auth" and event.get("src_ip") == ip
@@ -277,17 +282,6 @@ def local_finding(alert, analysis):
                             "escalate": ["N2", "Equipo de IA"]}
     if alert["rule_id"] in {"UC-DLP-001", "UC-DLP-002"} and (disclosure := _possible_disclosure(direct)):
         return disclosure
-    if alert["rule_id"] == "UC-OT-001":
-        for asset in analysis["context"]["activos"]:
-            if asset["hostname"] != "ENG-WS01":
-                continue
-            for event in direct:
-                if (event["source"] == "firewall" and event.get("src_ip") == asset["ip"]
-                        and event.get("zone_dst") == "LOGISTICS-OT" and event.get("rule") == "OT-ENG-ALLOW"
-                        and event.get("action") == "allow" and str(event.get("dst_port")) in {"502", "44818"}):
-                    return _proof("benign_true_positive", [event], "La CMDB identifica el puesto de ingeniería "
-                                  "y el firewall registra una conexión permitida a OT por un puerto previsto en RB-08.",
-                                  basis="Origen de ingeniería, puerto y regla de red autorizados en RB-08.")
     if alert["rule_id"] != "UC-OT-001":
         for report in analysis.get("context", {}).get("sandbox", []):
             if report.get("verdict") == "malicious" and report.get("sha256"):
@@ -303,9 +297,27 @@ def route(alert, analysis, mode, finding):
     """La autorización y la cobertura no dependen de lo que redacte el modelo."""
     severity = analysis["severity"]
     verdict = analysis["verdict"]
+    verified = bool(finding and (finding.get("citations") or finding.get("sandbox_refs")))
+    matched = verified and verdict == finding["verdict"]
+    critical = severity == "critical" or alert["severity"] == "critical"
+    if verified and finding.get("severity_override") == "critical":
+        critical = True
+        analysis.update(severity="critical", sla="15 min",
+                        severity_rationale=f"{analysis['severity_rationale']} Regla de escalado del runbook aplicable.")
+    elif alert["severity"] == "critical" and severity != "critical":
+        analysis.update(severity="critical", sla="15 min",
+                        severity_rationale=f"{analysis['severity_rationale']} Vigía conserva la prioridad crítica "
+                                           "de la alerta de origen para su revisión inmediata.")
+    elif matched and not critical and (finding.get("verified_impact") or finding.get("verified_prevention")):
+        priority = severidad(alert, verdict, verified_impact=finding.get("verified_impact", ""),
+                             verified_prevention=finding.get("verified_prevention", ""))
+        analysis.update(severity=priority.level, severity_rationale=priority.rationale, sla=priority.sla)
+        severity = priority.level
+        critical = severity == "critical"
+    local = analysis["provider"] == "Reglas locales" and not alert.get("external")
     result = {"mode": mode, "recommendation": "review", "recipients": [], "automatic": False,
               "reason": "Revisión pendiente. Hace falta evidencia suficiente o una decisión humana."}
-    if severity == "critical" or alert["severity"] == "critical":
+    if critical:
         result.update(recommendation="escalate", recipients=["N2 de guardia (teléfono)", "Responsable SOC", "CISO"],
                       reason="Crítica. Preparar el aviso y el expediente para revisión humana inmediata. SLA de 15 min.")
     elif severity == "high" and verdict == "true_positive":
@@ -314,23 +326,26 @@ def route(alert, analysis, mode, finding):
     elif finding and finding["verdict"] == "true_positive" and alert["rule_id"] == "UC-EDR-004":
         result.update(recommendation="escalate", recipients=["N2"],
                       reason="Señal de acceso a credenciales. Confirmar alcance y decidir la respuesta con N2.")
-    elif finding and verdict in {"benign_true_positive", "false_positive"}:
-        result.update(recommendation="close", reason=finding["basis"])
+    elif matched and verdict in {"benign_true_positive", "false_positive"}:
+        result.update(recommendation="close", reason=finding.get("basis") or finding["summary"])
         priority = severidad(alert, verdict)
         analysis.update(severity=priority.level,
                         severity_rationale=f"{analysis['severity_rationale']} Tras comprobar el caso: {priority.rationale}",
                         sla=priority.sla)
-        if (analysis["provider"] == "Reglas locales" and not alert.get("external")
-                and alert["rule_id"] in {"UC-EDR-002", "UC-AI-001"}
-                and alert["severity"] in {"informational", "low", "medium"} and severity != "high"):
-            result["automatic"] = True
+        old_rule = (alert["rule_id"] in {"UC-EDR-002", "UC-AI-001"}
+                    and alert["severity"] in {"informational", "low", "medium"} and severity != "high")
+        result["automatic"] = local and bool(finding.get("auto_close") or old_rule)
+    elif (matched and verdict == "true_positive" and finding.get("resolved")
+          and finding.get("verified_prevention") and severity in {"informational", "low"}):
+        result.update(recommendation="close", automatic=local, reason=finding["verified_prevention"])
     ot_asset = any(asset["zone"] == "LOGISTICS-OT" for asset in analysis["context"]["activos"])
     ot_alert = alert["rule_id"] == "UC-OT-001" or any(
         event.get("source") == "firewall" and "LOGISTICS-OT" in {event.get("zone_src"), event.get("zone_dst")}
         and event["event_id"] in analysis["requested"] for event in analysis["events"]
     )
-    ot_authorized = alert["rule_id"] == "UC-OT-001" and finding and finding["verdict"] == "benign_true_positive"
-    if ot_asset or (ot_alert and not ot_authorized):
+    ot_authorized = (local and alert["rule_id"] == "UC-OT-001" and matched
+                     and verdict == "benign_true_positive" and finding.get("ot_authorized"))
+    if (ot_asset or ot_alert) and not ot_authorized:
         result["recommendation"] = "escalate"
         result["automatic"] = False
         result["recipients"] = list(dict.fromkeys([*result["recipients"], "N2", "Responsable de Operaciones"]))
@@ -339,10 +354,10 @@ def route(alert, analysis, mode, finding):
         result["recommendation"] = "escalate"
         result["automatic"] = False
         result["recipients"] = list(dict.fromkeys([*result["recipients"], *finding["escalate"]]))
-        if severity != "critical":
+        if not critical:
             result["reason"] = "La evidencia justifica preparar el aviso y preservar los datos para revisión."
     minutes = {"critical": 15, "high": 30, "medium": 240, "low": 1440}
-    deadline = 15 if alert["severity"] == "critical" else minutes.get(analysis["severity"])
+    deadline = 15 if critical else minutes.get(analysis["severity"])
     if deadline is not None:
         stamp = datetime.fromisoformat(alert["created_at"].replace("Z", "+00:00"))
         result["deadline_at"] = (stamp + timedelta(minutes=deadline)).isoformat()

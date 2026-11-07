@@ -8,4 +8,4 @@ trap 'rm -rf "$stage"' EXIT
 ditto out/packaging/dist/Vigia.app "$stage/Vigia.app"
 ln -s /Applications "$stage/Applications"
 hdiutil create -volname "Vigía" -srcfolder "$stage" -ov -format UDZO \
-    "out/installers/Vigia-0.8.1-macos-$(uname -m).dmg"
+    "out/installers/Vigia-0.9.0-macos-$(uname -m).dmg"

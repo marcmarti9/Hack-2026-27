@@ -97,3 +97,25 @@ El lote de ensayo de la mesa reúne diez casos elegidos para enseñar resultados
 Con las fuentes de `756b573`, el motor offline procesó las **11.061 alertas sin errores**. La política indicó **1.331 cierres automáticos**, 267 escalados, 109 recomendaciones de cierre que requieren revisión y 9.354 revisiones. Hubo 8.657 abstenciones de veredicto. En este barrido se midieron disposiciones, sin persistir miles de decisiones en el perfil. La persistencia del cierre se comprobó por separado.
 
 La mediana fue 52 ms por alerta y el percentil 95, 105 ms. El barrido tardó 655,02 s y no llamó a OpenAI. No equivale a una medida de precisión ni a la latencia de los modelos. Para repetirlo sobre el dataset y el índice oficiales configurados, ejecuta `python -m scripts.bench_triage`. [Benchmark reproducible](../scripts/bench_triage.py) · [Instaladores de 0.8.1](https://github.com/marcmarti9/Hack-2026-27/actions/runs/42424325479)
+
+## Motor 0.9.0 y revisión independiente
+
+El loop de Agentit separó cinco entregas. EDR y preransomware, red y WAF, correo e identidad, plataforma y OT, y exportación de expedientes. Un revisor ajeno a los cambios ejecutó ocho bloques de pruebas contra el árbol integrado en Docker sin red. Se usaron 136 alertas de las 41 reglas presentes en el corpus. EDR-009, EDR-010 e IDP-007 se verificaron con ejemplos sintéticos porque carecen de alertas oficiales. Las pruebas comprobaron los campos, tipos y límites que declaran los esquemas de referencia.
+
+| Riesgo reproducido | Comportamiento verificado tras la corrección |
+| --- | --- |
+| El fallback OT permitía recomendar cierre con tráfico UDP a un destino sin inventario. | El cierre exige origen, destino, regla y protocolo coherentes. Se contrasta el historial previo del mismo origen y se escala a N2 y Operaciones ante señales adversas. |
+| Un inicio de sesión de riesgo alto podía quedar fuera de los 24 candidatos genéricos durante un viaje. | Se consultan inicios de sesión y auditoría por cuenta. Un evento contradictorio o un resultado truncado impiden el cierre. |
+| WAF y EDR declaraban seguimiento completo al final del corpus con horas de telemetría ausentes. | El motor comprueba los extremos de la ventana por fuente. Las alertas de borde conservan el hallazgo y pasan a revisión. Los límites del índice no permiten certificar continuidad dentro de la ventana. |
+| La severidad del expediente podía discrepar del plazo de escalado de una crítica. | Ambos turnos conservan la prioridad crítica y el plazo de 15 minutos. El analista mantiene la decisión. |
+| El expediente no tenía campos compatibles con los dos esquemas ni un identificador común de incidente. | Las semillas de preransomware comparten un expediente con alcance, citas, plan y preguntas. El revisor reprodujo el mismo identificador desde cuatro alertas distintas. |
+
+La cadena de preransomware vincula nueve alertas mediante registros compartidos. Cita 27 evidencias en 11 fases y tres equipos entre el 9 y el 18 de octubre. La telemetría confirma ejecución, movimiento lateral y comandos contra la recuperación. El resultado de los comandos, la extracción de credenciales y el cifrado quedan por confirmar. La prueba de una alerta inédita produjo un expediente a partir del índice, con el cierre automático desactivado.
+
+El contraste offline registra las consultas, criterios y contraindicaciones de las reglas. El contraste entre Luna y Sol, su latencia y el rendimiento sobre el lote del jurado quedan fuera de este ensayo. La muestra de auditoría y el barrido miden cobertura y comportamiento de las reglas. Para estimar precisión hace falta un conjunto de etiquetas independientes. [Esquemas y runbooks oficiales](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/5d7569232756eaf0a8723b22c428b70e8f67824f/01_contexto)
+
+### Barrido completo de 0.9.0
+
+La ejecución sin red escribió 11.061 expedientes en el orden original y sin errores. Emitió 3.958 verdaderos positivos, 4.411 falsos positivos, 1.451 positivos benignos y 1.241 abstenciones. La política indicó 8.802 cierres elegibles, 2.029 revisiones y 230 escalados. Se verificaron las referencias a eventos recuperados y el escalado sin autocierre de las 116 alertas con prioridad final crítica. Seis alertas de entrada reconstruyeron el incidente agrupado y el informe N2 vinculó nueve IDs oficiales.
+
+El barrido tardó 300,41 s con cuatro trabajadores. La mediana de triaje fue 79 ms y el percentil 95, 239 ms bajo la carga de la prueba. Se registraron cero consultas al proveedor y cero acciones ejecutadas durante el barrido. El recorrido Qt contra el simulador oficial comprobó por separado propuesta, reautenticación N2, ejecución e historial. [Comando de barrido](../scripts/run_corpus.py)

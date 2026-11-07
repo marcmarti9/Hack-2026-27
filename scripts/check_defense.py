@@ -62,9 +62,9 @@ def main():
         write_batch(path, [tampered, {"alert_id": ids[1]}, *ids[2:]])
         assert defense.load_alerts(path) == official
         tickets = run_cli(path)
-        assert [row["alert_ids"] for row in tickets] == [[identifier] for identifier in ids]
+        assert all(identifier in row["alert_ids"] for row, identifier in zip(tickets, ids))
         assert all(row["routing"]["mode"] == "guardia" and not row["external"] for row in tickets)
-        assert all(row["provider"] == "Reglas locales" and row["confidence"] is None for row in tickets)
+        assert all(row["provider"] == "Reglas locales" and 0 <= row["confidence"] <= 1 for row in tickets)
         assert all(row["summary"] and row["timing_ms"] >= 0 for row in tickets)
         assert all(ticket["escalation"]["escalate"] and not ticket["routing"]["automatic"]
                    for alert, ticket in zip(official, tickets) if alert["severity"] == "critical")

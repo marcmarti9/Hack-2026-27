@@ -310,20 +310,21 @@ def check(app, window, home, password, output):
     assert [entry["kind"] for entry in window.reviews.history("ALR-20261010-011795")] == ["Aceptada", "Análisis"]
     assert password.encode() not in window.account.path.read_bytes()
     work = window.workbench
-    work.query.setText("ALR-20261005-000172")
+    work.query.setText("ALR-20261005-000173")
     work.search.click()
     wait_for(lambda: work.total == 1, "lote filtrado")
     with patch("apps.desktop.review.openai_message") as transport:
         work.prepare.click()
         wait_for(lambda: window.job is None, "preparar lote")
         transport.assert_not_called()
-    assert work.reviews["ALR-20261005-000172"]["analysis"]["routing"]["recommendation"] == "review"
+    assert work.reviews["ALR-20261005-000173"]["decision"] == "automatic"
+    assert work.queue_correct.isEnabled()
 
     def correct():
         dialog = app.activeModalWidget()
         choice = dialog.findChild(QComboBox)
         choice.setCurrentIndex(choice.findData("false_positive"))
-        dialog.findChild(QLineEdit, "decisionReason").setText("Decisión de ensayo tras revisar el evento WAF-0001840.")
+        dialog.findChild(QLineEdit, "decisionReason").setText("Decisión de ensayo tras revisar el evento WAF-0001841.")
         next(control for control in dialog.findChildren(QPushButton)
              if control.text() == "Registrar decisión").click()
 
@@ -331,7 +332,7 @@ def check(app, window, home, password, output):
     work.queue_correct.click()
     assert work.table.item(0, 3).text() == "Corregida"
     assert work.table.item(0, 4).text() == "Falso positivo"
-    assert "WAF-0001840" in window.reviews.history("ALR-20261005-000172")[0]["data"]["reason"]
+    assert "WAF-0001841" in window.reviews.history("ALR-20261005-000173")[0]["data"]["reason"]
 
     work._toggle_monitor()
     work._toggle_monitor()
