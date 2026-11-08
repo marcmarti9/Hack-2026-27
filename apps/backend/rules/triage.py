@@ -76,9 +76,11 @@ def _vendor_access(alert, direct, context):
                     and timedelta(0) <= madrid(log["timestamp"]) - stamp <= timedelta(minutes=15)):
                 return {**_proof("true_positive", [vpn, log], "El proveedor abrió la VPN y el firewall permitió "
                                  "RDP hacia WMS01 fuera de la ventana contractual y del cambio aprobado. "
-                                 "La conexión está probada. Sigue por comprobar quién controlaba la cuenta.",
+                                 "El acceso a la VPN está probado. Queda por comprobar quién controlaba la cuenta "
+                                 "y si hubo una sesión RDP en WMS01.",
                                  actions=("Escalar a N2 y Logística. Revisar la sesión del proveedor.",)),
-                        "escalate": ["N2", "Logística"]}
+                        "escalate": ["N2", "Logística"],
+                        "verified_impact": "acceso a la VPN fuera de la ventana contractual"}
     return None
 
 

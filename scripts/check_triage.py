@@ -124,6 +124,11 @@ def main():
         escalation = investigate(db.get_alert(key), triage=True, mode="guardia")
         assert escalation["verdict"] == "true_positive" and escalation["routing"]["recommendation"] == "escalate"
         assert evidence in escalation["verified_finding"]["citations"] and not escalation["routing"]["automatic"]
+    vendor = investigate(db.get_alert("ALR-20261011-011877"), triage=True, mode="guardia")["report"]
+    assert vendor["severity"] == "medium" and vendor["sla"] == "4 h"
+    assert set(vendor["criterio_verificado"]["citations"]) == {"VPN-0010704", "FW-0026536"}
+    assert "acceso a la VPN" in vendor["severity_rationale"]
+    assert vendor["routing"]["recipients"] == ["N2", "Logística"]
     approved_group = investigate(db.get_alert("ALR-20261023-011915"), triage=True, mode="guardia")
     assert "CHG-2026-1078" in approved_group["verified_finding"]["summary"]
     assert not approved_group["routing"]["automatic"]

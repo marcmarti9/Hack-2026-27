@@ -30,7 +30,7 @@ flowchart LR
 
 Las reglas locales aplican la matriz de severidad y el SLA de Tarvia. Toda crítica se escala de inmediato. Las altas se escalan a N2 en la misma jornada, también cuando faltan datos para clasificar. Los cierres automáticos de alertas nuevas quedan restringidos a perfiles de bajo riesgo con todas sus referencias directas corroboradas. El único recorrido de contención implementado opera sobre el simulador del reto y requiere confirmación y reautenticación N2. [Política del SOC](https://github.com/dttdfr/DTT-UAB-The-Hack/blob/5d7569232756eaf0a8723b22c428b70e8f67824f/01_contexto/politica_soc.md)
 
-La cronología separa alertas del sensor, hallazgos y registros de contexto. Las fases de ataque del caso proceden del informe N2 acreditado. El tipo de registro por sí solo no establece una táctica. La exportación conserva el criterio, el origen de las citas y la decisión vigente. [Tácticas de MITRE ATT&CK](https://attack.mitre.org/tactics/enterprise/)
+La cronología separa alertas del sensor, hallazgos y registros de contexto. En preransomware, las reglas reconstruyen el informe N2 desde la telemetría de Tarvia. Las fases reflejan hitos acreditados de esa investigación. El tipo de registro por sí solo no establece una táctica. La exportación conserva el criterio, el origen de las citas y la decisión vigente. [Tácticas de MITRE ATT&CK](https://attack.mitre.org/tactics/enterprise/)
 
 El perfil opcional `inteligencia` de Compose actualiza CISA KEV y los deltas de la lista oficial de CVE cada hora. El recolector valida campos y tamaños, escribe un snapshot atómico y conserva la última copia válida por fuente. La web lo abre en solo lectura. Se cruzan IDs CVE con el inventario local. En una alerta externa se exige además un registro original contemporáneo que vincule el equipo con la alerta. La inteligencia informa sobre exposición posible, lleva fuente y fecha y nunca activa por sí sola un cierre ni una acción. Las guías se editan por separado y conservan su historial. [Fuentes, límites y operación](arquitectura-inteligencia.md)
 
@@ -42,7 +42,7 @@ El perfil opcional `inteligencia` de Compose actualiza CISA KEV y los deltas de 
 
 ## Verificación y defensa
 
-El barrido offline de Tarvia generó 11.061 expedientes sin errores en 121,39 s con cuatro trabajadores en Docker. La mediana fue de 35 ms y el p95 de 103 ms por alerta. Hubo 8.806 cierres elegibles, 281 escalados y 1.237 abstenciones. Son medidas de cobertura y latencia local. El lote inédito del jurado permitirá comprobar el comportamiento ante sus diez casos.
+El barrido offline de Tarvia generó 11.061 expedientes sin errores en 139,06 s con cuatro trabajadores en Docker. La mediana fue de 39 ms y el p95 de 115 ms por alerta. Hubo 8.806 cierres elegibles, 281 escalados y 1.237 abstenciones. El Panel separa las cifras del barrido de la actividad y las decisiones de la mesa. Son medidas de cobertura y latencia local. El lote inédito del jurado permitirá comprobar el comportamiento ante sus diez casos.
 
 Las regresiones cubren importación, autocierre, citas, escalado, agrupación de incidentes, snapshot y cronología. Una caída simulada del proveedor produjo cuatro expedientes con una sola llamada y mantuvo los tres escalados. El recolector también se probó contra ambas fuentes oficiales desde Docker. [Guion de defensa](defensa-web.md) · [Una página para el comité](comite-tarvia.md)
 

@@ -99,6 +99,10 @@ def main():
                     break
                 sleep(0.08)
             assert job["estado"] == "terminado" and len(job["tickets"]) == 6, job["error"]
+            overview = client.get("/api/resumen").json()
+            assert overview["mesa"]["investigadas"] == 6 and overview["mesa"]["escaladas"] == 2
+            assert overview["barrido"] == {"investigadas": 0, "abstenciones": 0, "escaladas": 0}
+            assert overview["cierres_ejecutados"] == 2
             rows = {row["alert_id"]: row for row in client.get("/api/directo").json()["alertas"]}
             first, second = rows[corroborated["alert_id"]], rows[unknown["alert_id"]]
             assert first["verdict"] == "true_positive" and first["estado"] == "escalada"

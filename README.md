@@ -145,7 +145,7 @@ docker run --rm --network none --read-only -v "$PWD/out:/vigia/out:ro" \
 | Severidad | `ALR-20261005-000172` da `low` en el escenario de prueba con bloqueo sin efecto. La prueba comprueba la denegación 403 en WAF e introduce la premisa de ausencia de efecto para probar el ajuste. |
 | Aprobaciones | OT bloqueada por hostname o subred, doble aprobación según el activo y revisión N2 para servicios de uso dual. La función devuelve requisitos; la autenticación y la ejecución quedan pendientes. |
 | Barrido offline web | 11.061 expedientes sin errores. 9.824 veredictos y 1.237 abstenciones. 8.806 cierres elegibles, 1.969 revisiones, 281 escalados y 5 recomendaciones de cierre. |
-| Tiempo del barrido | 121,39 s con cuatro trabajadores en Docker. Mediana de 35 ms y p95 de 103 ms por expediente. |
+| Tiempo del barrido | 139,06 s con cuatro trabajadores en Docker. Mediana de 39 ms y p95 de 115 ms por expediente. |
 
 El corpus contiene ejemplos de 41 de las 44 reglas del catálogo. Tres reglas adicionales tienen pruebas sintéticas. Los cierres elegibles se calcularon sin escribir decisiones. El barrido mide cobertura y latencia local. El guion recoge también ensayos remotos de versiones anteriores con alertas sintéticas. [Pruebas adversariales y límites](docs/revision-adversarial.md) · [Ensayos de defensa](docs/defensa-web.md)
 

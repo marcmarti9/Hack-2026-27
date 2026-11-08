@@ -53,6 +53,7 @@ const vistas = {
     ]);
     if (location.hash !== hash) return;
     const graves = ts.filter(t => t.escalation?.escalate && ['critical', 'high'].includes(t.severity));
+    const actividad = r.corpus_completo ? r.barrido : r.mesa;
     $('#vista').innerHTML = `<section aria-labelledby="guardia-titulo">
       <div class="guardia-encabezado">
         <div><h2 id="guardia-titulo">Panel</h2><p class="sub">Parte de guardia · 5 de octubre al 1 de noviembre de 2026</p></div>
@@ -64,14 +65,15 @@ const vistas = {
       </div>
       <dl class="guardia-metricas">
         <div><dt>Alertas del SIEM</dt><dd>${fmt(r.alertas)}</dd></div>
-        <div><dt>Expedientes generados</dt><dd>${fmt(r.investigadas)}</dd></div>
-        <div><dt>Cierres registrados</dt><dd>${fmt(r.cierres_ejecutados)}</dd></div>
-        <div><dt>Escalados</dt><dd class="guardia-escaladas">${fmt(r.escaladas)}</dd></div>
+        <div><dt>${r.corpus_completo ? 'Expedientes del barrido' : 'Expedientes de la mesa'}</dt><dd>${fmt(actividad.investigadas)}</dd></div>
+        <div><dt>${r.corpus_completo ? 'Escalados del barrido' : 'Escalados de la mesa'}</dt><dd class="guardia-escaladas">${fmt(actividad.escaladas)}</dd></div>
+        <div><dt>Cierres en la mesa</dt><dd>${fmt(r.cierres_ejecutados)}</dd></div>
       </dl>
       <p class="guardia-alcance">${r.corpus_completo
         ? `Barrido del dataset oficial · ${fmt(r.cerradas_por_reglas)} alertas aptas para cierre según las reglas.`
         : 'Expedientes y escalados de esta mesa.'}
-        ${fmt(r.abstenciones)} sin evidencia suficiente para un veredicto.</p>
+        ${fmt(actividad.abstenciones)} sin evidencia suficiente para un veredicto.
+        ${r.corpus_completo ? `<br>Mesa de triaje · ${fmt(r.mesa.investigadas)} expedientes, ${fmt(r.mesa.escaladas)} escalados y ${fmt(r.mesa.abstenciones)} abstenciones.` : ''}</p>
       <section class="guardia-casos">
         <h3>Casos graves escalados</h3>
         <div class="editor-lista">${graves.slice(0, 6).map(tarjetaCaso).join('') || '<p class="editor-vacio sub">Todavía no hay casos graves escalados en esta mesa.</p>'}</div>

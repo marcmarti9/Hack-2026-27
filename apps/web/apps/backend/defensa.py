@@ -258,14 +258,18 @@ def overview(total, after_hours):
     live = {aid: row["analysis"]["report"] for aid, row in rows.items() if (row.get("analysis") or {}).get("report")}
     complete = stats.get("investigadas") == total and not stats.get("errores")
     investigated = stats.get("investigadas", 0) + sum(aid not in index for aid in live)
-    pending = stats.get("abstenciones", sum(r["verdict"] == "needs_more_info" for r in live.values()))
-    escalations = stats.get("escaladas", sum(r["routing"]["recommendation"] == "escalate" for r in live.values()))
+    mesa = {"investigadas": len(live), "abstenciones": sum(r["verdict"] == "needs_more_info" for r in live.values()),
+            "escaladas": sum(r["routing"]["recommendation"] == "escalate" for r in live.values())}
+    barrido = {key: stats.get(key, 0) for key in mesa}
+    pending = stats.get("abstenciones", mesa["abstenciones"])
+    escalations = stats.get("escaladas", mesa["escaladas"])
     groups = {ticket for _, route, ticket in index.values() if route == "escalate" and ticket}
     return {
         "alertas": total, "cerradas_por_reglas": len(closes), "al_agente": investigated,
         "grupos": len(groups) if index else escalations, "investigadas": investigated,
         "escaladas": escalations, "abstenciones": pending,
         "cierres_ejecutados": sum(row.get("decision") == "automatic" for row in rows.values()),
+        "barrido": barrido, "mesa": mesa,
         "corpus_completo": complete, "benchmark": {k: stats[k] for k in ("p50_ms", "p95_ms") if k in stats},
         "fuera_de_horario_al_agente": round(100 * stats.get("fuera_de_horario", 0) / max(1, stats.get("investigadas", 0)), 1),
         "fuera_de_horario_total": round(100 * after_hours / max(1, total), 1),

@@ -51,6 +51,15 @@ python -m scripts.run_corpus "${VIGIA_DATA_DIR:-data/dataset}/03_alertas/alertas
 
 También puedes indicar su ruta con `VIGIA_WEB_CORPUS`. La web distingue los cierres elegibles del barrido y los cierres registrados en la mesa. Desde **Casos** puedes buscar por ID. **Descartes** enlaza a expedientes del barrido. Los runbooks y la guía del agente admiten revisiones versionadas para el contraste.
 
-Para enseñar el aislamiento, arranca el simulador oficial en el mismo entorno de red del backend, configura `VIGIA_SIM_PORT` y una clave de práctica de 10 a 128 caracteres en `VIGIA_WEB_N2_PASSWORD`. Vigía muestra la opción solo si el expediente y el puesto cumplen la política. La acción requiere confirmación, justificación y reautenticación N2.
+## Aislamiento en el simulador
+
+Para mostrar este recorrido en Docker, añade `VIGIA_SIM_PORT=18080` y una clave de práctica de 10 a 128 caracteres en `VIGIA_WEB_N2_PASSWORD` al archivo local de configuración. Recrea `vigia` y arranca el mock en el mismo contenedor, donde el backend lo consulta por loopback:
+
+```bash
+docker compose up -d --force-recreate vigia
+docker compose exec -d vigia python -c 'import sys, uvicorn; sys.path.insert(0, "/dataset/06_herramientas"); import mock_soc_api; mock_soc_api.LOGFILE = "/state/contencion-simulada.jsonl"; uvicorn.run(mock_soc_api.app, host="127.0.0.1", port=18080)'
+```
+
+Analiza `ALR-20261010-011795` en **Triaje**, abre su expediente y selecciona N2. La acción requiere confirmación, justificación y la clave de práctica. El expediente guarda el resultado. El proceso del simulador termina al recrear el contenedor.
 
 [Guía de la web](../../docs/guia-web.md) · [Guion de defensa](../../docs/defensa-web.md) · [Arquitectura](../../docs/arquitectura-vigia.md) · [EPIC](../../EPIC.md)
