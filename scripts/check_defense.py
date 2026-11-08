@@ -2,7 +2,7 @@
 import io
 import json
 from collections import Counter
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -25,14 +25,34 @@ def rejected(path, message):
         raise AssertionError("El lote inválido fue aceptado.")
 
 
-def run_cli(path):
+def run_cli(path, mode="guardia"):
     output = io.StringIO()
-    with (patch("sys.argv", ["defense", str(path), "--mode", "guardia"]),
+    with (patch("sys.argv", ["defense", str(path), "--mode", mode]),
           patch("gzip.open", side_effect=AssertionError("El ensayo leyó el archivo de referencia.")),
           patch("apps.desktop.review.openai_message", side_effect=AssertionError("El ensayo llamó a OpenAI.")),
           redirect_stdout(output)):
         defense.main()
     return [json.loads(line) for line in output.getvalue().splitlines()]
+
+
+def verify_incident_membership(path):
+    recovery = db.get_alert("ALR-20261010-011798")
+    external_ids = ("ALR-20261010-999991", "ALR-20261010-999992")
+    variants = [{**recovery, "alert_id": identifier, "related_events": [event]}
+                for identifier, event in zip(external_ids, ("EDR-0123415", "EDR-0123416"))]
+    sccm = "ALR-20261005-000301"
+    write_batch(path, [recovery["alert_id"], variants[0], sccm, variants[1]])
+    for mode in ("diurno", "guardia"):
+        canonical, first, unrelated, second = run_cli(path, mode)
+        assert [row["alert_id"] for row in (canonical, first, unrelated, second)] == [
+            recovery["alert_id"], external_ids[0], sccm, external_ids[1],
+        ]
+        assert unrelated["alert_ids"] == [sccm] and unrelated["incident"] is None
+        for report in (canonical, first, second):
+            assert report["ticket_id"] == "VIG-INC-FW-0025321"
+            assert set(external_ids) <= set(report["alert_ids"])
+            assert report["alert_ids"] == report["incident"]["alert_ids"] == canonical["alert_ids"]
+            assert report["routing"]["mode"] == mode
 
 
 def official_cases():
@@ -56,6 +76,7 @@ def main():
     assert db.get_alert(external_id) is None
     benign = db.get_alert("ALR-20261005-000301")
     external = {**benign, "alert_id": external_id, "external": False, "routing": {"automatic": True}}
+    external["mitre"] = {"technique_id": "T1059.001", "notes": "Texto externo sin verificar"}
 
     with TemporaryDirectory(prefix="vigia-defense-") as folder:
         path = Path(folder) / "lote.jsonl"
@@ -73,9 +94,40 @@ def main():
         loaded, = defense.load_alerts(path)
         assert loaded["external"] is True and loaded["rule_id"] == benign["rule_id"]
         assert not {"routing", "evidence"} & loaded.keys()
+        assert loaded["mitre"] == {"technique_id": "T1059.001"}
         ticket, = run_cli(path)
         assert ticket["external"] is True and ticket["alert_ids"] == [external_id]
+        assert ticket["mitre"] == ["T1059.001"]
         assert ticket["routing"]["mode"] == "guardia" and not ticket["routing"]["automatic"]
+        write_batch(path, [{**external, "mitre": {"technique_id": "T1059.001 extra"}}])
+        assert "mitre" not in defense.load_alerts(path)[0]
+        verify_incident_membership(path)
+
+        for extreme in ("0001-01-01T00:00:00Z", "9999-12-31T23:59:59Z"):
+            write_batch(path, [ids[0], {**external, "created_at": extreme}, ids[-1]])
+            rejected(path, "Línea 2")
+            output, errors = io.StringIO(), io.StringIO()
+            with (redirect_stdout(output), redirect_stderr(errors),
+                  patch("sys.argv", ["defense", str(path), "--mode", "guardia"])):
+                try:
+                    defense.main()
+                except SystemExit as error:
+                    assert error.code == 2
+                else:
+                    raise AssertionError("El CLI aceptó una fecha fuera del rango operativo.")
+            assert not output.getvalue() and "fuera del rango operativo" in errors.getvalue()
+
+        lsass = db.get_alert("ALR-20261010-011795")
+        stale = {**lsass, "alert_id": external_id, "created_at": "2026-11-01T12:00:00Z"}
+        write_batch(path, [stale])
+        old_reference, = run_cli(path)
+        assert old_reference["verdict"] == "needs_more_info" and not old_reference["routing"]["automatic"]
+        assert old_reference["routing"]["recommendation"] == "escalate"
+        assert not any(row["cited"] for row in old_reference["evidence"])
+        write_batch(path, [{**stale, "created_at": "2026-10-09T23:30:00Z"}])
+        future_reference, = run_cli(path)
+        assert future_reference["verdict"] == "needs_more_info"
+        assert not any(row["cited"] for row in future_reference["evidence"])
 
         for items, expected in (
             ([ids[0], {"alert_id": ids[0]}], "Alerta repetida"),
@@ -103,6 +155,7 @@ def main():
           f"{sum(row['timing_ms'] for row in tickets)} ms acumulados de triaje oficial; "
           f"{ticket['timing_ms']} ms para el externo.")
     print("Validación: canónico intacto, externo no automático, IDs ausentes/repetidos y entradas inválidas rechazados.")
+    print("Incidente: membresía externa compartida con una fila por alerta, en ambos turnos.")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,8 @@
 """Paneles de tickets, historial y edición de guías."""
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QHeaderView, QPlainTextEdit
 
-from apps.desktop.case_data import pretty
+from apps.desktop.case_data import display_record
+from apps.desktop.defense import report_ticket_id
 from apps.desktop.demo import archive
 from apps.desktop.review import MAX_PLAYBOOK, PLAYBOOKS
 from apps.desktop.widgets import button, label, text_area
@@ -32,14 +33,29 @@ class Operations:
         return widget
 
     def refresh_tickets(self):
-        self.ticket_rows = [
-            ((f"VIG-{key}", "Local", key, "Decidido" if record["decision"] else "Por revisar"), key)
-            for key, record in sorted(self.work.reviews.items(), reverse=True)
-        ] + [
+        groups = {}
+        for key, record in sorted(self.work.reviews.items(), reverse=True):
+            analysis = record.get("analysis") or {}
+            report = analysis.get("report") or {}
+            ticket_id = report_ticket_id(key, analysis)
+            group = groups.setdefault(ticket_id, {"representative": key, "members": set()})
+            group["members"].add(key)
+            if ticket_id.startswith("VIG-INC-"):
+                group["members"].update(report["alert_ids"])
+                if report.get("rule_id") == "UC-EDR-004":
+                    group["representative"] = key
+
+        self.ticket_rows = []
+        for ticket_id, group in groups.items():
+            key, members = group["representative"], group["members"]
+            description = f"{len(members)} alertas · {key}" if len(members) > 1 else key
+            decided = all(self.work.reviews.get(member, {}).get("decision") for member in members)
+            self.ticket_rows.append(((ticket_id, "Local", description, "Decidido" if decided else "Por revisar"), key))
+        self.ticket_rows.extend([
             ((ticket["ticket_id"], "Archivo", ticket["title"], "Referencia"),
              ticket["alert_ids"][0])
             for ticket in archive()["tickets"] if ticket["alert_ids"]
-        ]
+        ])
         self.work._fill_summary(self.ticket_table, [item[0] for item in self.ticket_rows])
         if self.ticket_rows:
             self.ticket_table.selectRow(0)
@@ -57,6 +73,7 @@ class Operations:
     def history(self, table_factory):
         widget, layout = self.work._panel("Historial", "Análisis, decisiones y cambios de guías de este perfil.")
         self.history_table = table_factory(["Fecha UTC", "Tipo", "Autor", "Referencia"])
+        self.history_table.setAccessibleName("Actividad del perfil")
         self.history_table.horizontalHeader().setStretchLastSection(True)
         self.history_table.currentCellChanged.connect(self._history_selection)
         layout.addWidget(self.history_table, 2)
@@ -87,12 +104,16 @@ class Operations:
     def _history_selection(self, row, *_):
         if not 0 <= row < len(self.history_rows):
             return
-        data = self.history_rows[row]["data"]
-        if self.history_rows[row]["kind"] == "Análisis":
-            data = {key: data.get(key) for key in
+        entry = self.history_rows[row]
+        data = entry["data"]
+        if entry["kind"] == "Análisis":
+            data = {key: data[key] for key in
                     ("verdict", "confidence", "proposal", "challenge", "proposal_error", "review_error",
-                     "requested", "timing", "guidance")}
-        self.history_detail.setPlainText(pretty(data))
+                     "requested", "timing", "guidance") if key in data and data[key] not in (None, "")}
+        heading = f"{entry['kind']} · {entry['target']}"
+        self.history_detail.setPlainText(
+            f"{heading}\n{entry['created_at']} · {entry['actor']}\n\n{display_record(data)}"
+        )
 
     def playbooks(self):
         widget, layout = self.work._panel("Playbooks y skill", "Edita las guías que Vigía consulta durante el triaje.")

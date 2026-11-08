@@ -14,18 +14,44 @@ SAP_GUI_SHA256 = "84bd19b4b49dbf3c466d6c0907b317e7299d6fe18b90c7756d9ba7044e4978
 SAP_GUI_PATH = r"c:\program files\sap\frontend\sapgui\saplogon.exe"
 SAP_GUI_COMMAND = r'saplogon.exe /ini_file="\\fs01\sap\saplogon.ini"'
 CHAIN_RULES = {"UC-EDR-001", "UC-EDR-004", "UC-EDR-007", "UC-EDR-008", "UC-EDR-011", "UC-NET-004"}
+CHAIN_PIVOTS = {"UC-EML-002", "UC-NET-001", "UC-IDP-008"}
 DISCOVERY = {"whoami.exe", "net.exe", "nltest.exe", "adf.exe", "adfind.exe", "net1.exe"}
+
+
+def _windows_image(basename):
+    return rf'(?:"(?:[^"\r\n]+\\)?{basename}"|(?:[^\s"]+\\)?{basename})'
+
+
 RECOVERY_COMMANDS = {
-    "vssadmin.exe": re.compile(r'\bvssadmin(?:\.exe)?"?\s+delete\s+shadows\b', re.I),
-    "wbadmin.exe": re.compile(r'\bwbadmin(?:\.exe)?"?\s+delete\s+catalog\b', re.I),
-    "wmic.exe": re.compile(r'\bwmic(?:\.exe)?"?\s+shadowcopy\s+delete\b', re.I),
-    "powershell.exe": re.compile(
-        r"\bwin32_shadowcopy\b.{0,200}?(?:\bremove-(?:ciminstance|wmiobject)\b|\$_.delete\s*\()", re.I,
+    "vssadmin.exe": re.compile(_windows_image(r"vssadmin(?:\.exe)?") + r"[ \t]+delete[ \t]+shadows(?=$|[ \t])", re.I),
+    "wbadmin.exe": re.compile(_windows_image(r"wbadmin(?:\.exe)?") + r"[ \t]+delete[ \t]+catalog(?=$|[ \t])", re.I),
+    "wmic.exe": re.compile(
+        _windows_image(r"wmic(?:\.exe)?")
+        + r'[ \t]+(?:shadowcopy|path[ \t]+(?:win32_shadowcopy|"win32_shadowcopy"))[ \t]+delete'
+          r"(?:[ \t]+/nointeractive)?[ \t]*$", re.I,
     ),
 }
-EDR_STOP = re.compile(r"\bsc(?:\.exe)?\s+stop\s+edragentsvc\b", re.I)
+LSASS_TARGET = re.compile(r"lsass\.exe(?:[ \t]+\(pid[ \t]+([0-9]+)\))?", re.I)
+LSASS_DUMP = re.compile(
+    _windows_image(r"rundll32(?:\.exe)?") + r"[ \t]+" + _windows_image(r"comsvcs\.dll")
+    + r"(?:[ \t]*,[ \t]*|[ \t]+)minidump[ \t]+([0-9]+)[ \t]+\S", re.I,
+)
+SHADOW_PIPELINE = re.compile(
+    r"""(?:get-ciminstance|get-wmiobject)[ \t]+(?:-classname[ \t]+)?(["']?)win32_shadowcopy\1[ \t]*"""
+    r"\|[ \t]*(?:remove-(?:ciminstance|wmiobject)(?:[ \t]+-confirm:\$false)?"
+    r"|foreach-object[ \t]*\{[ \t]*\$_\.delete\([ \t]*\)[ \t]*\})",
+    re.I,
+)
+PS_PREFIX = (
+    r'^\s*(?:powershell(?:\.exe)?|"[^"\r\n]+\\powershell\.exe"|[^\s"]+\\powershell\.exe)'
+    r'(?:[ \t]+-(?:noprofile|noninteractive|nologo|executionpolicy[ \t]+\w+))*[ \t]+'
+)
+PS_COMMAND = re.compile(PS_PREFIX + r"-(?:command|c)[ \t]+(.+)", re.I)
+EDR_STOP = re.compile(
+    _windows_image(r"sc(?:\.exe)?") + r'[ \t]+stop[ \t]+(?:edragentsvc|"edragentsvc")(?=$|[ \t])', re.I,
+)
 WEB_SHELL_COMMAND = re.compile(r"(?:/dev/tcp/|\bbase64\b[^|]*\|\s*(?:bash|sh)\b|\bnc\s+-e\b|\b-encodedcommand\s+\S+)", re.I)
-ENCODED_PS = re.compile(r'\s-(?:encodedcommand|enc)\s+"?([a-z0-9+/=]{12,8192})(?:"|\s|$)', re.I)
+ENCODED_PS = re.compile(PS_PREFIX + r'-(?:encodedcommand|enc)[ \t]+("?)([a-z0-9+/=]{12,8192})\1[ \t]*$', re.I)
 
 
 def _lower(value):
@@ -33,7 +59,15 @@ def _lower(value):
 
 
 def _account(value):
-    return _lower(value).rsplit("\\", 1)[-1].split("@", 1)[0]
+    # Los registros AD y proxy usan el nombre corto del mismo usuario de Tarvia.
+    raw = _lower(value)
+    if "\\" in raw:
+        domain, _, username = raw.rpartition("\\")
+        return username if domain == "tarvia" else raw
+    if "@" in raw:
+        username, _, domain = raw.rpartition("@")
+        return username if domain == "tarvia.example" else f"{domain}\\{username}"
+    return raw
 
 
 def _details(event):
@@ -58,23 +92,75 @@ def _covers_edr_window(event, *, before=0, after):
     return first <= stamp - timedelta(hours=before) and stamp + timedelta(hours=after) <= last
 
 
-def _same_process(child, parent, minutes=30):
+def _pid_reassigned(process, event, observations):
+    start, end = _ts(process), _ts(event)
+    return any(candidate.get("event_type") == "process_start"
+               and candidate.get("hostname") == process.get("hostname") and candidate.get("pid") == process.get("pid")
+               and start < _ts(candidate) <= end for candidate in observations)
+
+
+def _same_process(child, parent, minutes=30, *, observations=()):
     return (
         child.get("hostname") == parent.get("hostname") and bool(parent.get("pid"))
         and child.get("parent_pid") == parent["pid"]
         and _lower(child.get("parent_name")) == _lower(parent.get("process_name"))
         and timedelta(0) <= _ts(child) - _ts(parent) <= timedelta(minutes=minutes)
+        and not _pid_reassigned(parent, child, observations)
     )
 
 
 def _scope(alert, direct):
-    assets = {_lower(row.get("hostname")) for row in alert.get("entities", {}).get("hosts", [])}
+    assets = set()
+    for row in alert.get("entities", {}).get("hosts", []):
+        if hostname := _lower(row.get("hostname")):
+            assets.add(hostname)
+        elif row.get("ip") and (asset := db.asset(row["ip"])):
+            assets.add(_lower(asset["hostname"]))
     stamp = madrid(alert["created_at"])
     return [
         event for event in direct if event.get("source") == "edr_events"
         and _lower(event.get("hostname")) in assets
         and abs(_ts(event) - stamp) <= timedelta(hours=24)
     ]
+
+
+def _verify_entities(alert, analysis, events):
+    declared = alert.get("entities", {})
+    inventory = {_lower(asset["hostname"]): asset for asset in analysis["context"]["activos"]}
+    hosts, users, processes = {}, {}, {}
+    for event in events:
+        host = event["hostname"]
+        if _lower(host) not in hosts:
+            asset = inventory.get(_lower(host)) or db.asset(host) or {}
+            hosts[_lower(host)] = {"hostname": host, **({"ip": asset["ip"]} if asset.get("ip") else {})}
+        if account := _account(event.get("user")):
+            raw = event["user"]
+            tarvia = _lower(raw) in {f"tarvia\\{account}", f"{account}@tarvia.example"}
+            users[account] = {"upn": f"{account}@tarvia.example" if tarvia else raw}
+        if name := event.get("process_name"):
+            pid = event.get("pid")
+            processes[(host, _lower(name), pid)] = {
+                "hostname": host, "name": name, **({"pid": pid} if pid else {}),
+            }
+
+    discrepancies = []
+    for row in declared.get("hosts", []):
+        verified = hosts.get(_lower(row.get("hostname"))) or {}
+        if row.get("ip") and verified.get("ip") and row["ip"] != verified["ip"]:
+            discrepancies.append({"field": "hosts.ip", "declared": row, "verified": [verified]})
+    for row in declared.get("users", []):
+        if row.get("upn") and users and _account(row["upn"]) not in users:
+            discrepancies.append({"field": "users.upn", "declared": row, "verified": list(users.values())})
+    for row in declared.get("processes", []):
+        if not row.get("pid"):
+            continue
+        matches = [process for process in processes.values()
+                   if _lower(process["name"]) == _lower(row.get("name")) and process.get("pid")
+                   and (not row.get("hostname") or _lower(process["hostname"]) == _lower(row["hostname"]))]
+        if matches and all(str(row["pid"]) != str(process["pid"]) for process in matches):
+            discrepancies.append({"field": "processes.pid", "declared": row, "verified": matches})
+    return {"verified": {"hosts": list(hosts.values()), "users": list(users.values()),
+                         "processes": list(processes.values())}, "discrepancies": discrepancies}
 
 
 def _keep(analysis, events):
@@ -124,7 +210,7 @@ def _sap(alert, analysis, edr, proof):
         return None
     nearby = db.events_for_entity(event["hostname"], event["timestamp"], horas=1, source="edr_events", limit=500)
     if len(nearby) == 500 or any(
-        _same_process(candidate, event)
+        _same_process(candidate, event, observations=(*nearby, *analysis["events"]))
         and _lower(candidate.get("process_name")) in {"cmd.exe", "powershell.exe", "wscript.exe", "mshta.exe"}
         for candidate in (*nearby, *analysis["events"])
     ):
@@ -138,102 +224,129 @@ def _sap(alert, analysis, edr, proof):
     }
 
 
-def _antivirus(alert, analysis, edr, proof):
-    for event in edr:
-        details = _details(event)
-        action = _lower(details.get("action"))
+def _antivirus(alert, analysis, direct, edr, proof):
+    detections = [event for event in edr if event.get("event_type") == "detection" and _details(event).get("detection")]
+    if not detections:
+        return None
+    execution_types = {"process_start", "process_access", "network_connect", "registry_set", "service_install"}
+    detection_ids = {event["event_id"] for event in detections}
+    incomplete = any(event.get("source") == "edr_events" and event.get("event_type") == "detection"
+                     and event["event_id"] not in detection_ids for event in direct)
+    executions, unblocked = {}, {}
+    uncovered = truncated = False
+    for event in detections:
+        action = _lower(_details(event).get("action"))
+        if action == "detected_only":
+            unblocked[event["event_id"]] = event
+        incomplete |= action not in {"blocked", "quarantined"}
         sha256 = _lower(event.get("sha256"))
-        detection = details.get("detection")
-        if event.get("event_type") != "detection" or not detection:
-            continue
-        if action not in {"blocked", "quarantined"}:
-            if action == "detected_only":
-                return {**proof("true_positive", [event],
-                                "El antivirus registró una detección sin bloqueo. Hace falta comprobar "
-                                "si el binario llegó a ejecutarse.",
-                                actions=("Revisar ejecución, telemetría y posible contención con N2.",)),
-                        "escalate": ["N2"]}
-            continue
         if not re.fullmatch(r"[0-9a-f]{64}", sha256):
+            incomplete = True
             continue
         observations = db.events_for_entity(sha256, event["timestamp"], horas=24,
                                             source="edr_events", limit=500)
-        same_host = [
-            candidate for candidate in observations if candidate.get("hostname") == event["hostname"]
-            and _lower(candidate.get("sha256")) == sha256
-        ]
-        _trace(analysis, "Búsqueda EDR por hash", sha256, same_host,
+        matched = {candidate["event_id"]: candidate for candidate in (*observations, *analysis["events"], *edr)
+                   if candidate.get("source") == "edr_events" and candidate.get("hostname") == event["hostname"]
+                   and _lower(candidate.get("sha256")) == sha256
+                   and _near(candidate, event, 24 * 60)}
+        _trace(analysis, "Búsqueda EDR por hash", sha256, matched,
                "Mismo equipo dentro de ±24 horas. Límite de recuperación 500.")
-        executions = [candidate for candidate in same_host if candidate.get("event_type") in {
-            "process_start", "process_access", "network_connect", "registry_set", "service_install",
-        }]
-        if executions:
-            _keep(analysis, executions)
-            return {**proof("true_positive", [event, *executions],
-                            "El antivirus registró bloqueo o cuarentena y otro evento vincula el mismo "
-                            "hash con actividad en el equipo. Hay que investigar el alcance.",
-                            actions=("Revisar el equipo y solicitar contención a N2 si procede.",)),
-                    "escalate": ["N2"], "verified_impact": "actividad del mismo binario observada en EDR"}
-        metadata = alert.get("evidence", {})
-        reported = isinstance(metadata, dict) and metadata.get("executed") is False
-        covered = _covers_edr_window(event, before=24, after=24)
-        complete = covered and len(observations) < 500
-        verified = reported and not alert.get("external") and complete
-        limit = (" El índice EDR no abarca toda la ventana de 24 h a cada lado." if not covered
-                 else " La consulta alcanzó el límite de 500 eventos." if not complete else "")
-        result = proof("true_positive", [event],
-                       f"El antivirus registró {('bloqueo' if action == 'blocked' else 'cuarentena')} "
-                       "y la búsqueda acotada no recuperó ejecución para el mismo hash y equipo." + limit,
-                       actions=("Mantener la cuarentena y programar un escaneo completo del equipo.",),
-                       questions=() if verified else ("¿Confirma el EDR que la acción precedió a la ejecución?",))
-        if verified:
-            result.update(resolved=True, verified_prevention="acción del EDR y ausencia de ejecución del mismo hash en el equipo")
-        return result
-    return None
+        executions.update((key, row) for key, row in matched.items() if row.get("event_type") in execution_types)
+        unblocked.update((key, row) for key, row in matched.items() if row.get("event_type") == "detection"
+                         and _lower(_details(row).get("action")) == "detected_only")
+        uncovered |= not _covers_edr_window(event, before=24, after=24)
+        truncated |= len(observations) >= 500
+    evidence = {event["event_id"]: event for event in detections} | unblocked | executions
+    _keep(analysis, evidence.values())
+    if executions:
+        return {**proof("true_positive", evidence.values(),
+                        "El antivirus registró una detección y el EDR vinculó un hash detectado con actividad "
+                        "en el mismo equipo. Hay que investigar el alcance.",
+                        actions=("Revisar el equipo y solicitar contención a N2 si procede.",)),
+                "escalate": ["N2"], "verified_impact": "actividad del mismo binario observada en EDR"}
+    if unblocked:
+        return {**proof("true_positive", evidence.values(),
+                        "El antivirus registró una detección sin bloqueo. Hace falta comprobar su ejecución.",
+                        actions=("Revisar ejecución, telemetría y posible contención con N2.",)),
+                "escalate": ["N2"]}
+    metadata = alert.get("evidence", {})
+    reported = isinstance(metadata, dict) and metadata.get("executed") is False
+    verified = reported and not alert.get("external") and not (incomplete or uncovered or truncated)
+    limit = (" El índice EDR no abarca toda la ventana de 24 h a cada lado." if uncovered
+             else " La consulta alcanzó el límite de 500 eventos." if truncated else "")
+    summary = ("Se necesita corroborar la acción o el hash de todas las detecciones." if incomplete else
+               "El antivirus registró bloqueo o cuarentena y la búsqueda acotada no recuperó ejecución "
+               "para los mismos hashes y equipos.")
+    result = proof("true_positive", evidence.values(), summary + limit,
+                   actions=("Revisar la cuarentena y programar un escaneo completo del equipo.",),
+                   questions=() if verified else ("¿Confirma el EDR que todas las acciones precedieron a la ejecución?",))
+    if verified:
+        result.update(resolved=True, verified_prevention="acción del EDR y ausencia de ejecución de los hashes en sus equipos")
+    return result
 
 
-def _recovery(event):
-    pattern = RECOVERY_COMMANDS.get(_lower(event.get("process_name")))
-    return bool(pattern and event.get("event_type") == "process_start"
-                and pattern.search(event.get("command_line") or ""))
+def _decode_powershell(command):
+    encoded = ENCODED_PS.search(command)
+    if not encoded:
+        return ""
+    try:
+        return b64decode(encoded[2], validate=True).decode("utf-16-le")
+    except (Base64Error, UnicodeError):
+        return ""
+
+
+def recovery_attempt(event):
+    """Reconoce el lanzamiento de un comando contra las copias en la telemetría."""
+    if event.get("event_type") != "process_start":
+        return False
+    process = _lower(event.get("process_name"))
+    command = event.get("command_line") or ""
+    if process == "powershell.exe":
+        payload = _decode_powershell(command)
+        if not payload and (plain := PS_COMMAND.fullmatch(command)):
+            payload = plain[1].strip()
+            if len(payload) >= 2 and payload[0] == payload[-1] == '"':
+                payload = payload[1:-1]
+        return bool(SHADOW_PIPELINE.fullmatch(payload.strip()))
+    pattern = RECOVERY_COMMANDS.get(process)
+    return bool(pattern and pattern.match(command.lstrip()))
 
 
 def _encoded_powershell(edr, proof):
     for event in edr:
         if event.get("event_type") != "process_start" or _lower(event.get("process_name")) != "powershell.exe":
             continue
-        encoded = ENCODED_PS.search(event.get("command_line") or "")
-        if not encoded:
+        payload = _decode_powershell(event.get("command_line") or "")
+        if not payload:
             continue
-        try:
-            payload = b64decode(encoded[1], validate=True).decode("utf-16-le")
-        except (Base64Error, UnicodeError):
-            continue
-        shadow = RECOVERY_COMMANDS["powershell.exe"].search(payload)
+        shadow = SHADOW_PIPELINE.fullmatch(payload.strip())
         fetch_and_run = re.search(r"\b(?:iex|invoke-expression)\b", payload, re.I) and re.search(
             r"\b(?:downloadstring|invoke-webrequest|downloadfile)\s*[( ]", payload, re.I,
         )
         if shadow or fetch_and_run:
             purpose = "inhibición de recuperación" if shadow else "descarga y ejecución de código"
-            return {**proof("true_positive", [event], f"El EDR registró el inicio de PowerShell. "
-                            f"El comando codificado contiene una operación de {purpose}. El efecto queda por verificar.",
-                            actions=("Escalar a N2 y verificar el resultado y el origen del comando.",)),
-                    "escalate": ["N2"]}
+            finding = {**proof("true_positive", [event], f"El EDR registró el inicio de PowerShell. "
+                               f"El comando codificado contiene una operación de {purpose}. El efecto queda por verificar.",
+                               actions=("Escalar a N2 y verificar el resultado y el origen del comando.",)),
+                       "escalate": ["N2"]}
+            if shadow:
+                finding["severity_override"] = "critical"
+            return finding
     return None
 
 
-def _lsass(event):
+def lsass_attempt(event):
+    """Identifica acceso a memoria de LSASS o el lanzamiento de su volcado."""
     details = _details(event)
-    return (
-        event.get("event_type") in {"process_start", "process_access"}
-        and _lower(details.get("target_process")).split(" ", 1)[0] == "lsass.exe"
-        and (
-            _lower(event.get("process_name")) == "rundll32.exe"
-            and "comsvcs.dll" in _lower(event.get("command_line"))
-            and "minidump" in _lower(event.get("command_line"))
-            or event.get("event_type") == "process_access" and "process_vm_read" in _lower(details.get("access"))
-        )
-    )
+    target = LSASS_TARGET.fullmatch(_lower(details.get("target_process")))
+    if not target:
+        return False
+    if event.get("event_type") == "process_access":
+        return bool(re.search(r"\bprocess_vm_read\b", _lower(details.get("access"))))
+    if event.get("event_type") != "process_start" or _lower(event.get("process_name")) != "rundll32.exe":
+        return False
+    command = LSASS_DUMP.match(_lower(event.get("command_line")))
+    return bool(command and (not target[1] or command[1] == target[1]))
 
 
 def _malicious_process(event, analysis):
@@ -254,17 +367,18 @@ def _loader_path(events, analysis):
         for parent in starts:
             if (_lower(parent.get("process_name")) != "msiexec.exe" or not parent.get("pid")
                     or parent.get("pid") != artifact.get("pid") or parent.get("hostname") != artifact.get("hostname")
-                    or not _near(parent, artifact)):
+                    or not timedelta(0) <= _ts(artifact) - _ts(parent) <= timedelta(minutes=10)
+                    or _pid_reassigned(parent, artifact, starts)):
                 continue
             for launch in starts:
                 if (_lower(launch.get("process_name")) == "rundll32.exe" and path in _lower(launch.get("command_line"))
-                        and _same_process(launch, parent) and _ts(launch) >= _ts(artifact)):
+                        and _same_process(launch, parent, observations=starts) and _ts(launch) >= _ts(artifact)):
                     report = _sandbox(analysis, artifact.get("sha256"))
                     if not report or report.get("verdict") != "malicious":
                         continue
                     script = next((candidate for candidate in starts
                                    if _lower(candidate.get("process_name")) in {"wscript.exe", "cscript.exe"}
-                                   and _same_process(parent, candidate)), None)
+                                   and _same_process(parent, candidate, observations=starts)), None)
                     if script:
                         return script, parent, artifact, launch, report
     return None
@@ -276,7 +390,7 @@ def _anydesk(edr, proof):
         if (session.get("event_type") != "network_connect" or _lower(session.get("process_name")) != "anydesk.exe"
                 or "incoming" not in _lower(details.get("session")) or "control remoto" not in _lower(details.get("session"))):
             continue
-        children = [event for event in edr if _same_process(event, session)
+        children = [event for event in edr if _same_process(event, session, observations=edr)
                     and _lower(event.get("process_name")) in {"powershell.exe", "cmd.exe"}
                     and "\\\\" in (event.get("command_line") or "")]
         if children:
@@ -303,34 +417,57 @@ def _point_of_sale(edr, proof):
     return None
 
 
+def _edr_stopped(event):
+    return (event.get("event_type") == "agent_status" and _lower(event.get("process_name")) == "edragentsvc"
+            and _lower(_details(event).get("status")) == "stopped")
+
+
+def _edr_stop(event):
+    return (event.get("source") == "edr_events" and event.get("event_type") == "process_start"
+            and _lower(event.get("process_name")) == "sc.exe" and EDR_STOP.match(_lower(event.get("command_line"))))
+
+
+def _stop_precedes_status(command, status):
+    return (command.get("hostname") == status.get("hostname")
+            and timedelta(0) <= _ts(status) - _ts(command) <= timedelta(minutes=5))
+
+
 def _status(edr, analysis, proof):
-    for event in edr:
-        details = _details(event)
-        if (event.get("event_type") != "agent_status" or _lower(event.get("process_name")) != "edragentsvc"
-                or _lower(details.get("status")) != "stopped"):
-            continue
-        command = next((candidate for candidate in edr if _near(event, candidate, 5)
-                        and candidate.get("hostname") == event.get("hostname")
-                        and candidate.get("event_type") == "process_start"
-                        and _lower(candidate.get("process_name")) == "sc.exe"
-                        and _ts(candidate) <= _ts(event)
-                        and EDR_STOP.search(candidate.get("command_line") or "")), None)
+    stopped = [event for event in edr if _edr_stopped(event)]
+    observations = {event["event_id"]: event for event in (*analysis["events"], *edr)}
+    for event in stopped:
+        commands = [candidate for candidate in observations.values()
+                    if _edr_stop(candidate) and _stop_precedes_status(candidate, event)]
+        if not commands:
+            start = (_ts(event) - timedelta(minutes=5)).isoformat()
+            candidates = db.search_logs("edragentsvc", source="edr_events", desde=start,
+                                        hasta=event["timestamp"], limit=500)
+            commands = [candidate for candidate in candidates
+                        if candidate["event_id"] not in observations and _edr_stop(candidate)
+                        and _stop_precedes_status(candidate, event)]
+        command = max(commands, key=_ts, default=None)
         if command:
+            _keep(analysis, [command])
             return {**proof("true_positive", [command, event],
                             "El proceso lanzó la orden de detener el servicio EDR y el evento de estado "
                             "confirmó que quedó detenido.",
                             actions=("Escalar inmediatamente y restaurar la visibilidad del equipo con N2.",)),
                     "escalate": ["N2"], "verified_impact": "pérdida de telemetría EDR comprobada"}
-        if (_lower(details.get("reason")) == "upgrade 7.14 -> 7.15"
+    if not stopped or {event["event_id"] for event in stopped} != set(analysis["requested"]):
+        return None
+    for event in stopped:
+        details = _details(event)
+        if not (_lower(details.get("reason")) == "upgrade 7.14 -> 7.15"
                 and type(details.get("restarted_after_s")) is int and 0 < details["restarted_after_s"] <= 180
                 and _in_change(analysis, "CHG-2026-1080", event)
                 and any(asset.get("hostname") == event["hostname"] and "windows server" in
                         _lower((db.asset(event["hostname"]) or {}).get("os"))
                         for asset in analysis["context"]["activos"])):
-            return proof("benign_true_positive", [event], "La detención, la versión y la recuperación del "
-                         "agente EDR coinciden con el mantenimiento programado de servidores.",
-                         basis="Ventana CHG-2026-1080 y recuperación del agente registradas.")
-    return None
+            return None
+    return {**proof("benign_true_positive", stopped, "La detención, la versión y la recuperación del "
+                    "agente EDR coinciden con el mantenimiento programado de servidores.",
+                    basis="Ventana CHG-2026-1080 y recuperación del agente registradas."),
+            "authorized_change": True}
 
 
 def _in_change(analysis, change_id, event):
@@ -341,34 +478,93 @@ def _in_change(analysis, change_id, event):
     )
 
 
+def _smb_precedes(flow, service, source_ip, target_ip):
+    return (
+        flow.get("source") == "firewall" and flow.get("src_ip") == source_ip and flow.get("dst_ip") == target_ip
+        and _lower(flow.get("proto")) == "tcp" and str(flow.get("dst_port")) in {"445", "139"}
+        and flow.get("action") == "allow" and timedelta(0) <= _ts(service) - _ts(flow) <= timedelta(minutes=3)
+    )
+
+
+def _approved_lateral(service, edr, analysis, proof):
+    target = service["hostname"]
+    nearby = db.events_for_entity(target, service["timestamp"], horas=1, source="edr_events", limit=500)
+    observations = {event["event_id"]: event for event in (*nearby, *analysis["events"], *edr)}
+    children = [
+        event for event in observations.values() if event.get("source") == "edr_events"
+        and event.get("event_type") == "process_start" and event.get("hostname") == target
+        and _lower(event.get("parent_name")) == "psexesvc.exe"
+        and timedelta(0) <= _ts(event) - _ts(service) <= timedelta(minutes=30)
+    ]
+    _keep(analysis, children)
+    _trace(analysis, "Procesos de PsExec", target, children,
+           "Procesos bajo PSEXESVC en los 30 minutos posteriores a la instalación.")
+    recoveries = [event for event in children if recovery_attempt(event)]
+    if recoveries:
+        return {**proof("true_positive", [service, *recoveries],
+                        "En la ventana del mantenimiento se lanzaron comandos contra las copias bajo PSEXESVC. "
+                        "El cambio no cubre esos comandos y su efecto queda por verificar.",
+                        actions=("Escalar a N2 y verificar el estado de las copias.",)),
+                "escalate": ["N2"], "severity_override": "critical"}
+    malicious = [(event, report) for event in children if (report := _malicious_process(event, analysis))]
+    if malicious:
+        return {**proof("true_positive", [service, *(event for event, _ in malicious)],
+                        "En la ventana del mantenimiento se ejecutó un proceso bajo PSEXESVC cuyo hash "
+                        "está identificado como malicioso en sandbox.",
+                        actions=("Escalar a N2 y revisar el proceso observado en el servidor.",)),
+                "escalate": ["N2"], "verified_impact": "ejecución de un binario malicioso durante el mantenimiento",
+                "sandbox_refs": list(dict.fromkeys(report["sha256"] for _, report in malicious))}
+    if children or len(nearby) == 500 or not _covers_edr_window(service, after=0.5):
+        return {**proof("needs_more_info", [service, *children],
+                        "La instalación coincide con el cambio. Falta verificar el alcance de los procesos "
+                        "bajo PSEXESVC o completar la ventana de telemetría.",
+                        questions=("¿Las ejecuciones del servidor corresponden al paquete del cambio?",)),
+                "escalate": ["N2"]}
+    return {**proof("benign_true_positive", [service], "PsExec ejecutó la instalación de monitorización "
+                    "desde el bastión y en un servidor incluido en la ventana autorizada.",
+                    basis="Origen, destino, paquete y ventana compatibles con CHG-2026-1057."),
+            "auto_close": True}
+
+
 def _lateral(edr, direct, analysis, proof):
     assets = {asset["hostname"]: asset for asset in analysis["context"]["activos"]}
-    for service in edr:
+    scoped = {event["event_id"] for event in edr}
+    findings, unverified = [], []
+    for service in direct:
         details = _details(service)
-        origin = details.get("remote_host")
-        target = service["hostname"]
-        actor = _account(service.get("user"))
-        if (service.get("event_type") != "service_install" or _lower(details.get("service_name")) != "psexesvc"
-                or origin not in assets or target not in assets or not actor.startswith("adm.")):
+        if (service.get("source") != "edr_events" or service.get("event_type") != "service_install"
+                or _lower(details.get("service_name")) != "psexesvc"):
+            continue
+        origin, target = details.get("remote_host"), service.get("hostname")
+        if (service["event_id"] not in scoped or origin not in assets or target not in assets
+                or not _account(service.get("user")).startswith("adm.")):
+            unverified.append(service)
             continue
         scope = {"ERP-APP01", "HR-APP01", "PRINT01", "CRM-APP01"}
         if (origin == "JUMP01" and target in scope and _in_change(analysis, "CHG-2026-1057", service)
                 and details.get("payload") == "Instalación agente de monitorización 3.4"):
-            return {**proof("benign_true_positive", [service], "PsExec ejecutó la instalación de monitorización "
-                            "desde el bastión y en un servidor incluido en la ventana autorizada.",
-                            basis="Origen, destino, paquete y ventana compatibles con CHG-2026-1057."),
-                    "auto_close": True}
-        flow = next((event for event in direct if event.get("source") == "firewall"
-                     and event.get("src_ip") == assets[origin]["ip"] and event.get("dst_ip") == assets[target]["ip"]
-                     and str(event.get("dst_port")) in {"445", "139"} and event.get("action") == "allow"
-                     and _near(event, service, 3)), None)
+            findings.append(_approved_lateral(service, edr, analysis, proof))
+            continue
+        flow = next((event for event in direct
+                     if _smb_precedes(event, service, assets[origin]["ip"], assets[target]["ip"])), None)
         if origin != "JUMP01" and flow:
-            return {**proof("true_positive", [flow, service], "El firewall y la instalación de PSEXESVC "
-                            "coinciden en origen, destino y tiempo. La cuenta privilegiada se utilizó desde "
-                            "fuera del bastión permitido.",
-                            actions=("Escalar a N2 y revisar la cuenta y el proceso hijo en el destino.",)),
-                    "escalate": ["N2"], "verified_impact": "sesión administrativa y servicio remoto observados"}
-    return None
+            findings.append({**proof("true_positive", [flow, service], "El firewall y la instalación de PSEXESVC "
+                                      "coinciden en origen, destino y tiempo. La cuenta privilegiada se utilizó "
+                                      "desde fuera del bastión permitido.",
+                                      actions=("Escalar a N2 y revisar la cuenta y el proceso hijo en el destino.",)),
+                             "escalate": ["N2"], "verified_impact": "sesión administrativa y servicio remoto observados"})
+        else:
+            unverified.append(service)
+    if not findings:
+        return None
+    priority = {"true_positive": 2, "needs_more_info": 1, "benign_true_positive": 0}
+    finding = max(findings, key=lambda row: (priority[row["verdict"]], row.get("severity_override") == "critical"))
+    if finding["verdict"] == "benign_true_positive" and unverified:
+        return {**proof("needs_more_info", unverified, "Se verificó parte del mantenimiento, pero faltan pruebas "
+                        "para atribuir todas las instalaciones de PsExec al cambio."),
+                "escalate": ["N2"]}
+    finding["citations"] = list(dict.fromkeys(event_id for row in findings for event_id in row["citations"]))
+    return finding
 
 
 def _mining(edr, direct, analysis, proof):
@@ -474,9 +670,9 @@ def _direct_finding(alert, analysis, direct, edr, proof):
     if rule == "UC-EDR-002":
         return _encoded_powershell(edr, proof)
     if rule == "UC-EDR-003":
-        return _antivirus(alert, analysis, edr, proof)
+        return _antivirus(alert, analysis, direct, edr, proof)
     if rule == "UC-EDR-004":
-        lsass = [event for event in edr if _lsass(event)]
+        lsass = [event for event in edr if lsass_attempt(event)]
         if lsass:
             return {**proof("true_positive", lsass, "EDR registra el acceso o intento de volcado de LSASS. "
                             "No se ha comprobado la extracción de credenciales.",
@@ -487,7 +683,7 @@ def _direct_finding(alert, analysis, direct, edr, proof):
     if rule == "UC-EDR-006":
         return _mining(edr, direct, analysis, proof)
     if rule == "UC-EDR-007":
-        recovery = [event for event in edr if _recovery(event)]
+        recovery = [event for event in edr if recovery_attempt(event)]
         if recovery:
             blocked = _lower((alert.get("evidence") or {}).get("edr_action")) == "blocked"
             return {**proof("true_positive", recovery, "Se lanzaron comandos de inhibición de recuperación."
@@ -496,7 +692,8 @@ def _direct_finding(alert, analysis, direct, edr, proof):
                             + " Es una señal de preransomware. No se ha observado cifrado.",
                             actions=("Escalado inmediato a N2. Preservar el host y verificar copias, volúmenes y otros equipos.",),
                             questions=("¿Se eliminó alguna instantánea o se observaron escrituras de cifrado?",)),
-                    "escalate": ["N2"], "verified_impact": "lanzamiento de comandos contra la recuperación"}
+                    "escalate": ["N2"], "verified_impact": "lanzamiento de comandos contra la recuperación",
+                    "severity_override": "critical"}
     if rule == "UC-EDR-008":
         for anchor in edr:
             if not anchor.get("parent_pid"):
@@ -530,11 +727,36 @@ def check(alert, analysis, direct, proof):
         return None
     edr = _scope(alert, direct)
     finding = _direct_finding(alert, analysis, direct, edr, proof)
-    if finding and finding["verdict"] == "true_positive" and rule in CHAIN_RULES:
-        incident = _preransomware(alert, analysis, edr)
-        if incident:
-            finding["incident"] = incident
-            finding["citations"] = list(dict.fromkeys(finding["citations"] + incident["evidence_ids"]))
+    if finding:
+        cited = set(finding["citations"])
+        anchors = [event for event in edr if event["event_id"] in cited]
+        if rule == "UC-EDR-011" and finding["verdict"] == "true_positive":
+            # El hallazgo ya comprobó host, servicio, orden y ventana de la pareja.
+            anchors.extend(event for event in analysis["events"] if event["event_id"] in cited
+                           and event not in anchors and _edr_stop(event))
+        if alert.get("external") and anchors:
+            finding["entity_verification"] = _verify_entities(alert, analysis, anchors)
+        if finding["verdict"] == "true_positive" and rule in CHAIN_RULES:
+            _attach_incident(alert, analysis, finding, anchors)
+    return finding
+
+
+def _attach_incident(alert, analysis, finding, anchors):
+    if incident := _preransomware(alert, analysis, anchors):
+        finding["incident"] = incident
+        finding["severity_override"] = "critical"
+        finding["citations"] = list(dict.fromkeys(finding["citations"] + incident["evidence_ids"]))
+
+
+def link_incident(alert, analysis, finding):
+    """Amplía hallazgos positivos con pruebas directas de la misma cadena."""
+    if not finding or finding["verdict"] != "true_positive" or alert["rule_id"] not in CHAIN_PIVOTS:
+        return finding
+    direct_ids = set(finding["citations"]).intersection(analysis["requested"])
+    stamp = madrid(alert["created_at"])
+    anchors = [event for event in analysis["events"] if event["event_id"] in direct_ids
+               and abs(_ts(event) - stamp) <= timedelta(hours=24)]
+    _attach_incident(alert, analysis, finding, anchors)
     return finding
 
 
@@ -555,9 +777,7 @@ def _lateral_edge(service, events, analysis):
         return None
     flow = next((event for event in db.events_for_entity(source_asset["ip"], service["timestamp"], horas=1,
                                                          source="firewall", limit=500)
-                 if event.get("src_ip") == source_asset["ip"] and event.get("dst_ip") == target_asset["ip"]
-                 and str(event.get("dst_port")) in {"445", "139"} and event.get("action") == "allow"
-                 and _near(service, event, 3)), None)
+                 if _smb_precedes(event, service, source_asset["ip"], target_asset["ip"])), None)
     return (flow, service, child) if flow else None
 
 
@@ -631,6 +851,21 @@ def _privilege_pair(stop, actor):
     return []
 
 
+def _mail_script_hosts(mail, alert):
+    if mail.get("direction") != "inbound" or mail.get("action") != "delivered":
+        return set()
+    recipients = {_account(address) for address in mail.get("recipients", [])}
+    subjects = {_account(row.get("upn")) for row in alert.get("entities", {}).get("users", [])}
+    hosts = set()
+    for recipient in sorted((recipients & subjects) - {""})[:8]:
+        candidates = db.events_for_entity(recipient, mail["timestamp"], horas=24, source="edr_events", limit=500)
+        hosts.update(event["hostname"] for event in candidates if event.get("hostname")
+                     and _account(event.get("user")) == recipient and event.get("event_type") == "process_start"
+                     and _lower(event.get("process_name")) in {"wscript.exe", "cscript.exe"}
+                     and timedelta(0) <= _ts(event) - _ts(mail) <= timedelta(days=1))
+    return hosts
+
+
 def _preransomware(alert, analysis, anchors):
     """Exige movimiento lateral, acciones contra las copias y una prueba común con la alerta."""
     if not anchors:
@@ -646,16 +881,39 @@ def _preransomware(alert, analysis, anchors):
                             if event.get("hostname") == host]
         return by_host[host]
 
-    seed_hosts = {event["hostname"] for event in anchors}
+    seed_hosts = set()
+    for event in anchors:
+        source = event["source"]
+        if source == "edr_events" and event.get("hostname"):
+            seed_hosts.add(event["hostname"])
+        elif (source == "proxy" and event.get("hostname") and event.get("method") == "POST"
+              and event.get("action") == "allowed"):
+            seed_hosts.add(event["hostname"])
+        elif source == "email":
+            seed_hosts.update(_mail_script_hosts(event, alert))
+        elif source == "ad_events" and event.get("src_host"):
+            seed_hosts.add(event["src_host"])
+    if not seed_hosts:
+        return None
+
     seed_events = {event["event_id"] for event in anchors}
     bridge_hosts = set(seed_hosts)
     # Solo la misma muestra maliciosa, identidad y servicio permite partir del host del día 18.
-    if alert["rule_id"] == "UC-EDR-011":
-        for anchor in anchors:
-            for payload in host_edr(anchor["hostname"]):
-                if (_lower(payload.get("parent_name")) == "psexesvc.exe"
-                        and _same_process(anchor, payload, 10 * 24 * 60)
-                        and _malicious_process(payload, analysis)):
+    if alert["rule_id"] in {"UC-EDR-011", "UC-IDP-008"}:
+        for host in sorted(seed_hosts):
+            observations = host_edr(host)
+            for payload in observations:
+                if _lower(payload.get("parent_name")) != "psexesvc.exe":
+                    continue
+                linked = any(
+                    (anchor["source"] == "edr_events"
+                     and _same_process(anchor, payload, 10 * 24 * 60, observations=observations))
+                    or (anchor["source"] == "ad_events" and anchor.get("src_host") == host
+                        and _account(anchor.get("subject")) == _account(payload.get("user"))
+                        and timedelta(0) <= _ts(anchor) - _ts(payload) <= timedelta(days=10))
+                    for anchor in anchors
+                )
+                if linked and _malicious_process(payload, analysis):
                     bridge_hosts.update(peer["hostname"] for peer in _payload_peers(payload))
 
     services = [
@@ -666,12 +924,14 @@ def _preransomware(alert, analysis, anchors):
     ]
     for service in services:
         target = service["hostname"]
-        edge = _lateral_edge(service, host_edr(target), analysis)
+        observations = host_edr(target)
+        edge = _lateral_edge(service, observations, analysis)
         if not edge:
             continue
         flow, service, payload = edge
         origin = _details(service)["remote_host"]
-        recoveries = [event for event in host_edr(target) if _recovery(event) and _same_process(event, payload, 120)
+        recoveries = [event for event in observations if recovery_attempt(event)
+                      and _same_process(event, payload, 120, observations=observations)
                       and _account(event.get("user")) == _account(payload.get("user"))]
         if not recoveries:
             continue
@@ -711,7 +971,9 @@ def _render_incident(analysis, host_edr, origin, target, flow, service, payload,
         persistence = [
             event for event in origin_events if event.get("event_type") == "registry_set"
             and event.get("pid") == launch["pid"] and _lower(event.get("process_name")) == "rundll32.exe"
-            and "\\currentversion\\run\\" in _lower(_details(event).get("key")) and _near(event, launch, 2)
+            and "\\currentversion\\run\\" in _lower(_details(event).get("key"))
+            and timedelta(0) <= _ts(event) - _ts(launch) <= timedelta(minutes=2)
+            and not _pid_reassigned(launch, event, origin_events)
             and _lower(_details(artifact)["file_path"]) in _lower(_details(event).get("value"))
         ]
         if persistence:
@@ -721,11 +983,13 @@ def _render_incident(analysis, host_edr, origin, target, flow, service, payload,
                   "El proxy aceptó POST repetidos al dominio del instalador desde el mismo equipo y cuenta. "
                   "El patrón es compatible con C2. El contenido de las solicitudes no está disponible.")
         recon = [event for event in origin_events if event.get("event_type") == "process_start"
-                 and _lower(event.get("process_name")) in DISCOVERY and _same_process(event, launch, 24 * 60)]
+                 and _lower(event.get("process_name")) in DISCOVERY
+                 and _same_process(event, launch, 24 * 60, observations=origin_events)]
         if len({_lower(event["process_name"]) for event in recon}) >= 3:
             stage("Reconocimiento", origin, recon, "Comandos de enumeración de cuentas, grupos y equipos "
                   "registrados bajo el mismo PID padre de rundll32 en una ventana de 24 horas.")
-        lsass = [event for event in origin_events if _lsass(event) and _same_process(event, launch, 24 * 60)]
+        lsass = [event for event in origin_events if lsass_attempt(event)
+                 and _same_process(event, launch, 24 * 60, observations=origin_events)]
         if lsass:
             stage("Acceso a credenciales", origin, lsass,
                   "rundll32 lanzó un intento de volcado de LSASS. La creación del volcado no está confirmada.")
@@ -746,15 +1010,11 @@ def _render_incident(analysis, host_edr, origin, target, flow, service, payload,
               "Se ejecutó un binario con el mismo SHA-256, cuenta y servicio padre que en el servidor. "
               "El origen de esta segunda ejecución queda por determinar.")
         events = host_edr(host)
-        stop = next((event for event in events if event.get("event_type") == "process_start"
-                     and _lower(event.get("process_name")) == "sc.exe" and _same_process(event, peer, 10 * 24 * 60)
-                     and EDR_STOP.search(event.get("command_line") or "")), None)
+        stop = next((event for event in events if _edr_stop(event)
+                     and _same_process(event, peer, 10 * 24 * 60, observations=events)), None)
         if not stop:
             continue
-        status = next((event for event in events if event.get("event_type") == "agent_status"
-                       and _lower(event.get("process_name")) == "edragentsvc"
-                       and _lower(_details(event).get("status")) == "stopped"
-                       and timedelta(0) <= _ts(event) - _ts(stop) <= timedelta(minutes=5)), None)
+        status = next((event for event in events if _edr_stopped(event) and _stop_precedes_status(stop, event)), None)
         if privileges := _privilege_pair(stop, _account(peer.get("user"))):
             stage("Privilegios persistentes", host, privileges,
                   "La misma cuenta privilegiada creó otra cuenta y la incorporó a Domain Admins minutos después.")

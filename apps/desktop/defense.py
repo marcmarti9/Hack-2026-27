@@ -2,7 +2,7 @@
 import argparse
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from apps.backend.rules.engine import LEVELS
@@ -12,7 +12,13 @@ MAX_ALERTS = 10
 MAX_BYTES = 1_000_000
 ALERT_ID = re.compile(r"ALR-[0-9]{8}-[0-9]{6}")
 EVENT_ID = re.compile(r"[A-Z][A-Z0-9]{1,12}-[0-9]{4,10}")
+INCIDENT_TICKET_ID = re.compile(rf"VIG-INC-{EVENT_ID.pattern}")
+TECHNIQUE_ID = re.compile(r"T[0-9]{4}(?:\.[0-9]{3})?")
 UTC_STAMP = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?(?:Z|\+00:00)")
+# Reserva espacio para las ventanas de búsqueda, los plazos y la conversión a Madrid.
+TIME_MARGIN = timedelta(days=14, hours=3)
+MIN_ALERT_DATE = datetime.min.replace(tzinfo=timezone.utc) + TIME_MARGIN
+MAX_ALERT_DATE = datetime.max.replace(tzinfo=timezone.utc) - TIME_MARGIN
 TEXT_ENTITIES = {"ips", "domains", "urls"}
 RECORD_ENTITIES = {
     "hosts": ("hostname", "ip"),
@@ -85,9 +91,11 @@ def _external(item):
     if not UTC_STAMP.fullmatch(stamp):
         raise ValueError("La fecha debe estar en UTC (Z o +00:00).")
     try:
-        datetime.fromisoformat(stamp)
+        date = datetime.fromisoformat(stamp)
     except ValueError:
         raise ValueError("La fecha de la alerta no es válida.") from None
+    if not MIN_ALERT_DATE <= date <= MAX_ALERT_DATE:
+        raise ValueError("La fecha de la alerta queda fuera del rango operativo.")
     source = _text(item.get("source_product"), "source_product", 32)
     runbook = _text(item.get("runbook"), "runbook", 5)
     rule_id = _text(item.get("rule_id"), "rule_id", 24)
@@ -102,13 +110,28 @@ def _external(item):
             or any(not isinstance(key, str) or not EVENT_ID.fullmatch(key) for key in references)
             or len(set(references)) != len(references)):
         raise ValueError("Referencias de eventos inválidas o repetidas.")
-    return {
+    alert = {
         "alert_id": item["alert_id"], "created_at": stamp, "source_product": source,
         "rule_id": rule_id, "rule_name": _text(item.get("rule_name"), "rule_name", 300),
         "description": _text(item.get("description"), "description", 4000),
         "runbook": runbook, "severity": severity, "entities": _entities(item.get("entities")),
         "related_events": references, "external": True,
     }
+    mitre = item.get("mitre")
+    technique = mitre.get("technique_id") if isinstance(mitre, dict) else None
+    if isinstance(technique, str) and TECHNIQUE_ID.fullmatch(technique):
+        alert["mitre"] = {"technique_id": technique}
+    return alert
+
+
+def report_ticket_id(alert_id, analysis):
+    """Resuelve el identificador de un expediente local y mantiene el formato histórico."""
+    report = (analysis or {}).get("report") or {}
+    ticket_id = report.get("ticket_id")
+    if (isinstance(ticket_id, str) and INCIDENT_TICKET_ID.fullmatch(ticket_id)
+            and alert_id in report.get("alert_ids", [])):
+        return ticket_id
+    return f"VIG-{alert_id}"
 
 
 def load_alerts(path: Path) -> list[dict]:
@@ -173,6 +196,7 @@ def _ticket(alert, analysis):
 def main():
     from apps.desktop.assistant import available_model
     from apps.desktop.review import PLAYBOOKS, investigate
+    from apps.desktop.triage_report import merge_incident_memberships
 
     parser = argparse.ArgumentParser(description="Ensaya el triaje de hasta diez alertas de defensa.")
     parser.add_argument("batch", type=Path, help="Archivo JSONL con IDs o alertas")
@@ -186,12 +210,16 @@ def main():
     except (ValueError, OSError) as error:
         parser.error(str(error))
     playbooks = Path(__file__).with_name("resources") / "playbooks"
+    reports = []
     for alert in alerts:
         names = ("SKILL", alert["runbook"]) if alert["runbook"] in PLAYBOOKS else ("SKILL",)
         guidance = {name: {"revision": 0, "text": (playbooks / f"{name}.md").read_text(encoding="utf-8")}
                     for name in names} if args.remote else None
         analysis = investigate(alert, remote=args.remote, guidance=guidance, triage=True, mode=args.mode)
-        print(json.dumps(_ticket(alert, analysis)))
+        reports.append({**_ticket(alert, analysis), "alert_id": alert["alert_id"]})
+    merge_incident_memberships(reports)
+    for report in reports:
+        print(json.dumps(report))
 
 
 if __name__ == "__main__":

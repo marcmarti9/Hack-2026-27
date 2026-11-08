@@ -11,6 +11,7 @@ from apps.backend.rules.engine import madrid
 from apps.backend.rules.triage import local_finding
 from apps.backend.tools import db
 from apps.desktop.assistant import ALERT_ID
+from apps.desktop.defense import report_ticket_id
 from apps.desktop.demo import DEMO_USER
 from apps.desktop.review import now
 
@@ -23,7 +24,7 @@ TABLE = """
         actor TEXT NOT NULL, required_role TEXT NOT NULL,
         status TEXT NOT NULL CHECK (status IN ('reserved', 'executed', 'failed', 'unknown')),
         approved_at TEXT NOT NULL, finished_at TEXT, result TEXT NOT NULL,
-        justification TEXT NOT NULL, citations TEXT NOT NULL,
+        justification TEXT NOT NULL, citations TEXT NOT NULL, ticket_id TEXT,
         PRIMARY KEY (alert_id, action, target)
     )
 """
@@ -73,18 +74,38 @@ def isolation_proposal(alert_id: str, *, practice: bool) -> dict | None:
     return _propose(alert_id)
 
 
-def isolation_status(store, alert_id: str) -> dict | None:
+def isolation_records(store, alert_id: str, analysis=None) -> list[dict]:
+    """Devuelve los registros persistidos de la alerta y su expediente acreditado."""
     with closing(sqlite3.connect(store.path)) as connection:
         connection.row_factory = sqlite3.Row
-        if not connection.execute(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'simulated_isolations'"
-        ).fetchone():
-            return None
-        row = connection.execute("""
-            SELECT * FROM simulated_isolations WHERE alert_id = ?
-            ORDER BY approved_at DESC, rowid DESC LIMIT 1
-        """, (alert_id,)).fetchone()
-    return {**dict(row), "citations": json.loads(row["citations"])} if row else None
+        columns = {column[1] for column in connection.execute("PRAGMA table_info(simulated_isolations)")}
+        if not columns:
+            return []
+        ticket_id = report_ticket_id(alert_id, analysis)
+        condition = "alert_id = ?"
+        params = [alert_id]
+        if ticket_id.startswith("VIG-INC-"):
+            params = [member for member in analysis["report"]["alert_ids"]
+                      if isinstance(member, str) and ALERT_ID.fullmatch(member)]
+            condition = f"alert_id IN ({', '.join('?' for _ in params)})"
+            if "ticket_id" in columns:
+                condition = f"ticket_id = ? OR (ticket_id IS NULL AND {condition})"
+                params.insert(0, ticket_id)
+        rows = connection.execute(f"""
+            SELECT * FROM simulated_isolations WHERE {condition}
+            ORDER BY approved_at DESC, rowid DESC
+        """, params).fetchall()
+    records = []
+    for row in rows:
+        record = dict(row)
+        record["ticket_id"] = record.get("ticket_id") or report_ticket_id(row["alert_id"], None)
+        record["citations"] = json.loads(row["citations"])
+        records.append(record)
+    return records
+
+
+def isolation_status(store, alert_id: str) -> dict | None:
+    return next(iter(isolation_records(store, alert_id)), None)
 
 
 class _SimulatorError(ValueError):
@@ -129,14 +150,21 @@ def _reserve(store, proposal, actor, justification):
              "finished_at": None, "result": "Aprobado y reservado. Verificación del simulador pendiente.",
              "justification": justification}
     with closing(sqlite3.connect(store.path)) as connection, connection:
+        connection.execute("BEGIN IMMEDIATE")
         connection.execute(TABLE)
+        columns = {column[1] for column in connection.execute("PRAGMA table_info(simulated_isolations)")}
+        if "ticket_id" not in columns:
+            connection.execute("ALTER TABLE simulated_isolations ADD COLUMN ticket_id TEXT")
+        saved = connection.execute("SELECT analysis FROM reviews WHERE alert_id = ?", (entry["alert_id"],)).fetchone()
+        analysis = json.loads(saved[0]) if saved and saved[0] else None
+        entry["ticket_id"] = report_ticket_id(entry["alert_id"], analysis)
         values = {**entry, "citations": json.dumps(entry["citations"])}
         insert = connection.execute("""
             INSERT INTO simulated_isolations
                 (alert_id, action, target, actor, required_role, status, approved_at, finished_at,
-                 result, justification, citations)
+                 result, justification, citations, ticket_id)
             VALUES (:alert_id, :action, :target, :actor, :required_role, :status, :approved_at,
-                    :finished_at, :result, :justification, :citations)
+                    :finished_at, :result, :justification, :citations, :ticket_id)
             ON CONFLICT(alert_id, action, target) DO NOTHING
         """, values)
         if not insert.rowcount:
@@ -184,7 +212,7 @@ def execute_isolation(store, account, alert_id: str, *, practice: bool, target: 
     except _SimulatorError as error:
         return _finish(store, entry, "failed", str(error))
 
-    payload = {"target": target, "justification": reason, "approval_token": token, "ticket_id": f"VIG-{alert_id}"}
+    payload = {"target": target, "justification": reason, "approval_token": token, "ticket_id": entry["ticket_id"]}
     try:
         response = _request(port, "POST", CONTAINMENT, payload)
         if (response.get("action") != ACTION or response.get("result") != "ok (simulado)"

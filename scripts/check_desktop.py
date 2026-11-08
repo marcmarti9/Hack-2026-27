@@ -2,6 +2,8 @@
 import io
 import json
 import os
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import monotonic
@@ -10,7 +12,7 @@ from unittest.mock import patch
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
+    QApplication, QComboBox, QDialog, QFileDialog, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
     QPushButton, QTableWidget, QTabWidget, QTextBrowser,
 )
 
@@ -27,6 +29,7 @@ def check(app, window, home, password, output):
     from apps.backend.tools import db
     from apps.desktop.assistant import openai_message
     from apps.desktop.case_data import case_sections, demo_process, soc_status
+    from apps.desktop.defense import load_alerts
     from apps.desktop.demo import archive, for_alert
     from apps.desktop.reports import read_report
     from apps.desktop.review import REVIEW_SCHEMA, investigate
@@ -186,6 +189,19 @@ def check(app, window, home, password, output):
                 evidence = tabs.widget(1).findChild(QTextBrowser).toPlainText()
                 assert "Cobertura de las evidencias" in evidence and "EDR-0123412" in evidence
                 assert "Citas de la propuesta" in evidence and "Citas del contraste" in evidence
+                event_choice = tabs.widget(1).findChild(QComboBox)
+                event_choice.setCurrentText("EDR-0123412")
+                displayed_event = []
+
+                def capture_event(viewer):
+                    assert viewer.windowTitle() == "EDR-0123412"
+                    displayed_event.append(viewer.findChild(QPlainTextEdit).toPlainText())
+                    return QDialog.DialogCode.Rejected
+
+                with patch.object(QDialog, "exec", capture_event):
+                    controls["Ver evento original"].click()
+                    wait_for(lambda: displayed_event, "lectura del evento original")
+                assert "EDR-0123412" in displayed_event[0] and not displayed_event[0].lstrip().startswith("{")
                 assert "INC-20261009-011790" in tabs.widget(3).toPlainText()
                 assert "Verificar el equipo con N2." in tabs.widget(4).toPlainText()
                 guidance_failures = []
@@ -232,12 +248,13 @@ def check(app, window, home, password, output):
         json.dumps(response), json.dumps({**challenge, "verdict": "false_positive"})
     ]):
         disputed = investigate(work.selected, True)
-        assert disputed["verdict"] == "needs_more_info" and disputed["confidence"] is None
+        assert disputed["verdict"] == "true_positive" and disputed["confidence"] is None
+        assert disputed["review_error"] and not disputed["routing"]["automatic"]
     with patch("apps.desktop.review.openai_message", side_effect=[
         json.dumps(response), json.dumps({**challenge, "citations": ["EDR-9999999"]})
     ]):
         invalid = investigate(work.selected, True)
-        assert invalid["verdict"] == "needs_more_info" and invalid["review_error"]
+        assert invalid["verdict"] == "true_positive" and invalid["review_error"]
 
     intelligence_id = "ALR-20261009-011792"
     intelligence = investigate(db.get_alert(intelligence_id))
@@ -310,6 +327,74 @@ def check(app, window, home, password, output):
     assert [entry["kind"] for entry in window.reviews.history("ALR-20261010-011795")] == ["Aceptada", "Análisis"]
     assert password.encode() not in window.account.path.read_bytes()
     work = window.workbench
+    accepted_alert = db.get_alert("ALR-20261010-011795")
+    recent = investigate(accepted_alert, triage=True, mode="diurno")
+    accepted_path = home / "expediente-aceptado.json"
+
+    def export_accepted(dialog):
+        summary = dialog.findChild(QTextBrowser, "reviewProcess").toPlainText()
+        assert "Decisión humana vigente" in summary and "Ensayo del lote · histórico" in summary
+        next(control for control in dialog.findChildren(QPushButton) if control.text() == "Exportar expediente").click()
+        return QDialog.DialogCode.Rejected
+
+    with patch.object(QFileDialog, "getSaveFileName", return_value=(str(accepted_path), "")), patch.object(
+            QDialog, "exec", export_accepted):
+        work._detail(accepted_alert, defense_result=recent)
+    accepted_export = json.loads(accepted_path.read_text())
+    accepted_result = accepted_export["resultado_lote"]
+    assert accepted_result["persisted_decision"] == accepted_result["report"]["decision_actual"]["decision"] == "accepted"
+    assert accepted_result["routing"] == accepted_result["report"]["routing"]
+    assert accepted_result["routing"]["mode"] == "guardia"
+    assert accepted_export["ensayo_lote_original"]["routing"]["mode"] == "diurno"
+    sibling_id = "ALR-20261010-011794"
+    sibling = investigate(db.get_alert(sibling_id), triage=True)
+    assert window.reviews.save_analysis(sibling_id, sibling)
+    work.reviews = window.reviews.all()
+    work.sections.refresh_tickets()
+    incident_ticket = sibling["report"]["ticket_id"]
+    grouped = [row for row in work.sections.ticket_rows if row[0][0] == incident_ticket]
+    assert len(grouped) == 1 and grouped[0][1] == "ALR-20261010-011795"
+    assert window.reviews.history(sibling_id)[0]["kind"] == "Análisis"
+
+    history_before = window.reviews.history(accepted_alert["alert_id"])
+    recovery = db.get_alert("ALR-20261010-011798")
+    new_members = ("ALR-20261010-991502", "ALR-20261010-991503")
+    batch_path = home / "miembro-incidente.jsonl"
+    for identifier, event in zip(new_members, ("EDR-0123415", "EDR-0123416")):
+        batch_path.write_text(json.dumps({**recovery, "alert_id": identifier, "related_events": [event]}) + "\n")
+        with patch.object(work, "_batch_results") as results:
+            work._triage_batch(load_alerts(batch_path), present=True)
+            wait_for(lambda: results.called, "incorporar una alerta corroborada")
+            (batch_alert, batch_analysis, error), = results.call_args.args[0]
+            assert not error and batch_analysis["report"]["ticket_id"] == incident_ticket
+    assert new_members[0] not in batch_analysis["report"]["alert_ids"]
+    work.sections.refresh_tickets()
+    group, = [row for row, _ in work.sections.ticket_rows if row[0] == incident_ticket]
+    assert group[2].startswith("11 alertas")
+
+    def export_group(dialog):
+        tabs = dialog.findChild(QTabWidget)
+        timeline = next(tabs.widget(i) for i in range(tabs.count()) if tabs.tabText(i) == "Línea de tiempo")
+        assert all(identifier in timeline.toPlainText() for identifier in new_members)
+        next(control for control in dialog.findChildren(QPushButton) if control.text() == "Exportar expediente").click()
+        return QDialog.DialogCode.Rejected
+
+    with patch.object(QFileDialog, "getSaveFileName", return_value=(str(accepted_path), "")), patch.object(
+            QDialog, "exec", export_group):
+        work._detail(accepted_alert)
+        current_group = json.loads(accepted_path.read_text())["informe"]
+        work._detail(batch_alert, defense_result=batch_analysis)
+        current_batch = json.loads(accepted_path.read_text())["resultado_lote"]["report"]
+        work._detail(accepted_alert, defense_result=recent)
+        accepted_group = json.loads(accepted_path.read_text())
+    for report in (current_group, current_batch, accepted_group["resultado_lote"]["report"]):
+        assert report["ticket_id"] == incident_ticket
+        assert report["alert_ids"] == report["incident"]["alert_ids"] == current_group["alert_ids"]
+        assert set(new_members) <= set(report["alert_ids"])
+    assert current_group["decision_actual"]["decision"] == "accepted"
+    assert set(new_members).isdisjoint(accepted_group["ensayo_lote_original"]["report"]["alert_ids"])
+    assert window.reviews.history(accepted_alert["alert_id"]) == history_before
+
     work.query.setText("ALR-20261005-000173")
     work.search.click()
     wait_for(lambda: work.total == 1, "lote filtrado")
@@ -333,6 +418,32 @@ def check(app, window, home, password, output):
     assert work.table.item(0, 3).text() == "Corregida"
     assert work.table.item(0, 4).text() == "Falso positivo"
     assert "WAF-0001841" in window.reviews.history("ALR-20261005-000173")[0]["data"]["reason"]
+    exported_case = home / "expediente-corregido.json"
+
+    def export_corrected(dialog):
+        summary = dialog.findChild(QTextBrowser, "reviewProcess").toPlainText()
+        assert "Decisión humana vigente" in summary and "Se recomendó cerrar" in summary
+        assert "Automatizable según política" not in summary
+        next(control for control in dialog.findChildren(QPushButton) if control.text() == "Exportar expediente").click()
+        return QDialog.DialogCode.Rejected
+
+    with patch.object(QFileDialog, "getSaveFileName", return_value=(str(exported_case), "")), patch.object(
+            QDialog, "exec", export_corrected):
+        work._detail(work.selected)
+        corrected_report = json.loads(exported_case.read_text())["informe"]
+        original_analysis = work.reviews[work.selected["alert_id"]]["analysis"]
+        work._detail(work.selected, defense_result={**original_analysis, "persisted_decision": "automatic"})
+        corrected_export = json.loads(exported_case.read_text())
+        corrected_result = corrected_export["resultado_lote"]
+        assert corrected_result["report"] == corrected_report
+        assert corrected_result["verdict"] == corrected_report["verdict"]
+        assert corrected_result["routing"] == corrected_report["routing"]
+        assert corrected_result["persisted_decision"] == "corrected"
+        assert corrected_export["ensayo_lote_original"]["routing"]["automatic"]
+    assert corrected_report["decision_actual"]["verdict"] == corrected_report["verdict"] == "false_positive"
+    assert corrected_report["routing"]["recommendation"] == "review" and not corrected_report["routing"]["automatic"]
+    assert corrected_report["triaje_original"]["routing"]["automatic"]
+    assert "WAF-0001841" in corrected_report["decision_actual"]["reason"]
 
     work._toggle_monitor()
     work._toggle_monitor()
@@ -357,7 +468,7 @@ def check(app, window, home, password, output):
             grid = dialog.findChild(QTableWidget)
             assert [grid.item(row, 0).text() for row in range(grid.rowCount())] == inputs
             assert "Cierre automático" in grid.item(0, 3).text()
-            assert grid.item(1, 3).text() == "Escalar"
+            assert grid.item(1, 3).text() == "Escalar · Aceptada por el analista"
             if output:
                 dialog.grab().save(str(output.with_name("vigia-lote-guardia.png")))
         except BaseException as error:
@@ -397,7 +508,23 @@ def check(app, window, home, password, output):
         pending_file.write_text(json.dumps(incoming), encoding="utf-8")
         pending_file.rename(pending_file.with_suffix(".jsonl"))
         wait_for(lambda: external_id in work.reviews, "nueva alerta de la carpeta")
-        assert work.reviews[external_id]["analysis"]["input_alert"]["external"]
+        previous = work.reviews[external_id]
+        assert previous["analysis"]["input_alert"]["external"]
+        previous_history = window.reviews.history(external_id)
+        duplicate = pending_file.with_name("repetida.jsonl")
+        duplicate.write_text(json.dumps(incoming, sort_keys=True), encoding="utf-8")
+        wait_for(lambda: window.job is None, "fin del primer lote de carpeta")
+        work._monitor_tick()
+        wait_for(lambda: window.job is None, "reenvío idéntico")
+        assert window.reviews.history(external_id) == previous_history
+        assert "Conflicto de identidad" not in work.status.text()
+        collision = {**db.get_alert("ALR-20261010-011795"), "alert_id": external_id}
+        pending_file.write_text(json.dumps(collision), encoding="utf-8")
+        pending_file.replace(pending_file.with_suffix(".jsonl"))
+        work._monitor_tick()
+        wait_for(lambda: "Conflicto de identidad" in work.status.text(), "conflicto de identidad en carpeta")
+        assert work.reviews[external_id] == previous
+        assert window.reviews.history(external_id) == previous_history
         work._stop_monitor("Vigilancia detenida.")
     window.close()
 
@@ -459,6 +586,63 @@ def check_demo(app, window, normal_profile, output):
     window.close()
 
 
+def check_recorded_isolation(window, home):
+    from apps.backend.tools import db
+    from apps.desktop import sim_response
+    from apps.desktop.demo import DEMO_PASSWORD
+    from apps.desktop.review import investigate
+    from apps.desktop.workbench import Workbench
+
+    alerts = [db.get_alert(key) for key in ("ALR-20261010-011795", "ALR-20261010-011794")]
+    analyses = [investigate(alert, triage=True) for alert in alerts]
+    for alert, analysis in zip(alerts, analyses):
+        assert window.reviews.save_analysis(alert["alert_id"], analysis)
+    work = Workbench(window, alerts, 2, "2026-10-10", (2, 2))
+    alert_id = alerts[0]["alert_id"]
+    replies = iter((
+        {"info": {"title": "Tarvia SOC (simulado)", "version": "1.0"},
+         "paths": {"/approvals": {"post": {}}, "/containment/{action}": {"post": {}}}},
+        {"approval_token": "APR-0000000001"}, {"action": "isolate_host", "result": "ok (simulado)"},
+    ))
+    with patch.dict(os.environ, {"VIGIA_SIM_PORT": "8765"}), patch.object(
+            sim_response, "_request", side_effect=lambda _port, _method, _path, payload=None: {
+                **(payload or {}), **next(replies)
+            }):
+        proposal = sim_response.isolation_proposal(alert_id, practice=True)
+        saved = sim_response.execute_isolation(
+            window.reviews, window.account, alert_id, practice=True, target=proposal["target"],
+            confirmed=True, password=DEMO_PASSWORD, justification="Prueba aislada del expediente agrupado.",
+        )
+    assert saved["status"] == "executed"
+
+    path = home / "expediente.json"
+
+    def click_export(dialog):
+        tabs = dialog.findChild(QTabWidget)
+        assert "Ejecutado en el simulador" in tabs.widget(4).toPlainText()
+        controls = {control.text(): control for control in dialog.findChildren(QPushButton)}
+        assert controls["Aprobar aislamiento simulado"].isHidden()
+        controls["Exportar expediente"].click()
+        return QDialog.DialogCode.Rejected
+
+    with patch.dict(os.environ, {"VIGIA_SIM_PORT": ""}), patch.object(
+            QFileDialog, "getSaveFileName", return_value=(str(path), "")
+    ), patch.object(QDialog, "exec", click_export):
+        for alert in alerts:
+            work._detail(alert)
+            assert json.loads(path.read_text())["informe"]["executed_actions"] == [saved]
+        work._detail(alerts[1], defense_result=analyses[1])
+        report = json.loads(path.read_text())["resultado_lote"]["report"]
+        assert report["executed_actions"] == [saved]
+
+        with closing(sqlite3.connect(window.reviews.path)) as connection, connection:
+            connection.execute("UPDATE simulated_isolations SET ticket_id = NULL WHERE alert_id = ?", (alert_id,))
+        legacy = {**saved, "ticket_id": f"VIG-{alert_id}"}
+        work._detail(alerts[1])
+        assert json.loads(path.read_text())["informe"]["executed_actions"] == [legacy]
+    window.close()
+
+
 def main() -> None:
     app = QApplication([])
     with TemporaryDirectory() as path:
@@ -470,6 +654,9 @@ def main() -> None:
             check(app, Window(home), home, "contraseña de prueba", output)
             with TemporaryDirectory(prefix="vigia-demo-") as demo_profile:
                 check_demo(app, Window(Path(demo_profile), demo=True, present=True), home, output)
+            with TemporaryDirectory(prefix="vigia-isolation-") as isolation_profile:
+                profile = Path(isolation_profile)
+                check_recorded_isolation(Window(profile, demo=True), profile)
     app.quit()
     print("Vigía: sesión, ojo durante carga, 11.061 alertas, búsqueda, fecha y veredicto, chat local, "
           "contraste adversarial simulado, decisiones persistentes, estadísticas, reproducción diaria "

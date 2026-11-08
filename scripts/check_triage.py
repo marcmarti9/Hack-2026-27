@@ -62,11 +62,13 @@ def main():
     with patch("apps.desktop.review.openai_message", return_value=json.dumps(wrong)) as calls:
         result = investigate(critical, remote=True, triage=True, mode="guardia")
     assert calls.call_count == 2 and calls.call_args.args[1]["eventos_adicionales"]
-    assert result["verdict"] == "needs_more_info" and result["routing"]["recommendation"] == "escalate"
+    assert result["verdict"] == "true_positive" and result["routing"]["recommendation"] == "escalate"
+    assert result["confidence"] is None and result["report"]["provider_errors"]["review"]
     assert not result["routing"]["automatic"]
     with patch("apps.desktop.review.openai_message", return_value=json.dumps({**wrong, "citations": ["NO-123456"]})):
         invalid = investigate(critical, remote=True, triage=True)
     assert invalid["proposal_error"] and invalid["routing"]["recommendation"] == "escalate"
+    assert invalid["verdict"] == "true_positive" and invalid["report"]["provider_errors"]["proposal"]
 
     absent = investigate(db.get_alert("ALR-20261021-011900"), triage=True, mode="guardia")
     assert not absent["requested"] and absent["events"] and absent["verdict"] == "true_positive"
@@ -137,7 +139,8 @@ def main():
         transport.side_effect = [json.dumps({**ordinary, "verdict": "needs_more_info", "confidence": 45}),
                                  json.dumps(ordinary)]
         doubtful = investigate(web, remote=True)
-        assert doubtful["review_provider"] == "gpt-6.1-sol" and doubtful["verdict"] == "needs_more_info"
+        assert doubtful["review_provider"] == "gpt-6.1-sol" and doubtful["verdict"] == "true_positive"
+        assert doubtful["confidence"] is None and doubtful["review_error"]
         assert transport.call_args.kwargs["model"] == "gpt-6.1-sol"
         transport.reset_mock()
         transport.side_effect = [json.dumps(wrong), json.dumps(wrong)]

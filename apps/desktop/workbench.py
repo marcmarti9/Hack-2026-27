@@ -20,17 +20,20 @@ from apps.desktop.assistant import available_model, context_for, local_answer, o
 from apps.desktop.backup_page import BackupPage
 from apps.desktop.brand_widgets import Mark, navigation_icon
 from apps.desktop.case_data import (
-    SECTION_NAMES, case_panels, demo_process, evidence_sections, fraction, pretty, soc_status,
+    SECTION_NAMES, case_panels, demo_process, display_record, evidence_sections, fraction, pretty, soc_status,
 )
 from apps.desktop.demo import DEMO_ALERT, archive, for_alert
 from apps.desktop.defense import load_alerts
 from apps.desktop.operations import Operations
 from apps.desktop.reports import imported_summary, read_report
-from apps.desktop.review import CLASSIFICATIONS, PLAYBOOKS, VERDICTS, investigate, replay_demo, reviewed_proposal
-from apps.desktop.sim_response import execute_isolation, isolation_proposal, isolation_status
+from apps.desktop.review import (
+    CLASSIFICATIONS, MODEL_VERDICTS, PLAYBOOKS, VERDICTS, investigate, replay_demo, require_alert_identity, reviewed_proposal,
+)
+from apps.desktop.sim_response import execute_isolation, isolation_proposal, isolation_records
 from apps.desktop.widgets import Article, button, fade_in, label, palette_for, set_primary, text_area
 
 PAGE_SIZE = 50
+HUMAN_DECISIONS = {"accepted": "Aceptada", "corrected": "Corregida"}
 SEVERITY = {
     "critical": ("Crítica", "#9d302d"), "high": ("Alta", "#92412a"),
     "medium": ("Media", "#78551f"), "low": ("Baja", "#35614d"),
@@ -40,6 +43,42 @@ SEVERITY = {
 
 def number(value: int) -> str:
     return f"{value:,}".replace(",", ".")
+
+
+def _decision_record(item, history):
+    kind = HUMAN_DECISIONS.get(item.get("decision"))
+    if not kind:
+        return None
+    entry = next((entry["data"] for entry in history if entry["kind"] == kind), {})
+    return {"verdict": item["verdict"], "decision": item["decision"], "reviewer": item["reviewer"],
+            "reviewed_at": item["reviewed_at"], "reason": entry.get("reason", "")}
+
+
+def _apply_decision(report, decision):
+    report["decision_actual"] = decision
+    corrected = decision["decision"] == "corrected"
+    if not corrected and report["verdict"] == decision["verdict"] and not report["routing"]["automatic"]:
+        return
+    original = ("title", "summary", "verdict", "confidence", "confidence_basis", "routing",
+                "recommended_actions", "action_notes", "escalation")
+    report["triaje_original"] = {key: report[key] for key in original if key in report}
+    verdict = decision["verdict"]
+    label, _, _ = VERDICTS[verdict]
+    reason = f"El analista {'corrigió el veredicto a' if corrected else 'aceptó el veredicto'} {label.lower()}."
+    if decision["reason"]:
+        reason += " " + decision["reason"]
+    routing = report["routing"]
+    keep_escalation = routing["recommendation"] == "escalate"
+    report.update(title=f"Decisión humana · {label}", summary=reason,
+                  verdict=verdict if verdict in MODEL_VERDICTS else "needs_more_info",
+                  confidence=0.0, confidence_basis="La decisión humana carece de estimación numérica.",
+                  routing={**routing, "recommendation": "escalate" if keep_escalation else "review",
+                           "automatic": False, "reason": reason},
+                  recommended_actions=[], action_notes=[])
+    if not keep_escalation:
+        report["escalation"] = {"escalate": False, "to": "", "reason": reason}
+        report["routing"]["recipients"] = []
+        report["routing"].pop("deadline_at", None)
 
 
 def table(headers: list[str]) -> QTableWidget:
@@ -651,8 +690,8 @@ class Workbench(QWidget):
                     if self.inbox_seen.get(path) == signature:
                         continue
                     self.inbox_seen[path] = signature
-                    self._triage_batch(lambda: [alert for alert in load_alerts(path) if alert["alert_id"] not in exclusions],
-                                       monitor=True, mode=mode, inbox=path.name)
+                    self._triage_batch(lambda: load_alerts(path), monitor=True, mode=mode, inbox=path.name,
+                                       skip=exclusions)
                     return
             except OSError:
                 self.status.setText("No se pudo leer la carpeta de entrada. La vigilancia seguirá intentando.")
@@ -663,27 +702,42 @@ class Workbench(QWidget):
         self._triage_batch(lambda: db.alert_page("", 0, 10, sort="severity", exclude_ids=list(exclusions))[0],
                            monitor=True, mode=mode)
 
-    def _triage_batch(self, source, *, remote=False, present=False, monitor=False, mode=None, inbox=""):
+    def _triage_batch(self, source, *, remote=False, present=False, monitor=False, mode=None, inbox="", skip=()):
         mode = mode or self.triage_mode.currentData()
 
         def operation():
-            batch = source() if callable(source) else source
-            documents = {key: self.store.guidance(key) for key in {item["runbook"] for item in batch}} if remote else {}
-            results = {}
+            incoming = source() if callable(source) else source
+            batch, results, analyses = [], {}, {}
+            for item in incoming:
+                alert_id = item["alert_id"]
+                try:
+                    self.store.validate_alert_input(item)
+                except ValueError as error:
+                    results[alert_id] = (None, str(error))
+                else:
+                    if alert_id in skip:
+                        continue
+                batch.append(item)
+            pending_items = [item for item in batch if item["alert_id"] not in results]
+            documents = {key: self.store.guidance(key) for key in {item["runbook"] for item in pending_items}} if remote else {}
             with ThreadPoolExecutor(max_workers=2) as pool:
                 pending = {pool.submit(investigate, item, remote, documents.get(item["runbook"]),
                                        triage=True, mode=mode): item["alert_id"]
-                           for item in batch}
+                           for item in pending_items}
                 for task in as_completed(pending):
                     alert_id = pending[task]
                     try:
-                        result = task.result()
-                        stored = self.store.save_analysis(alert_id, result)
-                        if stored and result["routing"]["automatic"]:
-                            result["persisted_decision"] = "automatic"
-                        results[alert_id] = (result, "")
+                        analyses[alert_id] = task.result()
                     except Exception as error:
                         results[alert_id] = (None, str(error))
+            for alert_id, (stored, error) in self.store.save_batch(analyses).items():
+                if error:
+                    results[alert_id] = (None, error)
+                    continue
+                result = analyses[alert_id]
+                if stored and result["routing"]["automatic"]:
+                    result["persisted_decision"] = "automatic"
+                results[alert_id] = (result, "")
             return [(item, *results[item["alert_id"]]) for item in batch]
 
         def done(result, error):
@@ -708,10 +762,14 @@ class Workbench(QWidget):
                 self.monitor.setInterval(2_000)
             processed = sum(bool(analysis) for _, analysis, _ in result)
             prefix = f"{inbox} · " if inbox else ""
-            self.status.setText(f"{prefix}{processed}/{len(result)} investigadas · {len(result) - processed} errores")
+            status = f"{prefix}{processed}/{len(result)} investigadas · {len(result) - processed} errores"
+            failures = [f"{item['alert_id']} · {message}" for item, _, message in result if message]
+            if inbox and failures:
+                status += f" · {failures[0]}"
+            self.status.setText(status)
             if present:
                 self._batch_results(result)
-            elif not monitor and (failures := [f"{item['alert_id']} · {message}" for item, _, message in result if message]):
+            elif not monitor and failures:
                 self._error("Algunas alertas no pudieron analizarse.", "\n".join(failures))
 
         self._run(operation, done, "Investigando el lote con OpenAI…" if remote else "Investigando el lote con datos locales…")
@@ -727,7 +785,15 @@ class Workbench(QWidget):
         grid = table(["Alerta", "Severidad", "Resultado", "Siguiente paso", "Tiempo"])
         grid.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         routes = {"close": "Cerrar", "review": "Revisar", "escalate": "Escalar"}
+        cases = []
         for alert, analysis, error in results:
+            stored = {}
+            if analysis:
+                try:
+                    stored = self._matching_review(alert)
+                except ValueError as conflict:
+                    analysis, error = None, str(conflict)
+            cases.append((alert, analysis, error))
             if error:
                 values = (alert["alert_id"], "—", "Error", error, "—")
             else:
@@ -735,7 +801,15 @@ class Workbench(QWidget):
                 disposition = routes[routing["recommendation"]]
                 if analysis.get("persisted_decision") == "automatic":
                     disposition = "Cierre automático"
-                values = (alert["alert_id"], SEVERITY[analysis["severity"]][0], VERDICTS[analysis["verdict"]][0],
+                verdict = analysis["verdict"]
+                severity = analysis["severity"]
+                if kind := HUMAN_DECISIONS.get(stored.get("decision")):
+                    verdict, disposition = stored["verdict"], f"{kind} por el analista"
+                    persisted = (stored.get("analysis") or {}).get("report") or {}
+                    severity = persisted.get("severity", severity)
+                    if (persisted.get("routing") or routing)["recommendation"] == "escalate":
+                        disposition = f"Escalar · {disposition}"
+                values = (alert["alert_id"], SEVERITY[severity][0], VERDICTS[verdict][0],
                           disposition, f"{analysis['timing']['total_ms']} ms")
             row = grid.rowCount()
             grid.insertRow(row)
@@ -748,14 +822,14 @@ class Workbench(QWidget):
         controls = QHBoxLayout()
         controls.addStretch()
         def show_case(row):
-            if 0 <= row < len(results):
-                alert, analysis, _ = results[row]
+            if 0 <= row < len(cases):
+                alert, analysis, _ = cases[row]
                 if analysis:
                     self._detail(alert, defense_result=analysis)
 
         open_case = button("Ver expediente", lambda: show_case(grid.currentRow()), primary=True)
         def enable_case(row, *_):
-            open_case.setEnabled(0 <= row < len(results) and bool(results[row][1]))
+            open_case.setEnabled(0 <= row < len(cases) and bool(cases[row][1]))
 
         enable_case(grid.currentRow())
         grid.currentCellChanged.connect(enable_case)
@@ -914,7 +988,8 @@ class Workbench(QWidget):
 
     def _save_decision(self, alert, verdict, decision, expected=None, reason=""):
         try:
-            changed = self.store.decide(alert["alert_id"], verdict, decision, self.window.account.name(), expected, reason)
+            changed = self.store.decide(alert["alert_id"], verdict, decision, self.window.account.name(),
+                                        expected, reason, alert=alert)
             self.reviews = self.store.all()
         except Exception as error:
             self._error("No se pudo guardar la decisión.", error)
@@ -936,10 +1011,22 @@ class Workbench(QWidget):
         imported = (self.reviews.get(alert_id, {}).get("analysis") or {}).get("input_alert")
         self._run(lambda: db.get_alert(alert_id) or imported, done, "Buscando alerta…")
 
+    def _matching_review(self, alert):
+        stored = self.reviews.get(alert["alert_id"])
+        previous = (stored.get("analysis") or {}) if stored is not None else None
+        require_alert_identity(alert["alert_id"], previous, alert if alert.get("external") else None)
+        return stored or {}
+
     def _detail(self, alert, *, defense_result=None):
         if self.window.job:
             return
         alert_id = alert["alert_id"]
+        self.reviews = self.store.all()
+        try:
+            self._matching_review(alert)
+        except ValueError as conflict:
+            self._error("No se pudo abrir la alerta.", conflict)
+            return
         isolation = None if defense_result is not None or alert.get("external") else isolation_proposal(
             alert_id, practice=self.demo
         )
@@ -1018,7 +1105,7 @@ class Workbench(QWidget):
         if inspection:
             local.hide()
             remote.hide()
-        export = button("Exportar JSON")
+        export = button("Exportar expediente")
         footer.addWidget(local)
         footer.addWidget(remote)
         footer.addWidget(export)
@@ -1035,12 +1122,49 @@ class Workbench(QWidget):
             footer.addWidget(control)
         layout.addLayout(footer)
 
+        def recorded_isolations(analysis):
+            return [] if alert.get("external") else isolation_records(self.store, alert_id, analysis)
+
+        def detail_state():
+            try:
+                stored = self._matching_review(alert)
+            except ValueError:
+                stored = {}
+            persisted = stored.get("analysis") or {}
+            if not inspection:
+                return stored, persisted or baseline
+            if stored.get("decision") in HUMAN_DECISIONS:
+                return stored, persisted if persisted.get("report") else defense_result
+            # Keep the batch's own finding and routing, with the latest verified roster for its incident.
+            report = defense_result.get("report") or {}
+            saved_report = persisted.get("report") or {}
+            incident = report.get("incident") or {}
+            saved_incident = saved_report.get("incident") or {}
+            incident_id = incident.get("incident_id")
+            if not incident_id or not (
+                incident_id == report.get("ticket_id") == saved_report.get("ticket_id")
+                == saved_incident.get("incident_id")
+            ):
+                return {}, defense_result
+            members = saved_report["alert_ids"]
+            current = {**defense_result, "report": {
+                **report, "alert_ids": members, "incident": {**incident, "alert_ids": members},
+            }}
+            if defense_result.get("incident"):
+                current["incident"] = {**defense_result["incident"], "alert_ids": members}
+            return {}, current
+
         def render():
-            item = {} if inspection else self.reviews.get(alert_id, {})
-            analysis = defense_result if inspection else (item.get("analysis") or baseline)
+            item, analysis = detail_state()
+            corrected = item.get("decision") == "corrected"
+            human_decision = item.get("decision") in HUMAN_DECISIONS
             verdict = item.get("verdict") or analysis.get("verdict", "needs_more_info")
             verdict_name = VERDICTS[verdict][0]
             verdict_color = self.verdict_color(verdict)
+            routing = analysis.get("routing") or {}
+            superseded = corrected or (
+                human_decision and (analysis.get("verdict") != verdict or routing.get("automatic"))
+            )
             severity_key = analysis.get("severity", alert["severity"])
             severity = SEVERITY[severity_key][0]
             severity_color = self.severity_color(severity_key)
@@ -1049,36 +1173,48 @@ class Workbench(QWidget):
             values["Veredicto"].setText(verdict_name)
             values["Veredicto"].setStyleSheet(f"color: {verdict_color};")
             confidence = analysis.get("confidence")
-            values["Confianza"].setText(f"{confidence} %" if confidence is not None else "—")
-            values["Confianza"].setToolTip("Estimación del expediente de referencia"
-                                           if analysis.get("origin") == "demo"
-                                           else "Estimación del análisis disponible")
+            values["Confianza"].setText(f"{confidence} %" if confidence is not None and not superseded else "—")
+            values["Confianza"].setToolTip("Decisión humana sin confianza estimada" if superseded else (
+                "Estimación del expediente de referencia" if analysis.get("origin") == "demo"
+                else "Estimación del análisis disponible"
+            ))
             events = analysis.get("events", [])
             values["Eventos"].setText(str(len(events)) if analysis else "—")
 
             sections = []
             event_ids = list(alert.get("related_events", []))
-            routing = analysis.get("routing") or {}
-            automatic = (analysis.get("persisted_decision") if inspection else item.get("decision")) == "automatic"
+            persisted = analysis.get("persisted_decision") if inspection else item.get("decision")
+            automatic = not human_decision and persisted == "automatic"
             if routing:
                 mode = {"guardia": "Guardia", "diurno": "Horario atendido"}.get(routing.get("mode"), "Modo sin registrar")
                 step = {"close": "Cierre recomendado", "escalate": "Escalar", "review": "Revisión humana"}.get(
                     routing.get("recommendation"), "Paso por determinar")
                 if automatic:
                     step = "Cierre automático registrado"
-                status = ("Automatizable según política" if routing.get("automatic")
+                status = ("Decisión humana registrada" if human_decision else
+                          "Automatizable según política" if routing.get("automatic")
                           else "Requiere intervención humana")
                 recipients = routing.get("recipients") or []
                 deadline = routing.get("deadline_at")
-                sections.append(("Resultado de la política" if automatic else "Siguiente paso", "\n".join(filter(None, [
-                    f"{mode} · {step}" if automatic else f"{mode} · {step} · {status}", routing.get("reason"),
+                heading = ("Recomendación inicial del triaje · histórico" if superseded else
+                           "Resultado de la política" if automatic else "Siguiente paso")
+                if superseded:
+                    historical = {"close": "Se recomendó cerrar", "escalate": "Se recomendó escalar",
+                                  "review": "Se recomendó una revisión"}
+                    disposition = f"{mode} · {historical.get(routing.get('recommendation'), step)}"
+                else:
+                    disposition = f"{mode} · {step}" if automatic else f"{mode} · {step} · {status}"
+                sections.append((heading, "\n".join(filter(None, [
+                    disposition, routing.get("reason"),
                     f"Responsables: {', '.join(recipients)}" if recipients else "",
                     f"Plazo desde la alerta: {madrid(deadline):%d/%m/%Y %H:%M %Z}" if deadline else "",
                 ]))))
             if analysis:
                 proposal = analysis.get("proposal")
                 challenge = analysis.get("challenge")
-                if challenge and proposal:
+                if challenge and analysis.get("review_error"):
+                    contrast = "Contraste sin corroboración"
+                elif challenge and proposal:
                     contrast = ("Contraste de acuerdo" if proposal["verdict"] == challenge["verdict"]
                                 else "Contraste discrepante")
                 elif analysis.get("review_error") and "challenge_ms" in analysis.get("timing", {}):
@@ -1137,9 +1273,14 @@ class Workbench(QWidget):
                 feedback.setText("Cargando evidencias del índice…")
             if inspection:
                 feedback.setText("Resultado del lote de defensa · " + feedback.text())
+                if human_decision:
+                    original = defense_result["routing"]
+                    mode = {"guardia": "Guardia", "diurno": "Horario atendido"}.get(original.get("mode"), "Modo sin registrar")
+                    original_verdict = VERDICTS[defense_result["verdict"]][0]
+                    sections.append(("Ensayo del lote · histórico", f"{mode} · {original_verdict}\n{original['reason']}"))
             sections.append(("Qué detectó el SIEM", alert["description"]))
             if item.get("decision"):
-                heading = "Cierre automático registrado" if automatic else "Decisión registrada"
+                heading = "Cierre automático registrado" if automatic else "Decisión humana vigente"
                 feedback.setText(f"{heading} · {verdict_name} · {item['reviewer']}")
                 sections.insert(0, (heading, f"{verdict_name} · {item['reviewer']} · {item['reviewed_at']}"))
             if archived := demo_process(ticket, closed):
@@ -1155,25 +1296,30 @@ class Workbench(QWidget):
             if previous:
                 event_choice.setCurrentText(previous)
             event_detail.setEnabled(bool(event_choice.count()) and self.window.job is None)
-            history = [] if inspection else self.store.history(alert_id)
+            history = [] if inspection and not human_decision else self.store.history(alert_id)
             if item.get("decision") and not any(entry["kind"] in {"Aceptada", "Corregida", "Cierre automático"}
                                                 for entry in history):
                 history.append({"created_at": item["reviewed_at"],
                                 "kind": "Cierre automático" if automatic else "Decisión humana",
                                 "actor": item["reviewer"], "data": {"verdict": item["verdict"]}})
+            records = recorded_isolations(analysis)
             for name, content in case_panels(alert, analysis, history, hide_archive=hide_archive).items():
-                if name == "Acciones" and isolation:
-                    result = isolation_status(self.store, alert_id)
-                    prepared = bool(routing and analysis.get("verified_finding"))
+                if name == "Acciones":
+                    prepared = bool(isolation and routing and analysis.get("verified_finding") and not corrected)
+                    attempted = isolation and any(
+                        row["alert_id"] == alert_id and row["target"] == isolation["target"] for row in records
+                    )
                     state = {"reserved": "Aprobación reservada", "executed": "Ejecutado en el simulador",
                              "failed": "Ejecución rechazada", "unknown": "Resultado sin confirmar"}
-                    if result:
-                        content.insert(0, (state[result["status"]], f"{result['target']} · {result['actor']} (N2 de práctica)\n"
-                                           f"{result['result']}\nMotivo: {result['justification']}"))
-                    elif prepared:
+                    if prepared and not attempted:
                         content.insert(0, ("Contención preparada", f"Aislar {isolation['target']} en el simulador. "
                                            f"Requiere aprobación humana de N2. Evidencia: {', '.join(isolation['citations'])}."))
-                    approve.setVisible(prepared and not result)
+                    content[:0] = [
+                        (state[row["status"]], f"{row['target']} · {row['actor']} (N2 de práctica)\n"
+                         f"{row['alert_id']} · {row['result']}\nMotivo: {row['justification']}")
+                        for row in records
+                    ]
+                    approve.setVisible(prepared and not attempted)
                     approve.setEnabled(self.window.job is None)
                 extra[name].show_sections(content)
             can_accept = self._can_accept(item)
@@ -1238,7 +1384,7 @@ class Workbench(QWidget):
                 viewer.resize(720, 530)
                 contents = QVBoxLayout(viewer)
                 raw = text_area("Evento original")
-                raw.setPlainText(pretty(event))
+                raw.setPlainText(display_record(event))
                 contents.addWidget(raw, 1)
                 contents.addWidget(button("Cerrar", viewer.reject))
                 viewer.exec()
@@ -1317,20 +1463,37 @@ class Workbench(QWidget):
             if not name:
                 return
             try:
+                self.store.validate_alert_input(alert)
+                self.reviews = self.store.all()
+                review, current = detail_state()
+                report = dict(current.get("report") or {})
+                history = self.store.history(alert_id) if not inspection or review else []
+                decision = _decision_record(review, history)
+                if report:
+                    report["executed_actions"] = [action for action in recorded_isolations(current)
+                                                  if action["status"] == "executed"]
+                    if decision:
+                        _apply_decision(report, decision)
                 if inspection:
-                    payload = {"alerta": alert, "resultado_lote": defense_result}
+                    result = dict(current)
+                    if report:
+                        result["report"] = report
+                    payload = {"alerta": alert, "resultado_lote": result}
+                    if decision:
+                        payload["ensayo_lote_original"] = defense_result
+                        result.update(decision_actual=decision, persisted_decision=decision["decision"])
+                        if report:
+                            result.update(verdict=report["verdict"], routing=report["routing"], severity=report["severity"])
+                            if "triaje_original" in report:
+                                result["confidence"] = None
                 else:
-                    review = self.reviews.get(alert_id, {})
-                    current = review.get("analysis") or baseline
-                    report = dict(current.get("report") or {})
-                    if report and isolation and (action := isolation_status(self.store, alert_id)):
-                        if action["status"] == "executed":
-                            report["executed_actions"] = [action]
                     payload = {"alerta": alert, "informe": report, "revision_local": review, "contexto": baseline,
-                               "historial": self.store.history(alert_id),
+                               "historial": history,
                                "demo": {"ticket": ticket, "n2": incident, "descarte": closed}}
+                if decision and not report:
+                    payload["decision_actual"] = decision
                 Path(name).write_text(pretty(payload) + "\n", encoding="utf-8")
-            except OSError as error:
+            except (OSError, ValueError) as error:
                 self._error("No se pudo exportar el expediente.", error)
 
         local.clicked.connect(lambda: analyze("local"))
@@ -1374,6 +1537,8 @@ class Workbench(QWidget):
             text.append("SHA-256 consultados en sandbox: " + ", ".join(result["sandbox_refs"]))
         if result.get("questions"):
             text.extend(["Preguntas abiertas:", *result["questions"]])
+        if error:
+            text.append(error)
         return "\n".join(text)
 
     def _statistics(self):

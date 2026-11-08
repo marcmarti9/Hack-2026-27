@@ -26,7 +26,7 @@ def _address(target: str):
     return getattr(address, "ipv4_mapped", None) or address
 
 
-def _is_ot(target: str, asset: dict | None) -> bool:
+def is_ot(target: str, asset: dict | None = None) -> bool:
     if asset and asset["zone"] == "LOGISTICS-OT":
         return True
     address = _address(target)
@@ -40,7 +40,7 @@ def aprobacion(action: str, target: str) -> ApprovalPolicy:
     if not target:
         return ApprovalPolicy(False, (), "Falta el objetivo de la acción.")
     asset = db.asset(target)
-    if _is_ot(target, asset):
+    if is_ot(target, asset):
         return ApprovalPolicy(False, ("Responsable de Operaciones",), "La política limita OT al escalado.")
     if action == "isolate_host":
         if not asset:

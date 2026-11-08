@@ -199,6 +199,12 @@ def _click(alert, analysis, direct, proof):
     return None
 
 
+def _audit_applied(event):
+    # Los registros de operaciones aplicadas del índice original omiten result.
+    result = event.get("result")
+    return result is None or (isinstance(result, str) and result.strip().casefold() in {"", "success", "succeeded", "ok"})
+
+
 def _concealment(event, actor, ip=None):
     details = event.get("details") or {}
     filters = details.get("conditions") or {}
@@ -208,7 +214,7 @@ def _concealment(event, actor, ip=None):
     actions = details.get("actions") or {}
     return (event["source"] == "idp_audit" and event.get("operation") == "New-InboxRule"
             and event.get("actor_upn") == actor and event.get("target") == actor
-            and event.get("result") not in {"failure", "failed"} and (ip is None or event.get("src_ip") == ip)
+            and _audit_applied(event) and (ip is None or event.get("src_ip") == ip)
             and isinstance(terms, list) and isinstance(actions, dict)
             and bool(FINANCE_TERMS.intersection(term.lower() for term in terms))
             and actions.get("mark_as_read") is True
@@ -255,6 +261,15 @@ def _mobile(event):
     return "iPhone" in agent and "Outlook-iOS/" in agent and event.get("app") == "Office 365 Exchange Online"
 
 
+def _sensitive_download(event):
+    if event.get("operation") != "FileDownloaded":
+        return False
+    details = event.get("details") or {}
+    classification = str(details.get("data_classification") or "").casefold()
+    return (classification in {"personal", "sensitive", "confidential", "restricted"}
+            or bool(re.search(r"\b(?:n[oó]minas?|payroll)\b", str(event.get("target") or "").casefold())))
+
+
 def _travel_conflicts(events, login):
     conflicts = {}
     stamp = madrid(login["timestamp"])
@@ -266,8 +281,9 @@ def _travel_conflicts(events, login):
                                                          or event.get("risk_level") in {"medium", "high"})):
             conflicts[event["event_id"]] = event
         if (event["source"] == "idp_audit" and event.get("actor_upn") == login["user_upn"]
-                and event.get("result") not in {"failure", "failed", "denied"}
-                and event.get("operation") in {"New-InboxRule", "Add-MfaMethod", "Consent to application"}):
+                and _audit_applied(event)
+                and (event.get("operation") in {"New-InboxRule", "Add-MfaMethod", "Consent to application"}
+                     or (madrid(event["timestamp"]) >= stamp and _sensitive_download(event)))):
             conflicts[event["event_id"]] = event
     return list(conflicts.values())
 
@@ -288,14 +304,14 @@ def _travel_review(analysis, login, proof):
         unique = {event["event_id"]: event for event in conflicts}
         return {**proof("needs_more_info", [login, *list(unique.values())[:5]],
                         "El acceso encaja con el viaje o la salida móvil, pero el IdP registra accesos "
-                        "de riesgo o cambios sensibles para la misma cuenta en la ventana.",
+                        "de riesgo, cambios sensibles o descargas de datos sensibles de la misma cuenta en la ventana.",
                         actions=("Comprobar el origen y la actividad de la cuenta con N2.",),
                         basis="RB-03 · actividad de identidad que contradice el cierre automático."),
                 "escalate": ["N2"]}
     if truncated:
         return proof("needs_more_info", [login],
                      "La consulta de la cuenta alcanzó su límite. Hace falta revisar el resto de la ventana.",
-                     questions=("¿Hubo accesos de riesgo o cambios sensibles en la ventana completa?",),
+                     questions=("¿Hubo accesos de riesgo, cambios sensibles o descargas de datos sensibles en la ventana completa?",),
                      basis="RB-03 · cobertura incompleta del historial de identidad.")
     return None
 
@@ -351,11 +367,13 @@ def _travel(alert, analysis, direct, proof):
     for change in direct:
         actor, ip = change.get("actor_upn", ""), change.get("src_ip")
         if (change["source"] != "idp_audit" or change.get("operation") != "Add-MfaMethod" or not ip
+                or not _audit_applied(change)
                 or _account(actor) not in users or change.get("target") != actor):
             continue
         download = next((event for event in direct if event["source"] == "idp_audit"
                          and event.get("operation") == "FileDownloaded" and event.get("actor_upn") == actor
                          and event.get("src_ip") == ip and "nóminas" in event.get("target", "").lower()
+                         and _audit_applied(event)
                          and _later(event, change, minutes=30)), None)
         if download:
             return {**proof("true_positive", [download, change],
@@ -537,7 +555,7 @@ def _consent(alert, analysis, direct, proof):
     for event in direct:
         if (event["source"] != "idp_audit" or event.get("operation") != "Consent to application"
                 or _account(event.get("actor_upn", "")) not in _users(alert) or not event.get("target")
-                or event.get("result") in {"failure", "failed", "denied"}):
+                or not _audit_applied(event)):
             continue
         details = event.get("details") or {}
         permissions = details.get("permissions", [])

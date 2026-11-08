@@ -1,10 +1,10 @@
 """Criterio verificable y enrutamiento N1 sobre los datos del reto."""
 from base64 import b64encode
-from datetime import datetime, time, timedelta
-import re
+from datetime import datetime, time, timedelta, timezone
 
 from apps.backend.rules import coverage_edr, coverage_identidad, coverage_plataforma, coverage_ruido
-from apps.backend.rules.engine import madrid, severidad
+from apps.backend.rules.approvals import is_ot
+from apps.backend.rules.engine import Severity, madrid, severidad
 from apps.backend.tools import db
 
 SCCM_CHANGE = "CHG-2026-1031"
@@ -13,34 +13,11 @@ SCCM_SCRIPT = ("$inv = Get-CimInstance Win32_Product | Select Name,Version | Con
 WINDOWS_POWERSHELL = r"c:\windows\system32\windowspowershell\v1.0\powershell.exe"
 SCCM_COMMAND = ("powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand "
                 + b64encode("$inv = Get-CimInstance Win32_Product".encode("utf-16-le")).decode("ascii"))
-VELA_SIZE_CORRECTION = re.compile(r"Olvida la talla que te dije, quiero una (?:XS|S|M|L|XL|XXL)[.!]?", re.IGNORECASE)
 
 
 def _proof(verdict, events, summary, *, actions=(), questions=(), basis=""):
     return {"verdict": verdict, "citations": [event["event_id"] for event in events], "summary": summary,
             "questions": list(questions), "actions": list(actions), "confidence": None, "basis": basis}
-
-
-def _possible_disclosure(direct):
-    for event in direct:
-        if event["source"] != "dlp" or "Datos personales" not in event.get("policy", ""):
-            continue
-        transfers = [log for log in direct if log["source"] == "proxy" and log.get("method") == "POST"
-                     and log.get("action") == "allowed" and str(log.get("status")) in {"200", "201", "204"}
-                     and log.get("hostname") == event.get("hostname") and log.get("user") == event.get("user")
-                     and log.get("domain") == event.get("destination")
-                     and str(log.get("bytes_out", "")).isdigit() and int(log["bytes_out"]) > 0]
-        if not transfers:
-            continue
-        total = sum(int(log["bytes_out"]) for log in transfers)
-        return {**_proof("needs_more_info", [event, *transfers],
-                         f"DLP marcó posible información personal y el proxy registró {len(transfers)} "
-                         f"envíos aceptados al mismo destino ({total:,} bytes). "
-                         "Los registros no confirman el contenido ni la transferencia completa.",
-                         questions=("¿Qué datos contenía el archivo y qué parte llegó al destino?",),
-                         actions=("Preservar registros y pedir a N2 y DPO que determinen alcance y notificación.",)),
-                "escalate": ["N2", "DPO"]}
-    return None
 
 
 def _same_host(event, hosts):
@@ -70,13 +47,16 @@ def _phishing_session(alert, direct, events):
     return None
 
 
-def _vendor_access(direct, context):
+def _vendor_access(alert, direct, context):
     account = next((user for user in context["usuarios"] if user["username"] == "ext.logisoft"
                     and user["account_type"] == "external"), None)
     if not account or any(change["id"] == "CHG-2026-1071" for change in context["cambios"]):
         return None
+    origins = set(alert["entities"].get("ips", [])) if alert.get("external") else set()
     for vpn in direct:
         if vpn["source"] != "vpn" or vpn.get("user") != account["username"] or vpn.get("action") != "connect":
+            continue
+        if origins and vpn.get("src_ip") not in origins:
             continue
         stamp = madrid(vpn["timestamp"])
         if stamp.weekday() < 5 and time(8) <= stamp.time() < time(18):
@@ -97,20 +77,21 @@ def _vendor_access(direct, context):
     return None
 
 
-def _miner(direct, analysis, hosts):
+def _miner(direct, analysis):
     suspicious = {entry["indicator"] for entry in analysis["context"]["inteligencia"]
                   if (entry.get("tip") or {}).get("reputation") == "malicious"
                   and "xmr" in (entry["tip"].get("malware_family") or "").lower()}
+    sources = {asset["ip"]: asset["hostname"].lower() for asset in analysis["context"]["activos"]}
     for flow in direct:
         if (flow["source"] != "firewall" or flow.get("dst_ip") not in suspicious
                 or flow.get("action") != "allow" or str(flow.get("dst_port")) != "3333"):
             continue
-        if not any(asset["ip"] == flow.get("src_ip") for asset in analysis["context"]["activos"]):
+        if not (hostname := sources.get(flow.get("src_ip"))):
             continue
         stamp = madrid(flow["timestamp"])
         for process in analysis["events"]:
             if (process["source"] != "edr_events" or process.get("event_type") != "process_start"
-                    or not _same_host(process, hosts) or ":3333" not in process.get("command_line", "")
+                    or process.get("hostname", "").lower() != hostname or ":3333" not in process.get("command_line", "")
                     or not process.get("sha256") or abs(madrid(process["timestamp"]) - stamp) > timedelta(minutes=10)):
                 continue
             report = db.sandbox(process["sha256"])
@@ -165,31 +146,34 @@ def _sccm_match(alert, direct, context, hosts):
 def local_finding(alert, analysis):
     """Pruebas estrechas sobre observaciones del índice. Un resultado vacío no permite cerrar."""
     direct = [event for event in analysis["events"] if event["event_id"] in analysis["requested"]]
+    if alert.get("external"):
+        stamp = madrid(alert["created_at"]).astimezone(timezone.utc)
+        contemporary = [event for event in direct
+                        if stamp - timedelta(hours=24) <= madrid(event["timestamp"]).astimezone(timezone.utc) <= stamp]
+        if len(contemporary) < len(direct):
+            current_ids = {event["event_id"] for event in contemporary}
+            analysis["context_event_ids"] = [event["event_id"] for event in direct if event["event_id"] not in current_ids]
+            analysis["trace"].append({
+                "tool": "Ventana de referencias externas", "query": "Referencias directas en las 24 h hasta el aviso",
+                "count": len(contemporary),
+                "note": "Los registros fuera de ventana se conservan como contexto, sin confirmar este aviso.",
+            })
+        direct = contemporary
     hosts = {host["hostname"].lower() for host in alert.get("entities", {}).get("hosts", [])
              if host.get("hostname")}
     if alert["rule_id"] == "UC-EML-003":
         if finding := _phishing_session(alert, direct, analysis["events"]):
             return finding
     if alert["rule_id"] == "UC-VPN-001":
-        if finding := _vendor_access(direct, analysis["context"]):
+        if finding := _vendor_access(alert, direct, analysis["context"]):
             return finding
     if alert["rule_id"] == "UC-NET-002":
-        if finding := _miner(direct, analysis, hosts):
+        if finding := _miner(direct, analysis):
             return finding
     if "context" in analysis:
         for coverage in (coverage_edr, coverage_identidad, coverage_plataforma, coverage_ruido):
             if finding := coverage.check(alert, analysis, direct, _proof):
-                return finding
-    if alert["rule_id"] == "UC-WEB-002":
-        for ip in alert["entities"].get("ips", []):
-            blocked = [event for event in direct if event["source"] == "ecom_auth" and event.get("src_ip") == ip
-                       and event.get("result") == "failure" and event.get("failure_reason") == "rate_limited"
-                       and event.get("captcha") == "challenge_failed" and event.get("device_fp") == "fp-bot"]
-            if len({event.get("email") for event in blocked if event.get("email")}) >= 3:
-                return _proof("true_positive", blocked, "El comercio registró intentos automatizados contra varias "
-                              "cuentas desde el mismo origen, frenados por CAPTCHA y limitación de frecuencia. "
-                              "Estos registros no prueban una toma de cuenta.",
-                              questions=("¿Hubo accesos aceptados del mismo origen, dispositivo o campaña?",))
+                return coverage_edr.link_incident(alert, analysis, finding)
     if alert["rule_id"] == "UC-IDP-008":
         change = next((row for row in analysis["context"]["cambios"] if row["id"] == "CHG-2026-1078"), None)
         admins = {user["username"] for user in analysis["context"]["usuarios"] if user["privileged"] == "True"}
@@ -209,13 +193,14 @@ def local_finding(alert, analysis):
             return _proof("benign_true_positive", [event],
                           f"{event['event_id']} registra el inventario de SCCM en un puesto incluido en {SCCM_CHANGE}. "
                           "Coinciden proceso, firma, comando y ventana.", basis=f"Actividad autorizada verificada contra {SCCM_CHANGE}.")
-    if alert["rule_id"] == "UC-EDR-004":
+    if alert["rule_id"] == "UC-EDR-004" and "context" not in analysis:
         for event in direct:
             details = event.get("details") or {}
             command = event.get("command_line", "").lower()
             if (_same_host(event, hosts) and event["source"] == "edr_events"
                     and event.get("event_type") == "process_start"
                     and event.get("process_name", "").lower() == "rundll32.exe"
+                    and abs(madrid(event["timestamp"]) - madrid(alert["created_at"])) <= timedelta(minutes=15)
                     and "comsvcs.dll" in command and "minidump " in command
                     and details.get("target_process", "").lower().startswith("lsass.exe (pid ")):
                 return _proof(
@@ -225,18 +210,6 @@ def local_finding(alert, analysis):
                     questions=("¿Se creó o transfirió el volcado?", "¿Hay uso posterior de credenciales?"),
                     actions=("Revisar el aislamiento del puesto con N2. Verificar conexiones y credenciales expuestas.",),
                 )
-    if alert["rule_id"] == "UC-WEB-001":
-        ips = set(alert["entities"].get("ips", []))
-        for event in direct:
-            if (event["source"] == "waf" and event.get("src_ip") in ips
-                    and event["src_ip"] not in {"192.0.2.10", "192.0.2.11", "192.0.2.12"}
-                    and event.get("host") == "www.tarvia.example" and str(event.get("status")) == "403"
-                    and event.get("action") == "blocked"
-                    and event.get("uri", "").split("?", 1)[0].endswith("/phpunit/src/Util/PHP/eval-stdin.php")):
-                return _proof("true_positive", [event], f"{event['event_id']} registra una petición al ejecutor de PHPUnit "
-                              "bloqueada con HTTP 403. El registro confirma el intento y el bloqueo, sin evidencia de ejecución.",
-                              questions=("¿Hay solicitudes posteriores permitidas desde el mismo origen?",),
-                              actions=("Verificar tráfico posterior antes de cerrar o atribuir compromiso.",))
     if alert["rule_id"] == "UC-IDP-002":
         ips = set(alert["entities"].get("ips", []))
         failures = [event for event in direct if event["source"] == "idp_signins" and event.get("src_ip") in ips
@@ -250,38 +223,6 @@ def local_finding(alert, analysis):
                               f"{len(users)} cuentas distintas y el IdP bloqueó esos intentos. "
                               "El patrón es compatible con password spraying. No confirma acceso.",
                               questions=("¿Hubo un acceso correcto desde el mismo origen en otro servicio?",))
-    if alert["rule_id"] == "UC-AI-001":
-        entities = alert["entities"]
-        customers = {row["customer_id"] for row in entities.get("customers", [])}
-        for event in direct:
-            guard = event.get("guardrail") or {}
-            if (event["source"] == "ai_gateway" and event.get("authenticated") is True
-                    and event.get("customer_id") in customers and event.get("src_ip") in entities.get("ips", [])
-                    and guard.get("action") == "flagged" and guard.get("category") == "prompt_injection"
-                    and event.get("tool_calls") == [] and event.get("response_summary") == "Respuesta normal tras revisión"
-                    and VELA_SIZE_CORRECTION.fullmatch(event.get("prompt", ""))):
-                return _proof("false_positive", [event], "El registro contiene una corrección de talla completa. "
-                              "Vela marcó el mensaje pero el registro no muestra llamadas a herramientas.",
-                              basis="Corrección de talla acotada, validada con el registro del asistente.")
-    if alert["rule_id"] == "UC-AI-002":
-        for event in direct:
-            if event["source"] != "ai_gateway" or not event.get("session_id"):
-                continue
-            response = event.get("response_summary", "")
-            if response.startswith("El asistente enumeró ") and "códigos internos" in response:
-                denials = [log for log in direct if log["source"] == "ai_gateway"
-                           and log.get("session_id") == event["session_id"]
-                           and (log.get("guardrail") or {}).get("category") == "authz_mismatch"
-                           and (log.get("guardrail") or {}).get("action") == "blocked"]
-                if denials:
-                    return {**_proof("true_positive", [*denials, event],
-                                     "Una consulta entre clientes fue denegada. En la misma sesión, "
-                                     "el registro indica exposición de códigos internos en otra respuesta. "
-                                     "El bloqueo de la primera consulta no acredita que toda la sesión fuera segura.",
-                                     actions=("Escalar a N2 y al equipo de IA. Revisar los códigos expuestos.",)),
-                            "escalate": ["N2", "Equipo de IA"]}
-    if alert["rule_id"] in {"UC-DLP-001", "UC-DLP-002"} and (disclosure := _possible_disclosure(direct)):
-        return disclosure
     if alert["rule_id"] != "UC-OT-001":
         for report in analysis.get("context", {}).get("sandbox", []):
             if report.get("verdict") == "malicious" and report.get("sha256"):
@@ -293,28 +234,47 @@ def local_finding(alert, analysis):
     return None
 
 
+def missing_references(analysis):
+    return set(analysis["requested"]) - {event["event_id"] for event in analysis["events"]}
+
+
+def effective_priority(alert, analysis, finding, verdict):
+    """Aplica el runbook y las pruebas locales antes de elegir el contraste."""
+    base = Severity(analysis["severity"], analysis["severity_rationale"], analysis["sla"])
+    verified = bool(finding and (finding.get("citations") or finding.get("sandbox_refs")))
+    if verified and finding.get("severity_override") == "critical":
+        return Severity("critical", f"{base.rationale} Regla de escalado del runbook aplicable.", "15 min")
+    if alert["severity"] == "critical":
+        if (verified and verdict == finding["verdict"] == "benign_true_positive"
+                and finding.get("authorized_change") and not missing_references(analysis)):
+            return Severity("informational", f"{base.rationale} Cambio autorizado verificado. "
+                            "El cierre requiere decisión humana por la prioridad de origen.", "Revisión diaria")
+        return (base if base.level == "critical" else
+                Severity("critical", f"{base.rationale} Se conserva la prioridad crítica de origen.", "15 min"))
+    if verified and verdict == finding["verdict"]:
+        if verdict in {"benign_true_positive", "false_positive"}:
+            if base.level != "critical" or (finding.get("auto_close") and not finding.get("escalate")):
+                priority = severidad(alert, verdict)
+                return Severity(priority.level, f"{base.rationale} Tras comprobar el caso: {priority.rationale}",
+                                priority.sla)
+        elif base.level != "critical" and (finding.get("verified_impact") or finding.get("verified_prevention")):
+            return severidad(alert, verdict, verified_impact=finding.get("verified_impact", ""),
+                             verified_prevention=finding.get("verified_prevention", ""))
+    return base
+
+
 def route(alert, analysis, mode, finding):
     """La autorización y la cobertura no dependen de lo que redacte el modelo."""
-    severity = analysis["severity"]
+    initial_severity = analysis["severity"]
     verdict = analysis["verdict"]
-    verified = bool(finding and (finding.get("citations") or finding.get("sandbox_refs")))
-    matched = verified and verdict == finding["verdict"]
-    critical = severity == "critical" or alert["severity"] == "critical"
-    if verified and finding.get("severity_override") == "critical":
-        critical = True
-        analysis.update(severity="critical", sla="15 min",
-                        severity_rationale=f"{analysis['severity_rationale']} Regla de escalado del runbook aplicable.")
-    elif alert["severity"] == "critical" and severity != "critical":
-        analysis.update(severity="critical", sla="15 min",
-                        severity_rationale=f"{analysis['severity_rationale']} Vigía conserva la prioridad crítica "
-                                           "de la alerta de origen para su revisión inmediata.")
-    elif matched and not critical and (finding.get("verified_impact") or finding.get("verified_prevention")):
-        priority = severidad(alert, verdict, verified_impact=finding.get("verified_impact", ""),
-                             verified_prevention=finding.get("verified_prevention", ""))
-        analysis.update(severity=priority.level, severity_rationale=priority.rationale, sla=priority.sla)
-        severity = priority.level
-        critical = severity == "critical"
-    local = analysis["provider"] == "Reglas locales" and not alert.get("external")
+    matched = bool(finding and verdict == finding["verdict"] and
+                   (finding.get("citations") or finding.get("sandbox_refs")))
+    priority = effective_priority(alert, analysis, finding, verdict)
+    severity = priority.level
+    critical = severity == "critical"
+    analysis.update(severity=severity, severity_rationale=priority.rationale, sla=priority.sla)
+    local = (analysis["provider"] == "Reglas locales" and not alert.get("external")
+             and alert["severity"] != "critical")
     result = {"mode": mode, "recommendation": "review", "recipients": [], "automatic": False,
               "reason": "Revisión pendiente. Hace falta evidencia suficiente o una decisión humana."}
     if critical:
@@ -328,33 +288,46 @@ def route(alert, analysis, mode, finding):
                       reason="Señal de acceso a credenciales. Confirmar alcance y decidir la respuesta con N2.")
     elif matched and verdict in {"benign_true_positive", "false_positive"}:
         result.update(recommendation="close", reason=finding.get("basis") or finding["summary"])
-        priority = severidad(alert, verdict)
-        analysis.update(severity=priority.level,
-                        severity_rationale=f"{analysis['severity_rationale']} Tras comprobar el caso: {priority.rationale}",
-                        sla=priority.sla)
-        old_rule = (alert["rule_id"] in {"UC-EDR-002", "UC-AI-001"}
-                    and alert["severity"] in {"informational", "low", "medium"} and severity != "high")
+        old_rule = (alert["rule_id"] == "UC-EDR-002"
+                    and alert["severity"] in {"informational", "low", "medium"} and initial_severity != "high")
         result["automatic"] = local and bool(finding.get("auto_close") or old_rule)
     elif (matched and verdict == "true_positive" and finding.get("resolved")
           and finding.get("verified_prevention") and severity in {"informational", "low"}):
         result.update(recommendation="close", automatic=local, reason=finding["verified_prevention"])
-    ot_asset = any(asset["zone"] == "LOGISTICS-OT" for asset in analysis["context"]["activos"])
+    if result["recommendation"] == "close" and missing_references(analysis):
+        result.update(recommendation="review", automatic=False,
+                      reason="Faltan referencias directas. Revisar la cobertura antes de cerrar.")
+    current_refs = set(analysis["requested"]) - set(analysis.get("context_event_ids", []))
+    assets = analysis["context"]["activos"]
+    if alert.get("external") and matched and finding.get("citations"):
+        checked = set(finding["citations"])
+        hosts = {event[field] for event in analysis["events"] if event["event_id"] in checked
+                 for field in ("hostname", "src_host") if event.get(field)}
+        assets = [asset for asset in assets if asset["hostname"] in hosts]
+        current_refs &= checked
+    ot_asset = any(asset["zone"] == "LOGISTICS-OT" for asset in assets)
+    direct_flows = [event for event in analysis["events"]
+                    if event.get("source") == "firewall" and event["event_id"] in current_refs]
     ot_alert = alert["rule_id"] == "UC-OT-001" or any(
-        event.get("source") == "firewall" and "LOGISTICS-OT" in {event.get("zone_src"), event.get("zone_dst")}
-        and event["event_id"] in analysis["requested"] for event in analysis["events"]
+        "LOGISTICS-OT" in {flow.get("zone_src"), flow.get("zone_dst")} for flow in direct_flows
     )
+    if direct_flows and not (ot_asset or ot_alert):
+        endpoints = {flow[key] for flow in direct_flows for key in ("src_ip", "dst_ip") if flow.get(key)}
+        with db.read_session():
+            ot_alert = any(is_ot(endpoint) for endpoint in sorted(endpoints))
+    result["ot"] = ot_asset or ot_alert
     ot_authorized = (local and alert["rule_id"] == "UC-OT-001" and matched
                      and verdict == "benign_true_positive" and finding.get("ot_authorized"))
-    if (ot_asset or ot_alert) and not ot_authorized:
+    if result["ot"] and not ot_authorized:
         result["recommendation"] = "escalate"
         result["automatic"] = False
         result["recipients"] = list(dict.fromkeys([*result["recipients"], "N2", "Responsable de Operaciones"]))
         result["reason"] = "La alerta afecta a OT. Preparar el escalado a Operaciones y N2."
-    elif finding and finding.get("escalate"):
+    if finding and finding.get("escalate"):
         result["recommendation"] = "escalate"
         result["automatic"] = False
         result["recipients"] = list(dict.fromkeys([*result["recipients"], *finding["escalate"]]))
-        if not critical:
+        if not critical and not result["ot"]:
             result["reason"] = "La evidencia justifica preparar el aviso y preservar los datos para revisión."
     minutes = {"critical": 15, "high": 30, "medium": 240, "low": 1440}
     deadline = 15 if critical else minutes.get(analysis["severity"])

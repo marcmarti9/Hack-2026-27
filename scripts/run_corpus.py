@@ -3,7 +3,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import sqlite3
 import sys
 import tempfile
@@ -23,9 +22,7 @@ from apps.backend.tools import db
 from apps.desktop.assistant import available_model, review_model
 from apps.desktop.defense import ALERT_ID, MAX_BYTES, _external, _object, _ticket
 from apps.desktop.review import PLAYBOOKS, investigate
-
-
-TECHNIQUE = re.compile(r"T[0-9]{4}(?:\.[0-9]{3})?")
+from apps.desktop.triage_report import merge_incident_memberships
 
 
 @dataclass(frozen=True)
@@ -133,10 +130,6 @@ def _investigate(entry, mode, remote):
             if entry.data is None or len(entry.data) == 1:
                 raise ValueError("La alerta no está en el índice. Aporta el objeto completo.")
             alert = _external(entry.data)
-            mitre = entry.data.get("mitre")
-            technique = mitre.get("technique_id") if isinstance(mitre, dict) else None
-            if isinstance(technique, str) and TECHNIQUE.fullmatch(technique):
-                alert["mitre"] = {"technique_id": technique}
     except ValueError as error:
         return _error(entry, str(error))
     try:
@@ -261,12 +254,31 @@ def _run(stream, connection, mode, limit, jobs, progress_every):
     return processed
 
 
+def _incident_memberships(connection):
+    # Recupera solo las pertenencias, sin cargar los cuerpos del corpus en memoria.
+    reports = [
+        {"ticket_id": ticket, "alert_ids": json.loads(alert_ids),
+         "incident": {"incident_id": incident, "alert_ids": json.loads(incident_alert_ids)}}
+        for ticket, alert_ids, incident, incident_alert_ids in connection.execute("""
+            SELECT json_extract(report, '$.ticket_id'), json_extract(report, '$.alert_ids'),
+                   json_extract(report, '$.incident.incident_id'), json_extract(report, '$.incident.alert_ids')
+            FROM rows
+            WHERE json_type(report, '$.incident') = 'object'
+            ORDER BY number
+        """)
+    ]
+    merge_incident_memberships(reports)
+    return {report["ticket_id"]: report["alert_ids"] for report in reports
+            if report["ticket_id"] == report["incident"]["incident_id"]}
+
+
 def _publish(connection, output, processed):
     counts = Counter()
     verdicts = Counter()
     dispositions = Counter()
     rules = {}
     timings = []
+    memberships = _incident_memberships(connection)
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n", delete=False,
@@ -275,8 +287,12 @@ def _publish(connection, output, processed):
             for document, reserved in connection.execute("SELECT report, reserved FROM rows ORDER BY number"):
                 if document is None:
                     raise ValueError("Hay entradas sin expediente. Reanuda el proceso.")
-                stream.write(document + "\n")
                 report = json.loads(document)
+                incident = report.get("incident")
+                if incident and incident["incident_id"] == report["ticket_id"]:
+                    report["alert_ids"] = incident["alert_ids"] = memberships[report["ticket_id"]]
+                    document = _encode(report)
+                stream.write(document + "\n")
                 counts["errors"] += report["estado"] == "error"
                 counts["remote_alerts_reserved"] += reserved
                 verdicts[report["verdict"]] += 1

@@ -27,8 +27,16 @@ def verify_travel_pivots(alert, analysis, direct):
                   "device_compliant": False, "risk_level": "high"}
     audit = {"event_id": "hidden-audit", "timestamp": suspicious["timestamp"], "source": "idp_audit",
              "actor_upn": login["user_upn"], "operation": "Add-MfaMethod"}
+    download = {**audit, "event_id": "hidden-payroll", "src_ip": login["src_ip"], "operation": "FileDownloaded",
+                "target": "Personas/Nóminas/empleados.xlsx", "result": "success",
+                "details": {"data_classification": "personal"}}
     original = db.events_for_entity
-    for expected_source, hidden in (("idp_signins", suspicious), ("idp_audit", audit), ("idp_audit", None)):
+    ordinary = {**download, "target": "Portal del Empleado/Documentación", "details": {}}
+    denied = {**download, "result": "denied"}
+    for expected_source, hidden, closed in (
+        ("idp_signins", suspicious, False), ("idp_audit", audit, False), ("idp_audit", download, False),
+        ("idp_audit", None, False), ("idp_audit", ordinary, True), ("idp_audit", denied, True),
+    ):
         def pivot(value, around=None, horas=24, source=None, limit=100):
             if value == login["user_upn"] and around == login["timestamp"] and horas == 1 and source == expected_source:
                 if hidden:
@@ -39,6 +47,9 @@ def verify_travel_pivots(alert, analysis, direct):
         # La correlación genérica permanece idéntica y no contiene ninguno de estos eventos.
         with patch.object(db, "events_for_entity", side_effect=pivot):
             result = verify(alert, deepcopy(analysis), direct)
+        if closed:
+            assert result["verdict"] == "false_positive" and result["auto_close"]
+            continue
         assert result["verdict"] == "needs_more_info" and not result.get("auto_close")
         if hidden:
             assert hidden["event_id"] in result["citations"] and "N2" in result["escalate"]
@@ -108,6 +119,24 @@ def main():
     alert, analysis, direct = load("ALR-20261007-011787")
     assert verify(alert, analysis, [{**direct[-1], "session_id": "otra-sesion"}])["verdict"] == "needs_more_info"
 
+    alert, analysis, direct = load("ALR-20261010-011828")
+    assert all("result" not in event for event in direct)
+    for operation, result in (("FileDownloaded", "failure"), ("Add-MfaMethod", "DENIED")):
+        mutation = [{**event, "result": result} if event["operation"] == operation else event for event in direct]
+        assert not verify(alert, analysis, mutation)
+
+    alert, analysis, direct = load("ALR-20261008-011789")
+    original_lookup = db.events_for_entity
+
+    def denied_inbox(events):
+        return [{**event, "result": "denied"} if event["event_id"] == "AUD-0000787" else event for event in events]
+
+    analysis["events"] = denied_inbox(analysis["events"])
+    with patch.object(db, "events_for_entity", side_effect=lambda *args, **kw: denied_inbox(original_lookup(*args, **kw))):
+        finding = verify(alert, analysis, direct)
+    assert finding["verdict"] == "needs_more_info" and finding["severity_override"] == "critical"
+    assert "AUD-0000787" not in finding["citations"] and "Tesorería" in finding["escalate"]
+
     consent = {
         "event_id": "synthetic-consent", "source": "idp_audit", "actor_upn": "ana@tarvia.example",
         "operation": "Consent to application", "target": "Aplicación X", "result": "success",
@@ -117,7 +146,7 @@ def main():
     analysis = {"events": [consent], "context": {}, "trace": []}
     assert verify(alert, analysis, [consent])["verdict"] == "true_positive"
     assert not verify(alert, analysis, [{**consent, "details": {"publisher_verified": True, "permissions": ["Mail.Read"]}}])
-    print(f"OK · {len(cases)} alertas oficiales y 17 contrapruebas o casos sintéticos.")
+    print(f"OK · {len(cases)} alertas oficiales y 23 contrapruebas o casos sintéticos.")
 
     benign = db.get_alert("ALR-20261005-000279")
     fast = investigate(benign, triage=True, remote=True)

@@ -4,6 +4,7 @@ from ipaddress import ip_address
 import re
 from urllib.parse import urlsplit
 
+from apps.backend.rules import coverage_edr
 from apps.backend.rules.engine import madrid
 from apps.backend.tools import db
 
@@ -24,8 +25,10 @@ OT_RULES = {"ENG-WS01": "OT-ENG-ALLOW", "WMS01": "OT-WMS-ALLOW"}
 OT_PORTS = {"502", "44818"}
 OT_HISTORY_LIMIT = 48
 PAYROLL_RECIPIENT = "asesoria@gestoria-pons.example"
+DLP_GATEWAY_LIMIT = 100
 SESSION_LIMIT = 64
 DEPLOY_ACTOR = "svc_ecom_deploy"
+STORE_HOST = "www.tarvia.example"
 
 
 def _stamp(event):
@@ -51,6 +54,25 @@ def _record(analysis, tool, query, events, note):
     analysis["trace"].append({"tool": tool, "query": query, "count": len(events), "note": note})
 
 
+def _scope_pending(proof, events, summary, question, recipients=()):
+    return {**proof("needs_more_info", [], summary, questions=(question,)),
+            "context_citations": [event["event_id"] for event in events], "escalate": list(recipients)}
+
+
+def _host_matches(claim, hostname, ip):
+    return (not claim.get("hostname") or claim["hostname"].casefold() == hostname.casefold()) and (
+        not claim.get("ip") or claim["ip"] == ip)
+
+
+def _store_url(value):
+    try:
+        url = urlsplit(value)
+        return (url.scheme == "https" and url.hostname == STORE_HOST
+                and url.port in (None, 443) and url.username is None)
+    except ValueError:
+        return False
+
+
 def _actor(event):
     return (event.get("userIdentity") or {}).get("userName")
 
@@ -67,16 +89,68 @@ def _successful_cloud(events):
     return [event for event in events if event["source"] == "cloudtrail" and not event.get("errorCode")]
 
 
+def _public_bucket_acl(events, bucket, stamp):
+    return [event for event in events if event.get("eventName") == "PutBucketAcl"
+            and event.get("eventSource") == "s3.amazonaws.com" and _params(event).get("bucketName") == bucket
+            and abs(_stamp(event) - stamp) <= timedelta(minutes=10)
+            and str(_params(event).get("x-amz-acl") or "").casefold()
+            in {"public-read", "public-read-write", "authenticated-read"}]
+
+
+def _acl_review(events, proof):
+    return {**proof("needs_more_info", events, "CloudTrail registró una ACL exitosa de acceso amplio que modifica "
+                    "el alcance de acceso del depósito. Falta revisar los permisos efectivos.",
+                    questions=("¿Qué permisos sobre el depósito concedió la ACL y quién los autorizó?",)),
+            "escalate": ["N2"]}
+
+
+def _cloud_crm_downloads(alert, cloud, events, runner_ip, proof):
+    if cloud.get("bucket") != "tarvia-backups-prod":
+        return None
+    origins = set()
+    for value in alert["entities"].get("ips", []):
+        try:
+            origins.add(str(ip_address(value)))
+        except ValueError:
+            continue
+    origins.discard(runner_ip)
+    stamp = madrid(alert["created_at"])
+    access_key = cloud.get("access_key")
+    downloads = [event for event in events if _actor(event) == cloud["identity"]
+                 and _key(event) and (not access_key or _key(event) == access_key)
+                 and event.get("sourceIPAddress") in origins and event.get("eventName") == "GetObject"
+                 and event.get("eventSource") == "s3.amazonaws.com" and _params(event).get("bucketName") == cloud["bucket"]
+                 and str(_params(event).get("key") or "").startswith("sql/CRM_PROD/")
+                 and type(event.get("bytes_transferred")) is int and event["bytes_transferred"] > 0
+                 and abs(stamp - _stamp(event)) <= timedelta(minutes=15)]
+    if downloads:
+        volume = sum(event["bytes_transferred"] for event in downloads)
+        return {**proof("true_positive", downloads, "CloudTrail confirma lecturas de copias del CRM "
+                        f"({len(downloads)} operaciones GetObject y {volume:,} bytes) en los registros citados. "
+                        "Puede haber más datos afectados.",
+                        questions=("¿Cuál es el alcance total de la exposición y qué datos personales contenían las copias?",),
+                        actions=("Conservar CloudTrail y escalar a N2, DPO y al responsable de Cloud.",)),
+                "escalate": ["N2", "DPO"], "verified_impact": "descarga de copias del CRM"}
+    return None
+
+
 def _cloud(alert, analysis, direct, proof):
     rule = alert["rule_id"]
     cloud = alert["entities"].get("cloud") or {}
     events = _successful_cloud(direct)
     identity = cloud.get("identity")
     bucket = cloud.get("bucket")
-    if not events or not identity or any(_actor(event) != identity for event in events):
+    if not events or not identity:
         return None
     runner = db.asset("CI-RUNNER01")
     if not runner:
+        return None
+    if rule == "UC-CLD-004":
+        return _cloud_crm_downloads(alert, cloud, events, runner["ip"], proof)
+    if rule == "UC-CLD-003" and bucket:
+        if acl_changes := _public_bucket_acl(events, bucket, madrid(alert["created_at"])):
+            return _acl_review(acl_changes, proof)
+    if any(_actor(event) != identity for event in events):
         return None
     origin = events[0].get("sourceIPAddress")
     if not origin or any(event.get("sourceIPAddress") != origin for event in events):
@@ -94,10 +168,15 @@ def _cloud(alert, analysis, direct, proof):
             stamp = _stamp(events[0])
             nearby = db.search_logs(bucket, "cloudtrail", desde=(stamp - timedelta(minutes=10)).isoformat(),
                                     hasta=(stamp + timedelta(minutes=10)).isoformat(), limit=100)
-            policy_changes = [event for event in _successful_cloud(nearby) if _params(event).get("bucketName") == bucket
+            successful = _successful_cloud(nearby)
+            acl_changes = _public_bucket_acl(successful, bucket, stamp)
+            policy_changes = [event for event in successful if _params(event).get("bucketName") == bucket
                               and event.get("eventName") == "PutBucketPolicy"]
-            _record(analysis, "Políticas del depósito", "Cambios de política del mismo depósito en ±10 min",
-                    policy_changes, "Se comprobaron actor, origen y alcance para detectar cambios contradictorios.")
+            _record(analysis, "Permisos del depósito", "Cambios de política y ACL del mismo depósito en ±10 min",
+                    [*policy_changes, *acl_changes],
+                    "Se comprobaron actor, origen y alcance para detectar cambios contradictorios.")
+            if acl_changes:
+                return _acl_review([*events, *acl_changes], proof)
             indexed = {event["event_id"] for event in policy_changes}
             if (len(nearby) < 100 and {event["event_id"] for event in events} <= indexed
                     and all(_actor(event) == identity and event.get("sourceIPAddress") == origin
@@ -133,6 +212,10 @@ def _cloud(alert, analysis, direct, proof):
         operations = {event.get("eventName") for event in events}
         if not {"GetCallerIdentity", "ListBuckets", "ListUsers"}.issubset(operations) or not _same_window(events, 10):
             return None
+        if cloud.get("access_key") and cloud["access_key"] != access_key:
+            return _scope_pending(proof, events, "CloudTrail registra reconocimiento con una clave distinta de la "
+                                  "declarada. Sus operaciones quedan como contexto.",
+                                  "¿Qué registros corresponden a la clave declarada?", ("N2",))
         stamp = min(_stamp(event) for event in events)
         previous = db.search_logs(access_key, "cloudtrail", desde=(stamp - timedelta(days=7)).isoformat(),
                                   hasta=(stamp - timedelta(milliseconds=1)).isoformat(), limit=80)
@@ -161,18 +244,6 @@ def _cloud(alert, analysis, direct, proof):
                                 "Se confirmó la persistencia administrativa en CloudTrail.",
                                 actions=("Solicitar a N2 desactivar la clave y revisar la identidad creada.",)),
                         "escalate": ["N2"], "verified_impact": "creación de una identidad administrativa con clave"}
-    elif rule == "UC-CLD-004":
-        downloads = [event for event in events if event.get("eventName") == "GetObject"
-                     and bucket == "tarvia-backups-prod" and _params(event).get("bucketName") == bucket
-                     and str(_params(event).get("key") or "").startswith("sql/CRM_PROD/")
-                     and type(event.get("bytes_transferred")) is int and event["bytes_transferred"] > 0]
-        if len({_params(event)["key"] for event in downloads}) >= 3 and _same_window(downloads, 15):
-            volume = sum(event["bytes_transferred"] for event in downloads)
-            return {**proof("true_positive", downloads, f"CloudTrail confirma {len(downloads)} lecturas de copias "
-                            f"del CRM por {volume:,} bytes en los registros citados. Puede haber más datos afectados.",
-                            questions=("¿Cuál es el alcance total de la exposición y qué datos personales contenían las copias?",),
-                            actions=("Conservar CloudTrail y escalar a N2, DPO y al responsable de Cloud.",)),
-                    "escalate": ["N2", "DPO"], "verified_impact": "descarga de copias del CRM"}
     return None
 
 
@@ -231,8 +302,9 @@ def _cicd(alert, analysis, direct, proof):
 
 
 def _web_disclosure(alert, direct, proof):
-    accounts = {user.get("upn") for user in alert["entities"].get("users", [])}
-    hashes = {file.get("sha256") for file in alert["entities"].get("files", []) if file.get("sha256")}
+    entities = alert["entities"]
+    accounts = {user.get("upn") for user in entities.get("users", [])}
+    hashes = {file.get("sha256") for file in entities.get("files", []) if file.get("sha256")}
     for event in direct:
         if (event["source"] != "dlp" or event.get("channel") != "web_upload"
                 or event.get("policy") != "Datos personales de clientes (RGPD)"):
@@ -265,14 +337,40 @@ def _web_disclosure(alert, direct, proof):
                    and type(entry.get("rows_returned")) is int and entry["rows_returned"] >= 10000
                    and _stamp(entry) < first_archive and _same_window((entry, event), 60)]
         if queries:
-            return {**proof("needs_more_info", [*queries, *archives, *uploads, event],
+            chain = [*queries, *archives, *uploads, event]
+            hosts = entities.get("hosts", [])
+            asset = db.asset(hostname) if any(host.get("ip") for host in hosts) else None
+            if (any(not _host_matches(host, hostname, (asset or {}).get("ip")) for host in hosts)
+                    or any(domain.rstrip(".").casefold() != destination.casefold()
+                           for domain in entities.get("domains", []))):
+                return _scope_pending(proof, chain, "El equipo o el dominio declarados no coinciden con los de la "
+                                      "transferencia observada. Sus registros quedan como contexto.",
+                                      "¿Qué registros corresponden al equipo y al destino declarados?", ("N2", "DPO"))
+            return {**proof("needs_more_info", chain,
                             f"SQL registró {len(queries)} consultas masivas del CRM antes de la creación de un "
-                            f"archivo cifrado. El proxy aceptó {len(uploads)} envíos al destino de la alerta "
+                            f"archivo cifrado. El proxy aceptó {len(uploads)} envíos a {destination} "
                             f"({volume:,} bytes). Quedan por confirmar el contenido del archivo y el volumen recibido.",
                             questions=("¿Qué datos incluía el archivo cifrado y qué parte recibió el destino?",),
                             actions=("Preservar SQL, EDR, proxy y DLP. Escalar a N2 y DPO para determinar el alcance.",)),
                     "escalate": ["N2", "DPO"]}
     return None
+
+
+def _dlp_gateway(event, sender, analysis, direct):
+    nearby = db.events_for_entity(sender, around=event["timestamp"], horas=1, source="email",
+                                  limit=DLP_GATEWAY_LIMIT)
+    rows = {entry["event_id"]: entry for entry in direct}
+    for entry in (*analysis["events"], *nearby):
+        rows.setdefault(entry["event_id"], entry)
+    mail = [entry for entry in rows.values() if entry["source"] == "email" and entry.get("direction") == "outbound"
+            and entry.get("sender") == sender and isinstance(entry.get("recipients"), list)
+            and _same_window((event, entry), 5)
+            and any(attachment.get("name") == event["file_name"] and attachment.get("size") == event["file_size"]
+                    for attachment in entry.get("attachments") or [])]
+    capped = len(nearby) >= DLP_GATEWAY_LIMIT
+    _record(analysis, "Pasarela de correo", "Remitente exacto y adjunto en los cinco minutos del registro DLP",
+            mail, "El pivote alcanzó su límite." if capped else "Contraste de entrega y destinatarios.")
+    return mail, capped
 
 
 def _dlp(alert, analysis, direct, proof):
@@ -284,38 +382,64 @@ def _dlp(alert, analysis, direct, proof):
         if not actor or f"{actor}@tarvia.example" not in accounts:
             continue
         destination, filename = event.get("destination"), event.get("file_name") or ""
-        if not destination or not filename:
+        size = event.get("file_size")
+        if not destination or not filename or type(size) is not int or size <= 0:
             continue
         matches = event.get("matches") or {}
         sensitive = {name for name, count in matches.items() if type(count) is int and count > 0}
+        if not sensitive or not isinstance(event.get("policy"), str) or "Datos personales" not in event["policy"]:
+            continue
+        authorized_payroll = False
         if destination == PAYROLL_RECIPIENT:
             change = next((item for item in analysis["context"]["cambios"] if item["id"] == "FLUJO-0007"), None)
             user = db.user(actor)
-            authorized = (change and _local_window(event, change) and user and user["status"] == "active"
-                          and user["department"] == "Personas" and "nóminas" in user["title"].lower()
-                          and user["workstation"] == event.get("hostname") and event.get("action") == "audit"
-                          and event.get("policy") == "Datos personales de empleados"
-                          and re.fullmatch(r"variables_nomina_[a-z]{3}\.xlsx", filename)
-                          and sensitive == {"dni_nie", "iban"})
-            if authorized and len(direct) == len(analysis["requested"]) == 1:
-                return {**proof("benign_true_positive", [event], "DLP marcó el envío de variables de nómina "
-                                "desde el puesto del operador de Nóminas a la gestoría autorizada.",
-                                basis="FLUJO-0007 vigente. Coinciden canal, remitente, destino y tipo de datos."),
-                        "auto_close": True}
-            continue
-        if not sensitive or not isinstance(event.get("policy"), str) or "Datos personales" not in event["policy"]:
-            continue
-        mail = [entry for entry in direct if entry["source"] == "email" and entry.get("direction") == "outbound"
-                and entry.get("sender") == f"{actor}@tarvia.example" and entry.get("recipients") == [destination]
-                and entry.get("action") == "delivered" and _same_window((event, entry), 5)
-                and any(attachment.get("name") == filename and attachment.get("size") == event.get("file_size")
-                        for attachment in entry.get("attachments") or [])]
-        if mail and not destination.lower().endswith("@tarvia.example"):
-            return {**proof("true_positive", [event, *mail], "DLP detectó datos personales y la pasarela registra "
-                            "la entrega del mismo adjunto a un destinatario externo distinto de la gestoría autorizada. "
+            authorized_payroll = (change and _local_window(event, change) and user and user["status"] == "active"
+                                  and user["department"] == "Personas" and "nóminas" in user["title"].lower()
+                                  and user["workstation"] == event.get("hostname") and event.get("action") == "audit"
+                                  and event.get("policy") == "Datos personales de empleados"
+                                  and re.fullmatch(r"variables_nomina_[a-z]{3}\.xlsx", filename)
+                                  and sensitive == {"dni_nie", "iban"})
+        candidates, capped = _dlp_gateway(event, f"{actor}@tarvia.example", analysis, direct)
+        mail = [entry for entry in candidates if destination in entry["recipients"]]
+        if authorized_payroll:
+            mismatched_delivery = [entry for entry in candidates
+                                   if destination not in entry["recipients"] and entry.get("action") == "delivered"
+                                   and any(isinstance(recipient, str) and "@" in recipient
+                                           and not recipient.lower().endswith("@tarvia.example")
+                                           for recipient in entry["recipients"])]
+            if mismatched_delivery:
+                return {**proof("needs_more_info", [event, *mail, *mismatched_delivery],
+                                "La pasarela registró una entrega cercana del mismo adjunto a otro destinatario "
+                                "externo. Falta confirmar si corresponde al envío de nómina observado por DLP.",
+                                questions=("¿Qué mensaje y destinatarios corresponden a este registro de nómina?",)),
+                        "escalate": ["N2", "DPO"]}
+        unauthorized_mail = [entry for entry in mail if any(
+            isinstance(recipient, str) and "@" in recipient and not recipient.lower().endswith("@tarvia.example")
+            and not (authorized_payroll and recipient == PAYROLL_RECIPIENT) for recipient in entry["recipients"])]
+        delivered = [entry for entry in unauthorized_mail if entry.get("action") == "delivered"]
+        outcomes = {(entry.get("action"), frozenset(value for value in entry["recipients"] if isinstance(value, str)))
+                    for entry in mail}
+        if len(outcomes) > 1 and (authorized_payroll or unauthorized_mail):
+            return {**proof("needs_more_info", [event, *mail], "La pasarela contiene resultados o destinatarios distintos "
+                            "para el mismo adjunto. Falta confirmar qué entrega corresponde al registro DLP.",
+                            questions=("¿Qué mensaje y destinatarios corresponden al envío de datos personales?",)),
+                    "escalate": ["N2", "DPO"]}
+        if delivered:
+            return {**proof("true_positive", [event, *delivered], "DLP detectó datos personales y la pasarela registra "
+                            "la entrega del mismo adjunto a un destinatario externo fuera del flujo autorizado. "
                             "La confirmación final de alcance corresponde al DPO.",
                             actions=("Preservar el correo y escalar a N2 y DPO.",)),
                     "escalate": ["N2", "DPO"], "verified_impact": "entrega externa de adjunto con datos personales"}
+        if authorized_payroll and (capped or unauthorized_mail):
+            return {**proof("needs_more_info", [event, *mail], "La evidencia de la pasarela no permite confirmar "
+                            "que el envío se limitara a la gestoría autorizada.",
+                            questions=("¿Qué destinatarios confirma la pasarela para este adjunto?",)),
+                    "escalate": ["N2"]}
+        if authorized_payroll and len(direct) == len(analysis["requested"]) == 1:
+            return {**proof("benign_true_positive", [event], "DLP marcó el envío de variables de nómina "
+                            "desde el puesto del operador de Nóminas a la gestoría autorizada.",
+                            basis="FLUJO-0007 vigente. Coinciden canal, remitente, destino y tipo de datos."),
+                    "auto_close": True}
     return None
 
 
@@ -348,11 +472,28 @@ def _vela(alert, analysis, direct, proof):
                        entry.get("prompt") or "", re.IGNORECASE))]
         exposed = [entry for entry in session if str(entry.get("response_summary") or "").startswith(
             ("El asistente enumeró ", "El asistente devolvió ")) and "códigos internos" in entry["response_summary"]]
-        if blocked and exposed:
-            return {**proof("true_positive", [*blocked, *exposed], "El guardarraíl denegó un turno, pero otro "
-                            "registro de la misma sesión muestra exposición de códigos internos.",
+        exposed_with_tool = [entry for entry in exposed if _cross_customer_tool(entry, successful=True)]
+        if exposed and (blocked or exposed_with_tool):
+            context = ("El guardarraíl denegó un turno y otro registro de la misma sesión muestra exposición de códigos internos."
+                       if blocked else "Un turno de la sesión ejecutó una herramienta contra otro cliente "
+                       "y el resultado del asistente registra exposición de códigos internos.")
+            return {**proof("true_positive", [*blocked, *(exposed if blocked else exposed_with_tool)], context,
                             actions=("Escalar a N2 y al equipo de IA. Revisar la sesión y rotar los códigos expuestos.",)),
                     "escalate": ["N2", "Equipo de IA"], "verified_impact": "divulgación de códigos internos"}
+        cross_orders = [entry for entry in session
+                        if _cross_customer_tool(entry, successful=True, name="get_order")]
+        if cross_orders:
+            return {**proof("true_positive", cross_orders, "La herramienta de pedidos registró una consulta exitosa "
+                            "a un cliente distinto del autenticado. El registro confirma el acceso cruzado. "
+                            "El equipo de IA debe verificar los datos exactos devueltos.",
+                            actions=("Escalar a N2 y al equipo de IA. Preservar y revisar la respuesta de la sesión.",),
+                            questions=("¿Qué datos de pedido o dirección devolvió la consulta?",)),
+                    "escalate": ["N2", "Equipo de IA"], "verified_impact": "consulta exitosa a pedidos de otro cliente"}
+        if exposed:
+            return {**proof("needs_more_info", exposed,
+                            "El resumen de respuesta registra códigos internos. Falta corroborar cómo se obtuvieron.",
+                            questions=("¿Confirma el equipo de IA la exposición en la salida original de la sesión?",)),
+                    "escalate": ["N2", "Equipo de IA"]}
         if (blocked and all(entry.get("tool_calls") == [] and entry.get("response_summary") == "Rechazado por el guardarraíl"
                             for entry in session)):
             return {**proof("true_positive", blocked, "La sesión contiene un intento de manipulación que el guardarraíl "
@@ -371,11 +512,14 @@ def _vela(alert, analysis, direct, proof):
     return None
 
 
-def _cross_customer_tool(event):
+def _cross_customer_tool(event, *, successful=False, name=None):
     for tool in event.get("tool_calls") or []:
+        if name and tool.get("name") != name:
+            continue
         target = (tool.get("args") or {}).get("customer_id")
-        if (target and target != event.get("customer_id")
-                and str(tool.get("result") or "").startswith("denied: customer_id mismatch")):
+        result = str(tool.get("result") or "").casefold()
+        verified = result in {"ok", "success"} if successful else result.startswith("denied: customer_id mismatch")
+        if target and target != event.get("customer_id") and verified:
             return True
     return False
 
@@ -387,16 +531,15 @@ def _ot_precursors(event, hostname, analysis, proof, direct):
     fw = db.events_for_entity(origin, around=center, horas=1, source="firewall", limit=OT_HISTORY_LIMIT)
     edr = db.events_for_entity(hostname, around=center, horas=1, source="edr_events", limit=OT_HISTORY_LIMIT)
     previous_fw = [entry for entry in fw if entry.get("src_ip") == origin and start <= _stamp(entry) < end]
-    previous_edr = [entry for entry in edr if entry.get("hostname") == hostname and start <= _stamp(entry) < end]
+    previous_edr = [entry for entry in edr if entry["source"] == "edr_events"
+                    and entry.get("hostname") == hostname and start <= _stamp(entry) < end]
     suspicious = [entry for entry in previous_fw if entry.get("zone_dst") == "LOGISTICS-OT"
                   and str(entry.get("dst_port")) in OT_PORTS
                   and (entry.get("action") in {"deny", "block", "reject"} or (
                        entry.get("action") == "allow"
                        and entry.get("rule") != OT_RULES.get(hostname, "OT-MAINT-TEMP")))]
     suspicious.extend(entry for entry in previous_edr
-                      if entry.get("event_type") == "process_access"
-                      and str((entry.get("details") or {}).get("target_process") or "").lower().split()[:1] == ["lsass.exe"]
-                      and "process_vm_read" in str((entry.get("details") or {}).get("access") or "").lower())
+                      if coverage_edr.recovery_attempt(entry) or coverage_edr.lsass_attempt(entry))
     capped = len(fw) >= OT_HISTORY_LIMIT or len(edr) >= OT_HISTORY_LIMIT
     _record(analysis, "Actividad previa OT", "Firewall y EDR del origen exacto en las dos horas anteriores",
             suspicious, f"Registros anteriores del origen: {len(previous_fw)} de firewall y {len(previous_edr)} de EDR. "
@@ -419,7 +562,7 @@ def _ot(alert, analysis, direct, proof):
     change = next((item for item in analysis["context"]["cambios"] if item["id"] == "CHG-2026-1063"), None)
     reasons = set()
     destinations = {}
-    origins = {}
+    windows = {}
     for event in direct:
         if (event["source"] != "firewall" or event.get("zone_dst") != "LOGISTICS-OT"
                 or event.get("action") != "allow" or str(event.get("dst_port")) not in OT_PORTS
@@ -441,10 +584,13 @@ def _ot(alert, analysis, direct, proof):
             reasons.add("Mantenimiento CHG-2026-1063 dentro de su ventana")
         else:
             return None
-        origin = event["src_ip"]
-        if origin not in origins or _stamp(event) < _stamp(origins[origin]):
-            origins[origin] = event
-    for origin, event in origins.items():
+        windows[event["src_ip"], _stamp(event)] = event
+    if any(not any(_host_matches(host, assets[origin]["hostname"], origin) for origin, _ in windows)
+           for host in alert["entities"].get("hosts", [])):
+        return _scope_pending(proof, direct, "El nombre de equipo o la IP declarados no coinciden con el origen "
+                              "observado. Los flujos quedan como contexto sin confirmar la autorización del aviso.",
+                              "¿Qué activo de inventario originó el flujo declarado?", ("N2", "Responsable de Operaciones"))
+    for (origin, _), event in windows.items():
         if pending := _ot_precursors(event, assets[origin]["hostname"], analysis, proof, direct):
             return pending
     return {**proof("benign_true_positive", direct, "El tráfico fue hacia el clasificador de Martorell "
@@ -454,13 +600,16 @@ def _ot(alert, analysis, direct, proof):
 
 
 def _ato(alert, analysis, direct, proof):
-    customers = {customer.get("customer_id") for customer in alert["entities"].get("customers", [])}
-    ips = alert["entities"].get("ips", [])
+    entities = alert["entities"]
+    customers = {customer.get("customer_id") for customer in entities.get("customers", [])}
+    ips = entities.get("ips", [])
     for changed in direct:
         customer, origin = changed.get("customer_id"), changed.get("src_ip")
-        if (changed["source"] != "ecom_account" or changed.get("event") != "email_change"
-                or not customer or customer not in customers or origin not in ips
-                or (changed.get("details") or {}).get("new_email_domain") != "tempmail-box.example"):
+        kind = changed.get("event")
+        if (changed["source"] != "ecom_account" or kind not in {"email_change", "address_change"}
+                or not customer or customer not in customers or origin not in ips):
+            continue
+        if kind == "email_change" and (changed.get("details") or {}).get("new_email_domain") != "tempmail-box.example":
             continue
         stamp = _stamp(changed)
         payments = [entry for entry in direct if entry["source"] == "ecom_account"
@@ -477,8 +626,14 @@ def _ato(alert, analysis, direct, proof):
         _record(analysis, "Autenticación de cliente", "Accesos del cliente antes del cambio", logins,
                 "Mismo cliente y origen, con huella de automatización.")
         if logins:
+            if (any(domain.rstrip(".").casefold() != STORE_HOST for domain in entities.get("domains", []))
+                    or any(not _store_url(value) for value in entities.get("urls", []))):
+                return _scope_pending(proof, [*logins, changed, *payments], "El comercio declarado no coincide con "
+                                      "la tienda de Tarvia. Los registros de Tarvia quedan como contexto.",
+                                      "¿Qué registros corresponden al comercio declarado?")
+            change = "al cambio a correo temporal" if kind == "email_change" else "al cambio de dirección"
             return {**proof("true_positive", [logins[-1], changed, *payments], "Un login exitoso automatizado "
-                            "precedió al cambio a correo temporal y la compra de tarjeta regalo con una tarjeta "
+                            f"precedió {change} y la compra de tarjeta regalo con una tarjeta "
                             "guardada. Coinciden cliente y origen. El titular debe confirmar si autorizó la operación.",
                             actions=("Escalar a Fraude y N2. Conservar el acceso, el cambio y la compra en el expediente.",)),
                     "escalate": ["N2", "Fraude"], "verified_impact": "compra con tarjeta guardada"}
