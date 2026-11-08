@@ -10,12 +10,13 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from apps.backend.tools import db
-from apps.desktop import sim_response
-from apps.desktop.demo import DEMO_PASSWORD, DEMO_USER
-from apps.desktop.review import Reviews, investigate
-from apps.desktop.session import Account
+from apps.engine import sim_response
+from apps.engine.practice import DEMO_USER
+from apps.engine.review import Reviews, investigate
+from apps.engine.session import Account
 
 ALERT = "ALR-20261010-011795"
+DEMO_PASSWORD = "VigiaDemo2026"
 REASON = "N2 de práctica verifica la ejecución de MiniDump sobre LSASS."
 
 

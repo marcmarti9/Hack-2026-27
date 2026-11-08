@@ -19,11 +19,11 @@ from pydantic import BaseModel, Field
 from apps.backend.config import ROOT as REPO
 from apps.backend.rules.engine import LEVELS, fuera_de_horario, madrid
 from apps.backend.tools import db
-from apps.desktop import assistant, sim_response
-from apps.desktop.defense import ALERT_ID, MAX_BYTES, _object, parse_alerts
-from apps.desktop.demo import DEMO_USER
-from apps.desktop.review import Reviews, investigate, reviewed_proposal
-from apps.desktop.session import Account
+from apps.engine import assistant, sim_response
+from apps.engine.defense import ALERT_ID, MAX_BYTES, _object, parse_alerts
+from apps.engine.practice import DEMO_USER
+from apps.engine.review import Reviews, investigate, reviewed_proposal
+from apps.engine.session import Account
 
 from .config import OUT
 from .live_queue import LiveQueue

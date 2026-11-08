@@ -10,7 +10,7 @@ from apps.backend.rules.coverage_edr import check, link_incident, lsass_attempt,
 from apps.backend.rules.engine import madrid
 from apps.backend.rules.triage import _proof
 from apps.backend.tools import db
-from apps.desktop.review import _collect, investigate
+from apps.engine.review import _collect, investigate
 
 INCIDENT_ALERTS = (
     "ALR-20261009-011791",

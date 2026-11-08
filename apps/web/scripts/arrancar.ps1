@@ -20,7 +20,7 @@ if (-not (Test-Path $Py)) {
     else { & python -m venv .venv }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
-& $Py -m pip install --quiet -r requirements.txt -r apps/web/requirements.txt
+& $Py -m pip install --quiet -r apps/web/requirements.lock
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($Rehacer -or -not (Test-Path (Join-Path $env:VIGIA_OUT_DIR "tarvia.duckdb"))) {
     & $Py -m apps.backend.ingest

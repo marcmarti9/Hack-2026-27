@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from apps.backend.config import DATA
 from apps.backend.tools import db
-from apps.desktop import defense
+from apps.engine import defense
 
 
 def write_batch(path, entries):
@@ -29,7 +29,7 @@ def run_cli(path, mode="guardia"):
     output = io.StringIO()
     with (patch("sys.argv", ["defense", str(path), "--mode", mode]),
           patch("gzip.open", side_effect=AssertionError("El ensayo leyó el archivo de referencia.")),
-          patch("apps.desktop.review.openai_message", side_effect=AssertionError("El ensayo llamó a OpenAI.")),
+          patch("apps.engine.review.openai_message", side_effect=AssertionError("El ensayo llamó a OpenAI.")),
           redirect_stdout(output)):
         defense.main()
     return [json.loads(line) for line in output.getvalue().splitlines()]

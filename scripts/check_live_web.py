@@ -82,7 +82,13 @@ def main():
                    "related_events": [*routine["related_events"], "EML-0999999"]}
         mismatched = {**routine, "alert_id": "ALR-20261005-990987",
                       "evidence": {**routine["evidence"], "message_id": "<different@retailforum.example>"}}
-        body = "\n".join(json.dumps(row) for row in (corroborated, unknown, routine, blocked, missing, mismatched))
+        dns = {**db.get_alert("ALR-20261005-000456"), "alert_id": "ALR-20261005-990988"}
+        dns_missing = {**dns, "alert_id": "ALR-20261005-990989",
+                       "related_events": [*dns["related_events"], "DNS-0999999"]}
+        dns_wrong_domain = {**dns, "alert_id": "ALR-20261005-990990",
+                            "entities": {**dns["entities"], "domains": ["distinto.example"]}}
+        batch = (corroborated, unknown, routine, blocked, missing, mismatched, dns, dns_missing, dns_wrong_domain)
+        body = "\n".join(json.dumps(row) for row in batch)
         with TestClient(app) as client:
             assert client.get("/api/directo").json() == {"alertas": [], "trabajo": None}
             bad = client.post("/api/analizar", json={"texto": body + "\n{incorrecto}", "modo": "guardia"})
@@ -91,18 +97,18 @@ def main():
             valid = client.post("/api/analizar", json={"texto": body, "modo": "guardia", "archivo": "alertas_nuevas.jsonl"})
             assert valid.status_code == 200, valid.json()
             job_id = valid.json()["trabajo"]
-            assert len(client.get("/api/directo").json()["alertas"]) == 6
+            assert len(client.get("/api/directo").json()["alertas"]) == len(batch)
             until = monotonic() + 25
             while monotonic() < until:
                 job = client.get(f"/api/trabajo/{job_id}").json()
                 if job["fin"]:
                     break
                 sleep(0.08)
-            assert job["estado"] == "terminado" and len(job["tickets"]) == 6, job["error"]
+            assert job["estado"] == "terminado" and len(job["tickets"]) == len(batch), job["error"]
             overview = client.get("/api/resumen").json()
-            assert overview["mesa"]["investigadas"] == 6 and overview["mesa"]["escaladas"] == 2
+            assert overview["mesa"]["investigadas"] == len(batch) and overview["mesa"]["escaladas"] == 2
             assert overview["barrido"] == {"investigadas": 0, "abstenciones": 0, "escaladas": 0}
-            assert overview["cierres_ejecutados"] == 2
+            assert overview["cierres_ejecutados"] == 3
             rows = {row["alert_id"]: row for row in client.get("/api/directo").json()["alertas"]}
             assert {row["job_id"] for row in rows.values()} == {job_id}
             received = {row["recibida"] for row in rows.values()}
@@ -114,7 +120,7 @@ def main():
             report = client.get(f"/api/tickets/{second['ticket_id']}").json()["expediente"]
             assert report["declared_evidence"] == unknown["evidence"] and not report["evidence"]
             assert not report["routing"]["automatic"]
-            for alert, verdict in ((routine, "false_positive"), (blocked, "true_positive")):
+            for alert, verdict in ((routine, "false_positive"), (blocked, "true_positive"), (dns, "false_positive")):
                 closed = rows[alert["alert_id"]]
                 assert closed["estado"] == "cerrada" and closed["verdict"] == verdict
                 assert not closed["asignado"] and closed["motivo_cierre"]
@@ -123,7 +129,8 @@ def main():
                 history = defensa.reviews.history(alert["alert_id"])
                 assert history[0]["kind"] == "Cierre automático"
                 assert history[0]["data"]["citations"] == alert["related_events"]
-            assert all(rows[alert["alert_id"]]["estado"] != "cerrada" for alert in (missing, mismatched))
+            assert all(rows[alert["alert_id"]]["estado"] != "cerrada"
+                       for alert in (missing, mismatched, dns_missing, dns_wrong_domain))
             assign = f"/api/directo/{first['alert_id']}/asignacion"
             assert client.put(assign, json={"rol": "N2", "asignarme": True}).json()["asignado"] == "analista.n2"
             assert client.put(assign, json={"rol": "N1", "asignarme": True}).status_code == 409
@@ -147,11 +154,11 @@ def main():
             assert client.post("/api/analizar", json={"texto": json.dumps(changed)}).status_code == 409
             check_incident_projection(client, corroborated, unknown)
 
-        from apps.desktop.defense import _external
-        from apps.desktop.review import investigate
+        from apps.engine.defense import _external
+        from apps.engine.review import investigate
         result = {"verdict": "needs_more_info", "confidence": 90, "summary": "Posible acceso a LSASS sin corroborar.",
                   "citations": [], "questions": ["Recuperar el registro de EDR."], "actions": []}
-        with patch("apps.desktop.review.openai_message", return_value=json.dumps(result)) as request:
+        with patch("apps.engine.review.openai_message", return_value=json.dumps(result)) as request:
             analysis = investigate(_external(unknown), remote=True, triage=True, mode="guardia")
             assert request.call_count == 2
             first = request.call_args_list[0]
@@ -164,10 +171,10 @@ def main():
 
         agreement = {**result, "verdict": "false_positive", "summary": "Reporte del ejercicio sin entrega real.",
                      "citations": routine["related_events"]}
-        with patch("apps.desktop.review.openai_message", return_value=json.dumps(agreement)) as request:
+        with patch("apps.engine.review.openai_message", return_value=json.dumps(agreement)) as request:
             analysis = investigate(_external(routine), remote=True, triage=True)
             assert request.call_count == 2 and analysis["routing"]["automatic"]
-        with patch("apps.desktop.review.openai_message", side_effect=[json.dumps(agreement), json.dumps(result)]):
+        with patch("apps.engine.review.openai_message", side_effect=[json.dumps(agreement), json.dumps(result)]):
             analysis = investigate(_external(routine), remote=True, triage=True)
             assert analysis["review_error"] and not analysis["routing"]["automatic"]
 

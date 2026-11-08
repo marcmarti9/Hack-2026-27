@@ -16,6 +16,7 @@ SCCM_COMMAND = ("powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypa
 EXTERNAL_ROUTINE_RULES = {
     ("UC-EDR-002", "EDR", "RB-02"),
     ("UC-EML-001", "EMAIL_GW", "RB-01"),
+    ("UC-NET-006", "DNS", "RB-09"),
     ("UC-WEB-001", "WAF", "RB-05"),
 }
 

@@ -366,7 +366,7 @@ input[type=text] { width:100%; padding:12px; border-radius:10px; border:1px soli
   align-items: end;
   flex-wrap: wrap;
   gap: 16px 24px;
-  margin-bottom: 24px;
+  margin-bottom: 32px;
 }
 .guardia-encabezado h2, .mesa .mesa-heading h2 {
   font-size: clamp(28px, 3vw, 40px);
@@ -393,7 +393,7 @@ input[type=text] { width:100%; padding:12px; border-radius:10px; border:1px soli
   border-radius: var(--radius-card);
   background: var(--panel);
 }
-.guardia-metricas > div { padding: 16px 20px; border-inline-start: 1px solid var(--borde); }
+.guardia-metricas > div { padding: 20px 24px; border-inline-start: 1px solid var(--borde); }
 .guardia-metricas > div:first-child { border-inline-start: 0; }
 .guardia-metricas dt { color: var(--suave); font-size: 13px; }
 .guardia-metricas dd {
@@ -403,7 +403,11 @@ input[type=text] { width:100%; padding:12px; border-radius:10px; border:1px soli
   letter-spacing: -.04em;
 }
 .guardia-metricas .guardia-escaladas { color: var(--naranja); }
-.guardia-alcance { margin: 8px 0 24px; color: var(--suave); font-size: 13px; }
+.guardia-alcance, .guardia-mas { margin-top: 12px; color: var(--suave); font-size: 13px; }
+.guardia-alcance > summary, .guardia-mas > summary { cursor: pointer; width: fit-content; padding-block: 8px; }
+.guardia-alcance > summary:focus-visible, .guardia-mas > summary:focus-visible { outline: 2px solid var(--marca); outline-offset: 3px; }
+.guardia-alcance > p { max-width: 70ch; margin: 4px 0 12px; }
+.guardia-mas > .editor-lista { margin-top: 12px; }
 .guardia-bloques { align-items: start; margin-block: 24px; }
 .guardia-bloques .tarjeta { margin: 0; }
 .guardia-bloques .tarjeta > :last-child { margin-bottom: 0; }

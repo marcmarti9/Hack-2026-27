@@ -1,11 +1,10 @@
 # Contexto compartido de Vigía
 
 Resumen de lo que el equipo ha descubierto y decidido sobre el reto. Sirve para que cualquier persona o IA que trabaje en el
-repositorio parta del mismo punto. Las cifras de filtrado, grupos y caza de esta nota describen el prototipo del equipo y su archivo de referencia. Para el estado comprobado del escritorio, consulta la [revisión adversarial](revision-adversarial.md). El código vigente está en
+repositorio parta del mismo punto. Las cifras de filtrado, grupos y caza de esta nota describen el prototipo del equipo y su archivo de referencia. Para la versión actual, consulta la [arquitectura](arquitectura-vigia.md). El código vigente está en
 `apps/` y el estado de cada trabajo, en [EPIC.md](../EPIC.md).
 
-Guías de referencia en el repositorio: `VIGÍA guía completa del proyecto.pdf` (qué y por qué) y
-`docs/VIGÍA guía técnica paso a paso (1).pdf` (código probado de cada pieza y resultados esperados).
+Las guías de la etapa inicial están en la [revisión histórica del repositorio](https://github.com/marcmarti9/Hack-2026-27/tree/d6e83a6).
 
 ## 1. El reto y la idea
 

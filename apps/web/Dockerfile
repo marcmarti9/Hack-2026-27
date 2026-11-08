@@ -3,7 +3,7 @@ WORKDIR /vigia
 COPY apps/web/requirements.lock ./requirements.lock
 RUN pip install --no-cache-dir -r requirements.lock
 COPY apps/backend ./apps/backend
-COPY apps/desktop ./apps/desktop
+COPY apps/engine ./apps/engine
 COPY apps/__init__.py ./apps/__init__.py
 COPY apps/web ./apps/web
 COPY scripts ./scripts

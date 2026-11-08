@@ -1,0 +1,46 @@
+name: Vigía web
+
+on:
+  push:
+    branches: [main]
+    paths: ['apps/**', 'scripts/**', 'eval/**', 'compose.yaml', '.dockerignore', '.github/workflows/web.yml']
+  pull_request:
+    paths: ['apps/**', 'scripts/**', 'eval/**', 'compose.yaml', '.dockerignore', '.github/workflows/web.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verificacion:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - name: Descargar el dataset oficial
+        run: |
+          git clone https://github.com/dttdfr/DTT-UAB-The-Hack.git data/dataset
+          git -C data/dataset checkout --detach ea61e70a3c066ff7663c613475f180597d56bd06
+      - name: Construir la imagen
+        run: docker build -f apps/web/Dockerfile -t vigia-web-ci .
+      - name: Verificar índice, triaje y respuesta simulada sin red
+        run: |
+          docker run --rm --network none -v "$PWD/data/dataset:/dataset:ro" vigia-web-ci sh -ec '
+            python -m pip check
+            python -m apps.backend.ingest
+            for check in scripts/check_*.py; do
+              [ "$check" = scripts/check_sim_response.py ] && continue
+              module=${check%.py}
+              python -m scripts.${module#scripts/}
+            done
+            python -m scripts.serve_simulator --port 8765 &
+            simulator=$!
+            trap "kill $simulator 2>/dev/null || true" EXIT
+            for attempt in $(seq 1 30); do
+              if python -c "from urllib.request import urlopen; urlopen(\"http://127.0.0.1:8765/openapi.json\", timeout=1).close()" 2>/dev/null; then
+                break
+              fi
+              sleep 1
+            done
+            VIGIA_SIM_PORT=8765 VIGIA_SIM_TEST=1 python -m scripts.check_sim_response
+          '

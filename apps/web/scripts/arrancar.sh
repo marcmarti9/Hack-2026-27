@@ -11,5 +11,5 @@ for option in "$@"; do
 done
 [ -x .venv/bin/python ] || python3 -m venv .venv
 . .venv/bin/activate
-python -m pip install --quiet -r requirements.txt -r apps/web/requirements.txt
+python -m pip install --quiet -r apps/web/requirements.lock
 exec sh apps/web/scripts/servir.sh

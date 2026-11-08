@@ -40,7 +40,7 @@ const tarjetaCaso = t => `<a class="caso caso-fila" href="${enlace('caso', t.tic
   <div class="caso-identidad"><div class="t">${esc(t.title)}</div><p>${esc(veredicto(t.verdict))}${t.alert_id ? ` · <span class="mono">${esc(t.alert_id)}</span>` : ''}
     ${t.alert_ids?.length ? ` · ${cuentaAlertas(t.alert_ids.length)}` : ''}${t.primera ? ` · desde ${esc(hora(t.primera))}` : ''}</p></div>
   <div class="caso-estado"><div class="meta">${sev(t.severity)} <span>${confianza(t.confidence)}</span>
-    ${t.out_of_hours ? '<span>· fuera de horario</span>' : ''} ${t.manipulation_detected?.detected ? '<span class="warn">· ⚠ intento de engaño</span>' : ''}
+    ${t.out_of_hours ? '<span>· fuera de horario</span>' : ''} ${t.manipulation_detected?.detected ? '<span class="warn">· intento de engaño</span>' : ''}
     ${t.human_review ? '<span class="warn">· revisar</span>' : ''}</div>
     ${t.disposition ? `<p>${esc(disposicion(t.disposition))}</p>` : ''}</div>
   ${t.triage_seconds != null ? `<small class="caso-tiempo sub">${esc(t.triage_seconds)} s</small>` : ''}</a>`;
@@ -69,14 +69,18 @@ const vistas = {
         <div><dt>${r.corpus_completo ? 'Escalados del barrido' : 'Escalados de la mesa'}</dt><dd class="guardia-escaladas">${fmt(actividad.escaladas)}</dd></div>
         <div><dt>Cierres en la mesa</dt><dd>${fmt(r.cierres_ejecutados)}</dd></div>
       </dl>
-      <p class="guardia-alcance">${r.corpus_completo
-        ? `Barrido del dataset oficial · ${fmt(r.cerradas_por_reglas)} alertas aptas para cierre según las reglas.`
-        : 'Expedientes y escalados de esta mesa.'}
-        ${fmt(actividad.abstenciones)} sin evidencia suficiente para un veredicto.
-        ${r.corpus_completo ? `<br>Mesa de triaje · ${fmt(r.mesa.investigadas)} expedientes, ${fmt(r.mesa.escaladas)} escalados y ${fmt(r.mesa.abstenciones)} abstenciones.` : ''}</p>
+      <details class="guardia-alcance"><summary>Alcance de las cifras</summary>
+        <p>${r.corpus_completo
+          ? `Barrido del dataset oficial · ${fmt(r.cerradas_por_reglas)} alertas aptas para cierre según las reglas.`
+          : 'Expedientes y escalados de esta mesa.'}
+          ${fmt(actividad.abstenciones)} sin evidencia suficiente para un veredicto.</p>
+        ${r.corpus_completo ? `<p>Mesa de triaje · ${fmt(r.mesa.investigadas)} expedientes, ${fmt(r.mesa.escaladas)} escalados y ${fmt(r.mesa.abstenciones)} abstenciones.</p>` : ''}
+      </details>
       <section class="guardia-casos">
         <h3>Casos graves escalados</h3>
-        <div class="editor-lista">${graves.slice(0, 6).map(tarjetaCaso).join('') || '<p class="editor-vacio sub">Todavía no hay casos graves escalados en esta mesa.</p>'}</div>
+        <div class="editor-lista">${graves.slice(0, 3).map(tarjetaCaso).join('') || '<p class="editor-vacio sub">Todavía no hay casos graves escalados en esta mesa.</p>'}</div>
+        ${graves.length > 3 ? `<details class="guardia-mas"><summary>Más escalados</summary>
+          <div class="editor-lista">${graves.slice(3, 6).map(tarjetaCaso).join('')}</div></details>` : ''}
       </section>
       <div class="dos guardia-bloques">
         <div class="tarjeta"><h3>Revisión de brechas por el DPO</h3>${rg.map(x => `<div class="reloj">
@@ -265,14 +269,14 @@ const vistas = {
   },
 
   presentar() {
-    $('#vista').innerHTML = `<div class="editor-encabezado"><h2>Vigía en cuatro minutos</h2><p class="sub">Tarvia · Del dato a la decisión del SOC</p></div>
+    $('#vista').innerHTML = `<div class="editor-encabezado"><h2>Vigía en tres minutos</h2><p class="sub">Tarvia · Del dato a la decisión del SOC</p></div>
       <p class="editor-intro">El SOC recibe alertas también cuando el equipo está fuera de turno. Vigía cruza registros, inventario y cambios para preparar la decisión con sus evidencias.</p>
       <ol class="editor-lista editor-recorrido" role="list">
-        <li><a href="#panel"><div class="meta mono">01 · 30 s</div><div><strong>El turno completo</strong><p>Parte de guardia, alertas y escalados del barrido.</p></div></a></li>
-        <li><a href="#caso/VIG-ALR-20261005-000301"><div class="meta mono">02 · 40 s</div><div><strong>Un cierre comprobable</strong><p>SCCM, cambio autorizado y registros que explican el cierre.</p></div></a></li>
-        <li><a href="#caso/VIG-ALR-20261010-011795"><div class="meta mono">03 · 60 s</div><div><strong>Una cadena de preransomware</strong><p>Abre la cronología y muestra cómo se vinculan las alertas.</p></div></a></li>
-        <li><a href="#directo"><div class="meta mono">04 · 90 s</div><div><strong>La alerta del jurado</strong><p>Carga la entrada y sigue las fases del agente hasta el expediente.</p></div></a></li>
-        <li><a href="#relevo"><div class="meta mono">05 · 20 s</div><div><strong>Quién decide</strong><p>Responsables y plazos de guardia en un solo lugar.</p></div></a></li>
+        <li><a href="#panel"><div class="meta mono">0:00–0:25</div><div><strong>Las alertas fuera de turno</strong><p>La mesa de Tarvia y el volumen de alertas del SIEM.</p></div></a></li>
+        <li><a href="#caso/VIG-ALR-20261005-000301"><div class="meta mono">0:25–1:00</div><div><strong>Cómo investiga Vigía</strong><p>Del registro al cierre, con un inventario SCCM y su cambio autorizado.</p></div></a></li>
+        <li><a href="#directo"><div class="meta mono">1:00–1:55</div><div><strong>El lote del jurado</strong><p>Carga el JSONL y abre los resultados en Triaje.</p></div></a></li>
+        <li><a href="#caso/VIG-ALR-20261009-011791"><div class="meta mono">1:55–2:40</div><div><strong>La cadena de preransomware</strong><p>Abre la cronología del expediente y sus citas.</p></div></a></li>
+        <li><a href="#relevo"><div class="meta mono">2:40–3:00</div><div><strong>El relevo humano</strong><p>Consulta el responsable y el plazo de los expedientes escalados.</p></div></a></li>
       </ol>`;
   },
 

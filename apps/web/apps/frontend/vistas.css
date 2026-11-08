@@ -34,7 +34,7 @@
   align-items: start;
   border: 0;
   border-radius: 0;
-  padding: 18px 24px;
+  padding: 22px 24px;
   background: transparent;
   overflow-wrap: anywhere;
 }
@@ -49,9 +49,9 @@
 .editor-lista .caso-tiempo { margin: 3px 0 0; font: 12px var(--font-mono); white-space: nowrap; }
 .editor-lista .editor-vacio { margin: 0; padding: 18px 24px; }
 
-#vista[data-view="panel"] .guardia-casos { margin-top: 32px; }
+#vista[data-view="panel"] .guardia-casos { margin-top: 40px; }
 #vista[data-view="panel"] .guardia-casos h3 { font-size: 20px; }
-#vista[data-view="panel"] .guardia-bloques { gap: 24px; margin-top: 28px; }
+#vista[data-view="panel"] .guardia-bloques { gap: 24px; margin-top: 40px; }
 #vista[data-view="panel"] .guardia-bloques .tarjeta { padding: 20px 24px; }
 
 .editor-busqueda { max-width: 720px; margin: 0 0 24px; }
@@ -66,8 +66,8 @@
 .editor-busqueda input { min-width: 0; background: var(--fondo); }
 .editor-busqueda button { flex: none; min-height: 44px; }
 
-#vista[data-view="caso"] > :is(.dos, .vigia-report, #historia) { margin-block: 24px; }
-#vista[data-view="caso"] :is(.dos, .editor-expediente-acciones) { gap: 16px; }
+#vista[data-view="caso"] > :is(.dos, .vigia-report, #historia) { margin-block: 32px; }
+#vista[data-view="caso"] :is(.dos, .editor-expediente-acciones) { gap: 24px; }
 #vista[data-view="caso"] :is(.tarjeta, .raw, .meta) { min-width: 0; overflow-wrap: anywhere; }
 #vista[data-view="caso"] .tarjeta { padding: 20px 24px; }
 #vista[data-view="caso"] .paso { padding-block: 8px; }

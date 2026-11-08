@@ -1,7 +1,7 @@
 """Línea de tiempo enriquecida de un caso: alertas, eventos relacionados, informe N2 y caza, en lenguaje claro."""
 import re
 from datetime import datetime, timezone
-from .rules.engine import madrid, fuera_de_horario
+from apps.backend.rules.engine import madrid, fuera_de_horario
 
 # Fases de la cadena de ataque (MITRE ATT&CK) en el orden en que se cuentan
 FASES = ["Acceso inicial", "Ejecución", "Persistencia", "Robo de credenciales", "Descubrimiento",
@@ -93,7 +93,7 @@ def _agrupar(pasos: list[dict]) -> list[dict]:
     for p in out:
         p.pop("_clave", None)
         if p["repeticiones"] > 1:
-            p["detalle"] = f"Se repite {p['repeticiones']} veces hasta las {madrid(p['hasta']).strftime('%H:%M')}"
+            p["detalle"] = f"Se repite {p['repeticiones']} veces hasta las {madrid(_instant(p['hasta']).isoformat()).strftime('%H:%M')}"
     return out
 
 
@@ -104,7 +104,7 @@ def _instant(value: str) -> datetime:
 
 def construir(ticket: dict, alertas: list[dict], incidente: dict | None, max_pasos: int = 60, *, database=None) -> dict:
     if database is None:
-        from .tools import db as database
+        from apps.backend.tools import db as database
     pasos = {}
     evidence = {row["event_id"]: row for row in ticket.get("evidence", [])}
     local = set((ticket.get("criterio_verificado") or {}).get("citations", []))
@@ -157,8 +157,9 @@ def construir(ticket: dict, alertas: list[dict], incidente: dict | None, max_pas
     context = [step for step in ordered if step["fase"] == "Contexto"][:max_pasos - len(highlights)]
     lista = sorted(highlights + context, key=by_time)
     for p in lista:
-        l = madrid(p["ts"])
-        p["hora_local"] = l.strftime("%d/%m %H:%M"); p["fuera_de_horario"] = fuera_de_horario(p["ts"])
+        stamp = _instant(p["ts"]).isoformat()
+        l = madrid(stamp)
+        p["hora_local"] = l.strftime("%d/%m %H:%M"); p["fuera_de_horario"] = fuera_de_horario(stamp)
         p["fuente_nombre"], p["icono"] = FUENTE.get(p["fuente"], (p["fuente"], "•"))
     fases = [{"fase": f, "n": sum(1 for p in lista if p["fase"] == f),
               "primera": next((p["hora_local"] for p in lista if p["fase"] == f), "")} for f in FASES]

@@ -10,8 +10,8 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from apps.backend.tools import db
-from apps.desktop.defense import _external
-from apps.desktop.review import investigate
+from apps.engine.defense import _external
+from apps.engine.review import investigate
 from apps.web.apps.backend.timeline import construir
 
 
@@ -57,7 +57,7 @@ def main():
                                     for event in result["report"]["evidence"] if event["event_id"] in verified)
             answer = {"verdict": "true_positive", "citations": [verified[0]], "summary": "Hallazgo local.",
                       "confidence": 90, "questions": [], "actions": []}
-            with patch("apps.desktop.review._ask", return_value=answer) as model:
+            with patch("apps.engine.review._ask", return_value=answer) as model:
                 investigated = investigate(jenkins, remote=True, triage=True)
                 assert model.call_count == 2
                 assert all(call.args[1]["contexto"]["inteligencia_vulnerabilidades"] ==

@@ -13,6 +13,7 @@ async function vistaMesaDirecto(jid, prellenar = '') {
     <header class="mesa-heading">
       <div><h2 id="mesa-titulo">Triaje</h2>
         <p>Carga alertas del SIEM y consulta el informe de cada una.</p></div>
+      <button type="button" class="mesa-button mesa-subtle mesa-queue-shortcut" data-queue-shortcut hidden>Ir a la cola ${chevron}</button>
     </header>
     <div class="mesa-intake">
       <form class="mesa-import" aria-labelledby="mesa-nuevo">
@@ -31,8 +32,6 @@ async function vistaMesaDirecto(jid, prellenar = '') {
           <div class="mesa-toolbar">
             <label for="mesa-archivo" class="mesa-button mesa-secondary">${upload} Cargar archivo</label>
             <input type="file" id="mesa-archivo" accept=".json,.jsonl,.txt" class="mesa-file-input">
-            <button type="button" class="mesa-button mesa-subtle" data-sample>Lote de ensayo</button>
-            <button type="button" class="mesa-button mesa-subtle" data-sample-one>Alerta nueva de ensayo</button>
           </div>
           <p id="mesa-fuente" class="mesa-source">Hasta 150 alertas · 1 MB</p>
           <span class="mesa-sr-only" data-source role="status"></span>
@@ -53,6 +52,12 @@ async function vistaMesaDirecto(jid, prellenar = '') {
           </div>
           <button class="mesa-button mesa-primary" type="submit">Analizar lote ${arrow}</button>
         </div>
+        <details class="mesa-samples"><summary>Datos de ensayo ${chevron}</summary>
+          <div class="mesa-toolbar">
+            <button type="button" class="mesa-button mesa-subtle" data-sample>Lote de ensayo</button>
+            <button type="button" class="mesa-button mesa-subtle" data-sample-one>Alerta nueva de ensayo</button>
+          </div>
+        </details>
       </form>
       <section class="mesa-progress" aria-labelledby="mesa-progreso" data-phase="idle">
         <div class="mesa-panel-heading">
@@ -72,18 +77,18 @@ async function vistaMesaDirecto(jid, prellenar = '') {
     <section class="mesa-queue" aria-labelledby="mesa-cola">
       <div class="mesa-queue-heading">
         <div><h3 tabindex="-1" id="mesa-cola">Cola de alertas ${ayudaHTML('los filtros de la cola', 'Aquí se guardan las alertas que envías a analizar. La hora de la tabla es la del aviso original. Puedes buscar por ID, nombre o archivo.')}</h3><p data-count class="mesa-count"></p></div>
-        <div class="mesa-filter">
+        <label for="mesa-buscar" class="mesa-search">${icon('m21 21-4.35-4.35M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z')}
+          <span class="mesa-sr-only">Buscar una alerta</span>
+          <input type="search" id="mesa-buscar" placeholder="Buscar una alerta">
+        </label>
+      </div>
+      <div class="mesa-queue-controls">
           <div class="mesa-filters" role="group" aria-label="Filtrar por resolución">
             <button type="button" data-filter="all" aria-pressed="true">Todas</button>
             <button type="button" data-filter="latest" aria-pressed="false" hidden>Último lote</button>
             <button type="button" data-filter="escalated" aria-pressed="false">Escaladas</button>
             <button type="button" data-filter="automatic" aria-pressed="false">Cerradas por Vigía</button>
           </div>
-          <label for="mesa-buscar" class="mesa-search">${icon('m21 21-4.35-4.35M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z')}
-            <span class="mesa-sr-only">Buscar una alerta</span>
-            <input type="search" id="mesa-buscar" placeholder="Buscar una alerta">
-          </label>
-        </div>
       </div>
       <section class="mesa-assigned" aria-labelledby="mesa-asignadas" hidden>
         <h4 id="mesa-asignadas">Mis alertas</h4><div data-assigned></div>
@@ -131,6 +136,7 @@ async function vistaMesaDirecto(jid, prellenar = '') {
   const progressBar = find('[data-progress-bar]');
   const latest = find('[data-latest]');
   const jobResults = find('[data-job-results]');
+  const queueShortcut = find('[data-queue-shortcut]');
   const progressDetails = find('[data-progress-details]');
   const steps = find('.mesa-steps');
   const rows = find('tbody');
@@ -189,6 +195,7 @@ async function vistaMesaDirecto(jid, prellenar = '') {
     const recentBatch = alerts[0]?.recibida ? alerts[0].job_id : null;
     find('[data-filter="latest"]').hidden = !recentBatch;
     jobResults.hidden = !completedBatch || completedBatch !== recentBatch;
+    queueShortcut.hidden = !alerts.length;
     const visible = alerts.filter(row => (filter === 'all' || (filter === 'escalated' && row.estado === 'escalada') ||
       (filter === 'latest' && row.job_id === recentBatch) || (filter === 'automatic' && automatic(row))) &&
       [row.alert_id, row.title, row.origin, severidades[row.severity],
@@ -234,7 +241,7 @@ async function vistaMesaDirecto(jid, prellenar = '') {
           ${row.fiscal ? `<small>Fiscal: ${esc(row.fiscal)}</small>` : ''}</td>
         <td>${esc(assigneeLabel)}</td>
         <td><div class="mesa-actions">
-          ${canAssign ? `<button type="button" class="mesa-action" data-mesa-action="assign">${sameRole(row) ? 'Liberar' : 'Asignarme'}</button>` : ''}
+          ${canAssign ? `<button type="button" class="mesa-action mesa-subtle" data-mesa-action="assign">${sameRole(row) ? 'Liberar' : 'Asignarme'}</button>` : ''}
           <button type="button" class="mesa-action mesa-report-toggle" data-mesa-action="toggle" aria-expanded="${opened}"${opened ? ' aria-controls="mesa-expediente"' : ''}>${opened ? 'Ocultar informe' : 'Ver informe'} ${chevron}</button>
         </div></td></tr>`;
     }).join('') || `<tr class="mesa-empty"><td colspan="7"><strong>${alerts.length ? 'No hay alertas en esta vista' : 'Todavía no hay alertas'}</strong>
@@ -286,15 +293,16 @@ async function vistaMesaDirecto(jid, prellenar = '') {
       ${!ticket.expediente ? `<p>${esc(ticket.summary || row.summary)}</p>` : ''}
       ${expedienteHTML(ticket)}
       <div class="mesa-report-grid">
-        <section class="mesa-evidence"><h4>Evidencia recuperada <span class="mesa-evidence-count">${events.length}</span> ${ayudaHTML('la evidencia recuperada', 'Son registros encontrados en el índice. Pulsa el identificador de un evento para consultar el registro original.')}</h4>
+        <details class="mesa-evidence vigia-report-fold"><summary>Evidencia recuperada <span class="mesa-evidence-count">${events.length}</span></summary>
+          ${events.length ? '<p>Pulsa un identificador para consultar el registro original.</p>' : ''}
           ${events.length ? `<ul>${events.map(event => `<li><button type="button" class="mesa-name prueba" data-event="${esc(event.event_id)}">${esc(event.event_id)}</button> · ${esc(origenEvidencia(event, report))}<br><small>${esc(event.finding || event.source)}</small></li>`).join('')}</ul>` : '<p>El índice no devolvió registros para verificar esta alerta.</p>'}
           <div data-event-output role="status" hidden></div>
-        </section>
-        <section class="mesa-evidence"><h4>Declarada por el sensor ${ayudaHTML('la evidencia declarada', 'Son datos que venían en el archivo del SIEM. Las citas del expediente indican cuáles se pudieron comprobar.')}</h4>
+        </details>
+        <details class="mesa-evidence vigia-report-fold"><summary>Declarada por el sensor</summary>
           ${declared && typeof declared === 'object' && Object.keys(declared).length
-            ? `<p>Campos aportados por el sensor. Las citas del informe indican qué se verificó.</p>${registroHTML(declared)}`
+            ? `<p>Datos que venían en el archivo del SIEM. Las citas del informe indican qué se verificó.</p>${registroHTML(declared)}`
             : '<p>La alerta no aportó evidencia declarada adicional.</p>'}
-        </section>
+        </details>
       </div></div>`;
       const output = reportPanel.querySelector('[data-event-output]');
       reportPanel.querySelectorAll('[data-event]').forEach(button => {
@@ -483,12 +491,17 @@ async function vistaMesaDirecto(jid, prellenar = '') {
     }
   }
 
+  function focusQueue() {
+    const heading = find('#mesa-cola');
+    heading.focus({preventScroll: true});
+    heading.scrollIntoView({block: 'start'});
+  }
+  queueShortcut.addEventListener('click', focusQueue);
   jobResults.addEventListener('click', () => {
     search.value = '';
     setFilter('latest');
     renderRows();
-    find('#mesa-cola').focus();
-    find('#mesa-cola').scrollIntoView({block: 'start'});
+    focusQueue();
   });
 
   async function poll() {

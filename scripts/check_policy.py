@@ -4,7 +4,7 @@ from unittest.mock import patch
 from apps.backend.rules.approvals import aprobacion
 from apps.backend.rules.engine import fuera_de_horario, madrid, severidad
 from apps.backend.tools import db
-from apps.desktop.review import investigate
+from apps.engine.review import investigate
 
 
 def main() -> None:

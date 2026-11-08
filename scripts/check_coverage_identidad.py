@@ -5,7 +5,7 @@ from unittest.mock import patch
 from apps.backend.rules.coverage_identidad import check
 from apps.backend.rules.triage import _proof
 from apps.backend.tools import db
-from apps.desktop.review import _collect, investigate
+from apps.engine.review import _collect, investigate
 
 
 def load(alert_id):

@@ -9,13 +9,12 @@ from time import perf_counter
 from apps.backend.rules.engine import madrid, severidad
 from apps.backend.rules.triage import effective_priority, local_finding, missing_references, route
 from apps.backend.tools import db, threat_intel
-from apps.desktop.assistant import (
+from apps.engine.assistant import (
     ProviderUnavailable, alert_references, available_model, documented_tickets, event_references, openai_message, review_model,
     ticket_references,
 )
-from apps.desktop.defense import report_ticket_id
-from apps.desktop.demo import RESOURCES, display_questions
-from apps.desktop.triage_report import build_report, merge_incident_memberships
+from apps.engine.defense import report_ticket_id
+from apps.engine.triage_report import build_report, merge_incident_memberships
 
 VERDICTS = {
     "true_positive": ("Verdadero positivo", "#9d302d", "#f8e9e8"),
@@ -27,6 +26,7 @@ VERDICTS = {
 }
 CLASSIFICATIONS = tuple(k for k in VERDICTS if k != "needs_more_info")
 MODEL_VERDICTS = {"true_positive", "benign_true_positive", "false_positive", "needs_more_info"}
+RESOURCES = Path(__file__).with_name("resources")
 PLAYBOOKS = ("SKILL", *(f"RB-{i:02d}" for i in range(1, 11)))
 MAX_PLAYBOOK = 16_000
 REVIEW_SCHEMA = {
@@ -494,48 +494,6 @@ def investigate(alert: dict, remote: bool = False, guidance: dict | None = None,
     analysis["timing"]["total_ms"] = round((perf_counter() - started) * 1000)
     if "routing" in analysis:
         analysis["report"] = build_report(alert, analysis)
-    return analysis
-
-
-def replay_demo(alert: dict, ticket: dict) -> dict:
-    """Reconstruye el expediente archivado dentro de la sesión de demostración."""
-    if alert["alert_id"] not in ticket["alert_ids"]:
-        raise ValueError("El expediente de referencia no corresponde a esta alerta.")
-    started = perf_counter()
-    references = list(dict.fromkeys(item["event_id"] for item in ticket["evidence"]))
-    with db.read_session():
-        analysis = _collect(alert, correlate=False)
-        related = list(dict.fromkeys(analysis["requested"] + references))
-        analysis["events"] = db.get_events(related)
-    analysis["requested"] = related
-    recovered = {event["event_id"] for event in analysis["events"]}
-    verdict = ticket["verdict"] if ticket["verdict"] in VERDICTS else "needs_more_info"
-    confidence = round(ticket["confidence"] * 100)
-    fiscal = ticket.get("fiscal") or {}
-    proposal = {
-        "verdict": verdict, "confidence": confidence, "summary": ticket["summary"],
-        "citations": [key for key in references if key in recovered],
-        "questions": display_questions(ticket),
-        "actions": [f'{item["action"]} → {item["target"]} · {item["justification"]}'
-                    for item in ticket["recommended_actions"]],
-    }
-    challenge = None
-    if fiscal:
-        alternative = fiscal.get("alternative_verdict")
-        challenge = {
-            "verdict": verdict if fiscal["agrees"] else (
-                alternative if alternative in VERDICTS else "needs_more_info"
-            ),
-            "summary": "\n".join([fiscal["comment"], *fiscal["objections"]]),
-            "confidence": None, "citations": [],
-        }
-    checked = fiscal.get("agrees") and references and set(references) <= recovered and verdict in CLASSIFICATIONS
-    elapsed = round((perf_counter() - started) * 1000)
-    analysis.update({
-        "origin": "demo", "provider": "el expediente archivado", "proposal": proposal, "challenge": challenge,
-        "verdict": verdict if checked else "needs_more_info", "confidence": confidence if checked else None,
-        "timing": {"evidence_ms": elapsed},
-    })
     return analysis
 
 

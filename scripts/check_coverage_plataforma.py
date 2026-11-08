@@ -8,7 +8,7 @@ from apps.backend.rules.coverage_plataforma import check
 from apps.backend.rules.engine import madrid
 from apps.backend.rules.triage import _proof
 from apps.backend.tools import db
-from apps.desktop.review import _collect
+from apps.engine.review import _collect
 
 CASES = (
     ("ALR-20261015-011819", "true_positive", "CT-0005451", False, "N2"),

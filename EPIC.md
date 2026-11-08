@@ -4,18 +4,18 @@ Este archivo coordina a quienes trabajan en Vigía desde distintas máquinas. La
 
 ## Objetivo compartido
 
-Entregar Vigía como aplicación de escritorio para el SOC de Tarvia. La mesa reúne alertas, chat, estadísticas, informe diario, tickets, historial y guías de triaje. La revisión conserva la evidencia, el contraste y la decisión humana.
+Entregar Vigía como aplicación web para el SOC de Tarvia. Triaje guarda un expediente por alerta. Casos agrupa incidentes acreditados y la revisión conserva la evidencia, el contraste y la decisión humana.
 
 ## Fuentes y ramas
 
 | Fuente | Uso |
 | --- | --- |
-| [Aplicación de escritorio](apps/desktop), [README](README.md) y [PR #2](https://github.com/marcmarti9/Hack-2026-27/pull/2) | Aplicación Qt e instaladores para Linux, Windows y macOS. |
+| [Aplicación web](apps/web), [motor](apps/engine) y [README](README.md) | Código vigente, arranque y verificación. |
 | [Revisión adversarial](docs/revision-adversarial.md) y [página del comité](docs/comite-tarvia.md) | Requisitos del reto, evidencia, límites de la guardia y criterios de defensa. |
-| [PR #1 histórico](https://github.com/marcmarti9/Hack-2026-27/pull/1) y el ZIP en `main` | Prototipo web anterior. La versión de escritorio y su documentación se mantienen en `main`. |
+| [PR #1 histórico](https://github.com/marcmarti9/Hack-2026-27/pull/1) y [PR #2 histórico](https://github.com/marcmarti9/Hack-2026-27/pull/2) | Prototipo inicial y etapa de escritorio. |
 | [Repositorio de Deloitte](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/5d7569232756eaf0a8723b22c428b70e8f67824f) | Dataset, política del SOC y diez runbooks oficiales. |
 | [Contexto compartido](docs/contexto-vigia.md) | Cifras medidas, los 12 incidentes y las trampas autorizadas del dataset, decisiones de diseño, brief visual y lo pendiente. Léelo antes de empezar. |
-| [Boceto original de escritorio](docs/diseno-escritorio.pdf), guías y archivos de diseño en `main` | Referencias para triaje, puntuación y copias de seguridad. El estado de cada función se comprueba en el código y sus pruebas. |
+| [Documentación original](https://github.com/marcmarti9/Hack-2026-27/tree/d6e83a6) | Bocetos y guías de las primeras versiones. |
 
 ## Protocolo entre máquinas
 
@@ -74,3 +74,4 @@ La última entrada de cada sesión indica su estado actual.
 | 2026-11-08 | Codex · Ensayo web de defensa | Entregado en `main` | Página del comité actualizada a la web. El Panel separa cifras del barrido y de la mesa. La VPN confirmada de proveedor aplica el ajuste de severidad y conserva el escalado a N2 y Logística. | Chromium: diez expedientes con los veredictos esperados, dos cierres y ocho escalados. Aislamiento N2 comprobado de extremo a extremo contra el simulador, una ejecución y duplicado rechazado. Barrido repetido: 11.061 expedientes sin errores, p95 local de 115 ms. Siguiente paso, cargar las diez alertas inéditas del jurado. [Ensayo](docs/defensa-web.md#ensayo-web-de-diez-alertas) · [Comité](docs/comite-tarvia.md). |
 | 2026-11-08 | Codex · Resultados de Triaje | Entregado en `main` | Triaje abre los resultados del lote, permite buscar por archivo y ordena las nuevas entradas por hora de importación. La tabla mantiene la hora original de la alerta. | Regresión de mesa y Chromium con dos lotes, fecha del segundo anterior a la del primero y consulta tras recargar. La migración local conservó las diez alertas previas. Para consultarlas, buscar por ID o nombre de archivo. |
 | 2026-11-08 | Codex · Lote oficial del jurado | Verificado en `main` | Ensayo del JSONL original publicado en `ea61e70` en una instancia separada, con el motor local y el índice de Tarvia. | Chromium generó 10 expedientes en 0,9 s de servidor y los conservó al recargar. Seis escalados, tres cierres y una abstención por falta de historial previo del móvil en el caso de viaje imposible. Queda por medir el contraste remoto sobre este lote. [Lote oficial](https://github.com/dttdfr/DTT-UAB-The-Hack/blob/ea61e70a3c066ff7663c613475f180597d56bd06/03_alertas/demo_alertas_comunes.jsonl). |
+| 2026-11-08 | Codex · Entrega web y defensa | Entregado en `main` | Vigía queda como aplicación web. El motor y las guías pasan a `apps/engine`. Se retiran Qt, instaladores y prototipos sin uso. Triaje, Panel y expediente ganan espacio y se amplía el autocierre DNS verificado a alertas nuevas. | Pasaron 15 comprobaciones en Docker con índice nuevo y simulador. Chromium verificó el lote oficial y 11 rutas en cinco anchos. El lote conserva tres autocierres, seis escalados y una revisión. [README](README.md) · [Guion de tres minutos](docs/defensa-web.md). |

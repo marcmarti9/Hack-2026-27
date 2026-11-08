@@ -1,6 +1,6 @@
 # Vigía web
 
-Mesa de triaje de Tarvia en el navegador. **Triaje** recibe lotes nuevos y muestra el progreso y el informe de cada alerta. **Casos** y **Panel** permiten consultar el histórico. La web comparte el motor de triaje y las reglas de escalado con Vigía escritorio.
+Mesa de triaje de Tarvia en el navegador. **Triaje** recibe lotes y muestra el progreso y el informe de cada alerta. **Casos** y **Panel** permiten consultar el histórico. La API usa `apps/engine` para investigar y `apps/backend` para consultar el índice y aplicar la política.
 
 ## Arranque con Docker Compose
 
@@ -8,12 +8,12 @@ Con Git y Docker Compose instalados, ejecuta estos comandos desde la raíz del r
 
 ```bash
 git clone https://github.com/dttdfr/DTT-UAB-The-Hack.git data/dataset
-git -C data/dataset checkout --detach 5d7569232756eaf0a8723b22c428b70e8f67824f
+git -C data/dataset checkout --detach ea61e70a3c066ff7663c613475f180597d56bd06
 docker compose up -d --build
 docker compose logs -f vigia
 ```
 
-El primer arranque construye el índice. Con los volúmenes vacíos, la prueba local indexó 814.471 eventos y 11.061 alertas en unos 6 min 44 s. Cuando el log indique que Uvicorn ha arrancado, abre [Vigía web](http://127.0.0.1:8100/#directo). Los volúmenes conservan el índice y el estado de la mesa entre arranques. [Dataset oficial, revisión fijada](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/5d7569232756eaf0a8723b22c428b70e8f67824f)
+El primer arranque construye el índice. Con los volúmenes vacíos, la prueba local indexó 814.471 eventos y 11.061 alertas en unos 6 min 44 s. Cuando el log indique que Uvicorn ha arrancado, abre [Vigía web](http://127.0.0.1:8100/#directo). Los volúmenes conservan el índice y el estado de la mesa entre arranques. [Dataset oficial, revisión fijada](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/ea61e70a3c066ff7663c613475f180597d56bd06)
 
 Si ya tienes el dataset, usa esa misma revisión y define `VIGIA_DATASET_PATH` con su ruta. Puedes ponerla en el `.env` local de la raíz junto con `VIGIA_PORT` si el puerto 8100 está ocupado. El dataset se monta en solo lectura.
 
@@ -25,9 +25,9 @@ Para activar OpenAI, añade `OPENAI_API_KEY` al `.env` local de la raíz antes d
 
 1. En **Triaje**, carga un archivo JSONL de hasta 150 alertas y 1 MB. Usa el mismo formato que `03_alertas/alertas.jsonl` del reto, con un objeto por línea y un identificador único para cada alerta nueva.
 2. Selecciona el turno y pulsa **Analizar lote**. Si activas **Contraste de Vigía**, verás cuándo se hacen la propuesta y la revisión. La mesa conserva los resultados, las asignaciones y las decisiones.
-3. Despliega una fila para consultar su informe. **Cerrada por Vigía** indica que el cierre ya está registrado y solo queda consultar el informe. Los perfiles de bajo riesgo habilitados para archivos nuevos son inventario SCCM autorizado, correo informativo identificado y solicitudes WAF cuya resolución queda verificada. Se exige corroborar todas las referencias directas. Si pediste contraste remoto, se exige acuerdo validado con esas pruebas y confianza de al menos 80 %. Las críticas se escalan según la política del SOC. El autocierre registra la decisión, el criterio y sus citas.
+3. Despliega una fila para consultar su informe. **Cerrada por Vigía** indica que el cierre ya está registrado. Para alertas nuevas, los perfiles elegibles incluyen inventario SCCM autorizado, correo informativo verificado, solicitudes WAF de resolución comprobada y consultas DNS que coinciden con un patrón de reputación verificado. Se exige corroborar todas las referencias directas. Si pediste contraste remoto, se exige acuerdo validado con esas pruebas y confianza de al menos 80 %. El autocierre guarda la decisión, el criterio y sus citas.
 
-Para ensayar antes de recibir el archivo del jurado, carga el [lote de ensayo](../../eval/lote-presentacion-091.jsonl) o pulsa **Alerta nueva de ensayo** para usar una entrada sintética que referencia un registro de Tarvia.
+Para ensayar, carga `03_alertas/demo_alertas_comunes.jsonl` del dataset o el [lote de práctica](../../eval/lote-presentacion-091.jsonl). En **Datos de ensayo**, el botón **Alerta nueva de ensayo** prepara una entrada sintética vinculada a un registro de Tarvia.
 
 Vigía usa Luna para proponer y Sol para el contraste cuando hay severidad alta, dudas o discrepancias. El veredicto se coteja con las citas y la evidencia local. Un fallo del proveedor queda en el expediente y el escalado de seguridad sigue la política del SOC. Los cierres elegibles por regla se resuelven localmente. [Modelos en OpenAI Docs](https://developers.openai.com/api/docs/guides/latest-model)
 
@@ -57,7 +57,7 @@ Para mostrar este recorrido en Docker, añade `VIGIA_SIM_PORT=18080` y una clave
 
 ```bash
 docker compose up -d --force-recreate vigia
-docker compose exec -d vigia python -c 'import sys, uvicorn; sys.path.insert(0, "/dataset/06_herramientas"); import mock_soc_api; mock_soc_api.LOGFILE = "/state/contencion-simulada.jsonl"; uvicorn.run(mock_soc_api.app, host="127.0.0.1", port=18080)'
+docker compose exec -d vigia python -m scripts.serve_simulator --port 18080
 ```
 
 Analiza `ALR-20261010-011795` en **Triaje**, abre su expediente y selecciona N2. La acción requiere confirmación, justificación y la clave de práctica. El expediente guarda el resultado. El proceso del simulador termina al recrear el contenedor.

@@ -10,8 +10,8 @@ from apps.backend.rules.coverage_ruido import check
 from apps.backend.rules.engine import madrid
 from apps.backend.rules.triage import _proof
 from apps.backend.tools import db
-from apps.desktop.defense import load_alerts
-from apps.desktop.review import _collect, investigate
+from apps.engine.defense import load_alerts
+from apps.engine.review import _collect, investigate
 
 
 def _case(key):

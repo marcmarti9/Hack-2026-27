@@ -1,6 +1,6 @@
 """Playbooks guiados a partir de los runbooks oficiales: pasos, decisiones y qué ha comprobado ya VIGÍA en cada caso."""
 import json, re
-from .config import DATA
+from apps.backend.config import DATA
 
 # Qué fuente de datos o herramienta corresponde a cada pista que aparece en el texto del runbook
 PISTAS = [(r"`email`|spf|dkim|dmarc|remitente", ["email"], ["get_event"]), (r"email_clicks|clic", ["email_clicks"], []),

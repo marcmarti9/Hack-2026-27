@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from apps.backend.rules.triage import local_finding
 from apps.backend.tools import db
-from apps.desktop.review import Reviews, investigate
+from apps.engine.review import Reviews, investigate
 
 
 def main():
@@ -67,13 +67,13 @@ def main():
         "verdict": "false_positive", "confidence": 99, "summary": "El WAF bloqueó el ataque con un 403.",
         "citations": ["EDR-0123412"], "questions": [], "actions": [],
     }
-    with patch("apps.desktop.review.openai_message", return_value=json.dumps(wrong)) as calls:
+    with patch("apps.engine.review.openai_message", return_value=json.dumps(wrong)) as calls:
         result = investigate(critical, remote=True, triage=True, mode="guardia")
     assert calls.call_count == 2 and calls.call_args.args[1]["eventos_adicionales"]
     assert result["verdict"] == "true_positive" and result["routing"]["recommendation"] == "escalate"
     assert result["confidence"] is None and result["report"]["provider_errors"]["review"]
     assert not result["routing"]["automatic"]
-    with patch("apps.desktop.review.openai_message", return_value=json.dumps({**wrong, "citations": ["NO-123456"]})):
+    with patch("apps.engine.review.openai_message", return_value=json.dumps({**wrong, "citations": ["NO-123456"]})):
         invalid = investigate(critical, remote=True, triage=True)
     assert invalid["proposal_error"] and invalid["routing"]["recommendation"] == "escalate"
     assert invalid["verdict"] == "true_positive" and invalid["report"]["provider_errors"]["proposal"]
@@ -145,7 +145,7 @@ def main():
     web = db.get_alert("ALR-20261005-000172")
     ordinary = {**wrong, "verdict": "true_positive", "confidence": 93, "citations": ["WAF-0001840"]}
     models = {"OPENAI_API_KEY": "test-key", "OPENAI_MODEL": "gpt-6-luna", "OPENAI_REVIEW_MODEL": "gpt-6.1-sol"}
-    with patch.dict(os.environ, models), patch("apps.desktop.review.openai_message") as transport:
+    with patch.dict(os.environ, models), patch("apps.engine.review.openai_message") as transport:
         transport.return_value = json.dumps(ordinary)
         assert investigate(web, remote=True)["review_provider"] == "gpt-6-luna"
         transport.reset_mock()

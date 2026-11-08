@@ -10,10 +10,10 @@ from apps.backend.rules.approvals import aprobacion
 from apps.backend.rules.engine import madrid
 from apps.backend.rules.triage import local_finding
 from apps.backend.tools import db
-from apps.desktop.assistant import ALERT_ID
-from apps.desktop.defense import report_ticket_id
-from apps.desktop.demo import DEMO_USER
-from apps.desktop.review import now
+from apps.engine.assistant import ALERT_ID
+from apps.engine.defense import report_ticket_id
+from apps.engine.practice import DEMO_USER
+from apps.engine.review import now
 
 ACTION = "isolate_host"
 CONTAINMENT = "/containment/" + ACTION

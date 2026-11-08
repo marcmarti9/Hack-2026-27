@@ -42,7 +42,7 @@ def context_for(question: str, selected: dict | None) -> tuple[dict | None, list
     if not alert:
         return None, []
 
-    from apps.desktop.review import investigate
+    from apps.engine.review import investigate
 
     analysis = investigate(alert, remote=False)
     finding = analysis.get("verified_finding") or {}

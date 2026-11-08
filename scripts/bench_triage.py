@@ -5,7 +5,7 @@ from time import monotonic
 
 from apps.backend.config import DATA
 from apps.backend.rules.engine import fuera_de_horario
-from apps.desktop.review import investigate
+from apps.engine.review import investigate
 
 def main():
     started = monotonic()

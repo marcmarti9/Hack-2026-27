@@ -207,15 +207,15 @@ def parse_alerts(payload: bytes, *, max_alerts: int = MAX_ALERTS, reject_conflic
 
 
 def _ticket(alert, analysis):
-    from apps.desktop.triage_report import build_report
+    from apps.engine.triage_report import build_report
 
     return analysis.get("report") or build_report(alert, analysis)
 
 
 def main():
-    from apps.desktop.assistant import available_model
-    from apps.desktop.review import PLAYBOOKS, investigate
-    from apps.desktop.triage_report import merge_incident_memberships
+    from apps.engine.assistant import available_model
+    from apps.engine.review import PLAYBOOKS, investigate
+    from apps.engine.triage_report import merge_incident_memberships
 
     parser = argparse.ArgumentParser(description="Ensaya el triaje de hasta diez alertas de defensa.")
     parser.add_argument("batch", type=Path, help="Archivo JSONL con IDs o alertas")

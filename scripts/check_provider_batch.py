@@ -67,7 +67,7 @@ def main():
             sleep(0.2)
             raise failure(429, request.full_url)
 
-        with TestClient(app) as client, patch("apps.desktop.assistant.build_opener") as transport:
+        with TestClient(app) as client, patch("apps.engine.assistant.build_opener") as transport:
             transport.return_value.open.side_effect = unavailable
             start = monotonic()
             job = run_batch(client, [routine, critical, high, unknown])

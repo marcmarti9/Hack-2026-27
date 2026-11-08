@@ -1,6 +1,6 @@
 # Arquitectura de Vigía
 
-Vigía investiga alertas del SIEM de Tarvia, documenta lo que puede verificar y deja las decisiones críticas al SOC. El mismo motor de Python atiende la web y el escritorio. La web es la interfaz para la defensa.
+Vigía investiga alertas del SIEM de Tarvia, documenta lo que puede verificar y deja las decisiones críticas al SOC. La web usa FastAPI y JavaScript. `apps/engine` orquesta la investigación y `apps/backend` concentra el índice y la política.
 
 ## Entrada, estado e investigación
 

@@ -159,6 +159,15 @@ function expedienteHTML(t) {
     ? `<details class="vigia-report-fold"><summary>${nombre}</summary><div class="vigia-report-fold-content">${contenido}</div></details>`
     : '';
   const registro = (nombre, dato) => desplegable(nombre, dato && Object.keys(dato).length ? registroHTML(dato) : '');
+  const contexto = [
+    registro('Enriquecimiento del índice', informe.enrichment),
+    registro('Vulnerabilidades', informe.vulnerabilities),
+    registro('Entidades declaradas', informe.declared_entities),
+    registro('Discrepancias de entidades', informe.entity_discrepancies),
+    registro('Alertas relacionadas', informe.related_alerts),
+    registro('Técnicas MITRE', informe.mitre),
+    registro('Alcance del incidente N2', informe.incident?.scope),
+  ].join('');
   const etiqueta = (nombre, valor, clase = '') => valor
     ? `<div${clase ? ` class="${clase}"` : ''}><dt>${nombre}</dt><dd>${esc(valor)}</dd></div>` : '';
   const icono = cerrada ? '<path d="m5 12 4 4 10-10"/>'
@@ -195,13 +204,7 @@ function expedienteHTML(t) {
         </div>
         ${preguntas.length ? desplegable('Qué falta por comprobar', registroHTML(preguntas)) : ''}
         ${registro('Criterio y referencias', crit)}
-        ${registro('Enriquecimiento del índice', informe.enrichment)}
-        ${registro('Vulnerabilidades', informe.vulnerabilities)}
-        ${registro('Entidades declaradas', informe.declared_entities)}
-        ${registro('Discrepancias de entidades', informe.entity_discrepancies)}
-        ${registro('Alertas relacionadas', informe.related_alerts)}
-        ${registro('Técnicas MITRE', informe.mitre)}
-        ${registro('Alcance del incidente N2', informe.incident?.scope)}
+        ${desplegable('Contexto técnico', contexto)}
       </section>
       <section class="vigia-report-section">
         <h3>Propuesta y revisión adversarial ${ayudaHTML('la revisión adversarial', 'La segunda revisión busca pruebas en contra y comprueba si las citas respaldan la propuesta inicial.')}</h3>
@@ -225,13 +228,14 @@ function expedienteHTML(t) {
       </section>
     </div>
     ${inteligenciaHTML(informe.threat_intel)}
-    <section class="vigia-report-section">
-      <h3>Consultas al índice <span class="vigia-report-count">${fmt(consultas.length)}</span> ${ayudaHTML('las consultas al índice', 'Cada consulta muestra dónde buscó Vigía, qué datos usó, cuántos registros encontró y qué límites tuvo la búsqueda.')}</h3>
+    <details class="vigia-report-fold vigia-report-section vigia-report-index">
+      <summary>Consultas al índice <span class="vigia-report-count">${fmt(consultas.length)}</span></summary>
+      <p class="vigia-report-muted">Fuentes consultadas, resultados y límites de cada búsqueda.</p>
       ${consultas.length ? `<ul class="vigia-report-queries">${consultas.map(c => `<li>
         <div><strong>${esc(c.tool)}</strong><p>${esc(c.query)}</p>${c.note ? `<p>${esc(c.note)}</p>` : ''}</div>
         ${c.count != null ? `<span>${fmt(c.count)} ${c.count === 1 ? 'resultado' : 'resultados'}</span>` : ''}
       </li>`).join('')}</ul>` : '<p class="vigia-report-muted">Sin consultas registradas.</p>'}
-    </section>
+    </details>
   </div>`;
 }
 

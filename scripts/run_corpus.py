@@ -19,10 +19,10 @@ import duckdb
 from apps.backend.config import DB, ROOT
 from apps.backend.rules.engine import fuera_de_horario
 from apps.backend.tools import db
-from apps.desktop.assistant import available_model, review_model
-from apps.desktop.defense import ALERT_ID, MAX_BYTES, _external, _object, _ticket
-from apps.desktop.review import PLAYBOOKS, investigate
-from apps.desktop.triage_report import merge_incident_memberships
+from apps.engine.assistant import available_model, review_model
+from apps.engine.defense import ALERT_ID, MAX_BYTES, _external, _object, _ticket
+from apps.engine.review import PLAYBOOKS, investigate
+from apps.engine.triage_report import merge_incident_memberships
 
 
 @dataclass(frozen=True)
@@ -74,7 +74,7 @@ def _encode(value):
 
 
 def _guidance(runbook):
-    directory = ROOT / "apps" / "desktop" / "resources" / "playbooks"
+    directory = ROOT / "apps" / "engine" / "resources" / "playbooks"
     names = ("SKILL", runbook) if runbook in PLAYBOOKS else ("SKILL",)
     return {name: {"revision": 0, "text": (directory / f"{name}.md").read_text(encoding="utf-8")}
             for name in names}
@@ -177,9 +177,9 @@ def _locked_state(state):
 def _signature(input_hash, mode, limit, output):
     index = DB.stat()
     paths = [*sorted((ROOT / "apps" / "backend").rglob("*.py")),
-             *(ROOT / "apps" / "desktop" / f"{name}.py" for name in ("assistant", "defense", "review", "triage_report")
-               if (ROOT / "apps" / "desktop" / f"{name}.py").is_file()),
-             *sorted((ROOT / "apps" / "desktop" / "resources" / "playbooks").glob("*.md")),
+             *(ROOT / "apps" / "engine" / f"{name}.py" for name in ("assistant", "defense", "review", "triage_report")
+               if (ROOT / "apps" / "engine" / f"{name}.py").is_file()),
+             *sorted((ROOT / "apps" / "engine" / "resources" / "playbooks").glob("*.md")),
              Path(__file__)]
     code = hashlib.sha256()
     for path in paths:
