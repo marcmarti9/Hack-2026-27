@@ -1,13 +1,13 @@
 # Defensa web de Vigía
 
-Arranca Vigía y espera a que el índice esté listo. Abre **Parte de guardia → Recorrido para el jurado**. Antes de empezar, comprueba que **Analizar en directo** abre la mesa y que **Casos** abre el expediente de LSASS. Si vas a enseñar la revisión remota, confirma que OpenAI está disponible. [Arranque reproducible de la web](../apps/web/README.md#arranque-con-docker-compose)
+Arranca Vigía y espera a que el índice esté listo. Abre **Panel → Recorrido para el jurado**. Antes de empezar, comprueba que **Triaje** abre la mesa y que **Casos** abre el expediente de LSASS. Si vas a enseñar la revisión remota, comprueba que puedes activar **Contraste de Vigía**. [Arranque reproducible de la web](../apps/web/README.md#arranque-con-docker-compose)
 
 | Tiempo | Qué enseñar | Qué decir |
 | --- | --- | --- |
-| 0:00–0:30 | Parte de guardia y embudo del SIEM | «El SOC de Tarvia tiene horario. Las alertas llegan durante todo el día. Vigía prepara el expediente, la evidencia y el siguiente paso para cada una.» |
+| 0:00–0:30 | Panel y cifras del SIEM | «El SOC de Tarvia tiene horario. Las alertas llegan durante todo el día. Vigía prepara el expediente, la evidencia y el siguiente paso para cada una.» |
 | 0:30–1:10 | SCCM, registro citado y cambio autorizado | «Esto parece una ejecución sospechosa. Al cruzar el registro con el cambio aprobado, Vigía puede dejar un cierre trazable y ahorrarle esa revisión al analista.» |
 | 1:10–2:10 | LSASS, cronología y alcance N2 | «Aquí las alertas aisladas cambian de sentido al relacionarlas. La cadena muestra acceso a credenciales, movimiento lateral y señales contra las copias. El expediente indica lo que se observó y qué falta por confirmar.» |
-| 2:10–3:40 | Subir el JSONL del jurado y desplegar una fila en Analizar en directo | «Este lote acaba de llegar. En la mesa se ve qué alerta está en curso y qué decidió el motor al terminar. El informe muestra las consultas, la propuesta, el contraste cuando se usa OpenAI y las citas que respaldan el resultado.» |
+| 2:10–3:40 | Subir el JSONL del jurado y desplegar una fila en Triaje | «Este lote acaba de llegar. En la mesa se ve qué alerta está en curso y qué decidió el motor al terminar. El informe muestra las consultas, la propuesta, el contraste de Vigía cuando se activa y las citas que respaldan el resultado.» |
 | 3:40–4:00 | Relevo, responsables y plazo | «El caso crítico llega a N2 con pruebas, plazo y una acción propuesta. Las decisiones quedan en el historial. Eso es lo que mantiene la guardia operativa.» |
 
 En la mesa, pulsa **Cerradas por Vigía** para enseñar qué trabajo se ha resuelto sin intervención. Abre un informe y muestra el motivo, la cita original y la entrada **Cierre automático** en el historial. Después pulsa **Escaladas** y abre un crítico para mostrar qué decisión sigue en manos de N2.

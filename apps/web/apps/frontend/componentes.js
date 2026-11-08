@@ -137,7 +137,7 @@ function expedienteHTML(t) {
         </div>
       </div>
       <dl class="vigia-report-meta">
-        ${etiqueta(`Confianza ${ayudaHTML('la confianza del triaje', 'En el triaje local refleja el respaldo de las pruebas. Si se valida el contraste con OpenAI, muestra la estimación de los modelos.')}`, estimada ? `${Math.round(informe.confidence * 100)} %` : 'Sin estimación')}
+        ${etiqueta(`Confianza ${ayudaHTML('la confianza del triaje', 'En el triaje local refleja el respaldo de las pruebas. Si se valida el contraste de Vigía, muestra su estimación.')}`, estimada ? `${Math.round(informe.confidence * 100)} %` : 'Sin estimación')}
         ${etiqueta('Duración', duracion)}
         ${etiqueta('Plazo', !automatica && hora(ruta.deadline_at))}
         ${etiqueta('Responsables', ruta.recipients?.join(' · '), 'vigia-report-owners')}
@@ -167,18 +167,18 @@ function expedienteHTML(t) {
         <h3>Propuesta y revisión adversarial ${ayudaHTML('la revisión adversarial', 'La segunda revisión busca pruebas en contra y comprueba si las citas respaldan la propuesta inicial.')}</h3>
         <ol class="vigia-report-review">
           <li><strong>${fuente === 'Reglas locales' ? 'Comprobación local' : 'Primera propuesta'}</strong>
-            <span>${esc(fuente || 'Sin proveedor registrado')}</span>
+            <span>${fuente === 'Reglas locales' ? 'Reglas locales' : fuente ? 'Vigía' : 'Sin proveedor registrado'}</span>
             ${registro('Propuesta registrada', propuesta)}
           </li>
           <li><strong>${informe.review_provider ? 'Contraste del fiscal' : 'Contraste de la evidencia'}</strong>
-            <span>${esc(informe.review_provider || (tieneContraste ? 'Verificación de los registros' : 'Sin contraste registrado'))}</span>
+            <span>${informe.review_provider ? 'Vigía' : tieneContraste ? 'Verificación de los registros' : 'Sin contraste registrado'}</span>
             ${informe.review_reason ? `<p>${esc(informe.review_reason)}</p>` : ''}
             ${registro('Contraste registrado', contraste)}
           </li>
         </ol>
         ${tieneLimites ? `<div class="vigia-report-limit"><strong>Límites de la revisión</strong>
-          ${errores.proposal ? `<p><b>Propuesta</b> · ${esc(errores.proposal)}</p>` : ''}
-          ${errores.review ? `<p><b>Contraste</b> · ${esc(errores.review)}</p>` : ''}
+          ${errores.proposal ? `<p><b>Propuesta</b> · ${esc(textoVigia(errores.proposal))}</p>` : ''}
+          ${errores.review ? `<p><b>Contraste</b> · ${esc(textoVigia(errores.review))}</p>` : ''}
           ${registro('Registro de incidencias', Object.fromEntries(Object.entries(errores).filter(([fase]) => !['proposal', 'review'].includes(fase))))}
         </div>` : ''}
         ${!tienePropuesta && !tieneContraste ? '<p class="vigia-report-muted">Este expediente se limita a las consultas y evidencias registradas.</p>' : ''}
@@ -206,7 +206,10 @@ function decisionHTML(t) {
       <form id="corregir-alerta" hidden><div class="botones"><label>Veredicto <select name="verdict" required><option value="">Selecciona</option>${Object.entries(VERDICTO).filter(([id]) => id !== 'needs_more_info').map(([id, texto]) => `<option value="${id}">${esc(texto)}</option>`).join('')}</select></label>
         <label>Motivo <input name="reason" type="text" required maxlength="700"></label><button>Registrar corrección</button></div></form>`}
     <p class="sub" id="estado-decision" role="status"></p>
-    ${(t.historial || []).map(h => `<div class="paso"><b>${esc(h.kind)}</b> · ${esc(h.actor)} · ${esc(hora(h.created_at))}${h.reason ? `<br>${esc(h.reason)}` : ''}</div>`).join('') || '<p class="sub">Sin cambios de historial registrados.</p>'}</div>`;
+    ${(t.historial || []).map(h => {
+      const actor = h.kind === 'Análisis' && !['Reglas locales', 'Local'].includes(h.actor) ? 'Vigía' : h.actor;
+      return `<div class="paso"><b>${esc(h.kind)}</b> · ${esc(actor)} · ${esc(hora(h.created_at))}${h.reason ? `<br>${esc(textoVigia(h.reason))}` : ''}</div>`;
+    }).join('') || '<p class="sub">Sin cambios de historial registrados.</p>'}</div>`;
 }
 
 function aislamientoHTML(propuesta) {
@@ -238,23 +241,72 @@ function activarAislamiento(t) {
 }
 
 async function editorGuia(name) {
-  const block = $('#guia-editable'), doc = await api('documentos/' + encodeURIComponent(name));
-  block.innerHTML = `<details><summary>Documento del agente · revisión ${doc.revision}</summary>
-    <form><textarea aria-label="Documento del agente" maxlength="16000" required ${rol() === 'N1' ? 'readonly' : ''}></textarea>
-      ${rol() === 'N1' ? '' : '<button>Guardar revisión</button>'}
-      <p class="sub" role="status"></p>
-    </form></details>`;
+  const block = $('#guia-editable'), path = 'documentos/' + encodeURIComponent(name);
+  let doc;
+  try { doc = await api(path); }
+  catch {
+    block.textContent = 'No se pudo abrir el documento del agente.';
+    return;
+  }
+  if (!block.isConnected) return;
+  const editable = rol() !== 'N1';
+  block.innerHTML = `<div class="pb-editor-bar">
+    <div><h3 id="pb-doc-title">Documento del agente</h3>
+      <p><code>${esc(name)}.md</code> <span data-revision></span></p></div>
+    ${editable ? '<button type="button" class="sec pb-doc-edit">Editar documento</button>' : '<span class="pb-readonly">Solo lectura</span>'}
+  </div>
+  <pre class="pb-doc-body" aria-labelledby="pb-doc-title"></pre>
+  ${editable ? `<form hidden>
+    <label for="pb-doc-input">Texto Markdown</label>
+    <textarea id="pb-doc-input" spellcheck="false" maxlength="16000" required></textarea>
+    <div class="pb-editor-actions"><button type="submit">Guardar revisión</button><button type="button" class="sec pb-doc-cancel">Cancelar</button></div>
+  </form>` : ''}
+  <p class="pb-editor-status" role="status"></p>`;
+  const preview = block.querySelector('.pb-doc-body');
+  const revision = block.querySelector('[data-revision]');
+  const status = block.querySelector('[role="status"]');
+  function renderDocument() {
+    revision.textContent = `Revisión ${doc.revision}`;
+    const fragment = document.createDocumentFragment();
+    doc.texto.split('\n').forEach((line, i) => {
+      if (i) fragment.append('\n');
+      if (/^#{1,6}\s/.test(line)) {
+        const heading = document.createElement('span');
+        heading.className = 'pb-doc-heading';
+        heading.textContent = line;
+        fragment.append(heading);
+      } else fragment.append(line);
+    });
+    preview.replaceChildren(fragment);
+  }
+  renderDocument();
+  if (!editable) return;
   const form = block.querySelector('form'), input = form.querySelector('textarea');
-  input.value = doc.texto;
+  const edit = block.querySelector('.pb-doc-edit'), cancel = block.querySelector('.pb-doc-cancel');
+  const save = form.querySelector('[type="submit"]');
+  function setEditing(editing) {
+    if (editing) input.value = doc.texto;
+    form.hidden = !editing;
+    preview.hidden = editing;
+    edit.hidden = editing;
+    (editing ? input : edit).focus();
+  }
+  edit.onclick = () => { status.textContent = ''; setEditing(true); };
+  cancel.onclick = () => { status.textContent = ''; setEditing(false); };
   form.onsubmit = async event => {
     event.preventDefault();
+    save.disabled = cancel.disabled = input.readOnly = true;
+    status.textContent = 'Guardando revisión…';
     try {
-      const r = await post('documentos/' + encodeURIComponent(name), {revision: doc.revision, texto: input.value, rol: rol()}, 'PUT');
-      if (!r.ok) throw new Error(mensajeError(await r.json()));
-      await editorGuia(name);
-      block.querySelector('details').open = true;
-      block.querySelector('[role="status"]').textContent = 'Revisión guardada.';
-    } catch (error) { form.querySelector('[role="status"]').textContent = error.message; }
+      const r = await post(path, {revision: doc.revision, texto: input.value, rol: rol()}, 'PUT');
+      const saved = await r.json();
+      if (!r.ok) throw new Error(mensajeError(saved));
+      doc = saved;
+      renderDocument();
+      setEditing(false);
+      status.textContent = 'Revisión guardada.';
+    } catch (error) { status.textContent = error.message; }
+    finally { save.disabled = cancel.disabled = input.readOnly = false; }
   };
 }
 
@@ -285,73 +337,161 @@ function activarDecision(t) {
 function playbookHTML(pbk, tid) {
   const marcas = cargar(`vigia_pb_${tid}_${pbk.id}`, {});
   const hechos = pbk.pasos.filter(s => s.estado === 'hecho' || marcas[s.n]).length;
-  return `<div class="tarjeta playbook" data-pb="${esc(pbk.id)}" data-t="${esc(tid)}">
-    <div class="pb-cab"><span class="pb-icono">${pbk.icono}</span><div><small class="suave">PLAYBOOK ${esc(pbk.id)}</small><h3 style="margin:0">${esc(pbk.titulo)}</h3></div>
-      <div class="pb-prog"><b>${hechos}/${pbk.total}</b><small>comprobaciones hechas</small><div class="barra"><i style="width:${100 * hechos / pbk.total}%"></i></div></div></div>
-    <p class="sub" style="margin:10px 0 14px">VIGÍA ya hizo <b style="color:var(--verde)">${pbk.hechos}</b> comprobaciones con los datos. Te quedan las marcadas con ○: márcalas cuando las hagas.</p>
-    <ol class="pasos-pb">${pbk.pasos.map(s => { const yo = marcas[s.n], hecho = s.estado === 'hecho';
-      return `<li class="${hecho ? 'vigia' : yo ? 'yo' : 'pend'}"><span class="chk" data-n="${s.n}" title="${hecho ? 'Comprobado por VIGÍA' : 'Marcar como hecho'}">${hecho ? '✓' : yo ? '✓' : '○'}</span>
-        <div><b>${esc(s.titulo)}</b> <span class="quien">${hecho ? 'VIGÍA' : yo ? 'Tú' : 'Te toca'}</span><div class="suave">${esc(s.texto)}</div>
-        ${hecho && s.hallazgo ? `<div class="hallazgo">→ ${esc(s.hallazgo)} ${s.prueba ? `<span class="prueba mono" data-ev="${esc(s.prueba)}">${esc(s.prueba)}</span>` : ''}</div>` : ''}
-        ${s.fuentes.length ? `<div class="srcs">${s.fuentes.map(f => `<span>${esc(f)}</span>`).join('')}</div>` : ''}</div></li>`; }).join('')}</ol>
-    <h4 class="dec-tit">Decisión</h4>
-    <div class="decisiones">${pbk.decisiones.map((d, i) => `<div class="dec ${d.color} ${i === pbk.elegida ? 'elegida' : ''}">
-      ${i === pbk.elegida ? '<span class="reco">VIGÍA recomienda</span>' : ''}<div class="si">Si: ${esc(d.condicion)}</div><div class="ent2">→ ${esc(d.accion)}</div></div>`).join('')}</div></div>`;
+  return `<div class="playbook pb-case" data-pb="${esc(pbk.id)}" data-t="${esc(tid)}">
+    <div class="pb-case-heading"><div><code>${esc(pbk.id)}</code><h3>${esc(pbk.titulo)}</h3></div>
+      <div class="pb-case-progress"><b aria-live="polite"><span data-count>${hechos}</span>/${pbk.total}</b>
+        <small>Comprobaciones hechas</small><progress value="${hechos}" max="${pbk.total || 1}" aria-label="Comprobaciones hechas"></progress></div></div>
+    <p class="pb-description">Vigía completó <b>${pbk.hechos}</b> comprobaciones con los datos. Marca las pendientes cuando las hagas.</p>
+    <ol class="pb-steps">${pbk.pasos.map(s => {
+      const propio = Boolean(marcas[s.n]), comprobado = s.estado === 'hecho';
+      return `<li class="pb-check-row">${comprobado
+        ? '<span class="pb-check-icon" aria-hidden="true">✓</span>'
+        : `<button type="button" class="pb-check-icon" data-check="${s.n}" aria-pressed="${propio}" aria-label="Comprobación ${s.n}: ${esc(s.titulo)}">${propio ? '✓' : '○'}</button>`}
+        <div><div class="pb-step-title"><b>${esc(s.titulo)}</b>
+          <small class="pb-check-state">${comprobado ? 'Vigía' : propio ? 'Tú' : 'Pendiente'}</small></div>
+          <p>${esc(s.texto)}</p>
+          ${comprobado && s.hallazgo ? `<p class="pb-finding">${esc(s.hallazgo)} ${s.prueba ? `<button type="button" class="sec prueba mono" data-ev="${esc(s.prueba)}">${esc(s.prueba)}</button>` : ''}</p>` : ''}
+          ${fuentesPlaybookHTML(s.fuentes)}
+        </div></li>`;
+    }).join('')}</ol>
+    <h4>Decisión</h4>
+    ${decisionesPlaybookHTML(pbk.decisiones, pbk.elegida)}
+  </div>`;
 }
 
 function playbooksCasoHTML(pbs, tid) {
   if (!pbs || !pbs.length) return '';
   const act = Math.min(+(window._pbTab || 0), pbs.length - 1);
-  return `<div class="pb-tabs">${pbs.map((p, i) => `<button class="pb-tab ${i === act ? 'activo' : ''}" data-i="${i}">${p.icono} ${esc(p.id)} · ${esc(p.titulo.split(/[:(]/)[0])}
-      <small>${p.hechos}/${p.total}</small></button>`).join('')}</div>
-    ${pbs.map((p, i) => `<div class="pb-panel" data-i="${i}" ${i === act ? '' : 'hidden'}>${playbookHTML(p, tid)}</div>`).join('')}`;
+  return `<div class="pb-case-workspace">
+    <div class="pb-case-tabs" role="group" aria-label="Playbooks del caso">${pbs.map((p, i) =>
+      `<button type="button" data-playbook-tab="${i}" aria-pressed="${i === act}" aria-controls="pb-case-${i}">
+        <code>${esc(p.id)}</code> ${esc(p.titulo.split(/[:(]/)[0])} <small>${p.hechos}/${p.total}</small></button>`).join('')}</div>
+    ${pbs.map((p, i) => `<div id="pb-case-${i}" data-playbook-panel="${i}" ${i === act ? '' : 'hidden'}>${playbookHTML(p, tid)}</div>`).join('')}
+  </div>`;
 }
 
 function activarPlaybooks() {
-  document.querySelectorAll('.pb-tab').forEach(b => b.onclick = () => { window._pbTab = b.dataset.i;
-    document.querySelectorAll('.pb-tab').forEach(x => x.classList.toggle('activo', x === b));
-    document.querySelectorAll('.pb-panel').forEach(x => x.hidden = x.dataset.i !== b.dataset.i); });
-  document.querySelectorAll('.playbook').forEach(box => box.querySelectorAll('.pend .chk, .yo .chk').forEach(c => c.onclick = () => {
-    const k = `vigia_pb_${box.dataset.t}_${box.dataset.pb}`, m = cargar(k, {}); m[c.dataset.n] = !m[c.dataset.n]; guardar(k, m); ruta(); }));
+  const workspace = $('.pb-case-workspace');
+  if (!workspace) return;
+  const tabs = [...workspace.querySelectorAll('[data-playbook-tab]')];
+  const panels = [...workspace.querySelectorAll('[data-playbook-panel]')];
+  tabs.forEach(tab => tab.onclick = () => {
+    window._pbTab = tab.dataset.playbookTab;
+    tabs.forEach(other => other.setAttribute('aria-pressed', String(other === tab)));
+    panels.forEach(panel => panel.hidden = panel.dataset.playbookPanel !== window._pbTab);
+  });
+  workspace.querySelectorAll('.pb-case').forEach(box => {
+    const key = `vigia_pb_${box.dataset.t}_${box.dataset.pb}`, marks = cargar(key, {});
+    const progress = box.querySelector('progress'), count = box.querySelector('[data-count]');
+    box.querySelectorAll('[data-check]').forEach(check => check.onclick = () => {
+      const checked = !marks[check.dataset.check];
+      marks[check.dataset.check] = checked;
+      guardar(key, marks);
+      check.setAttribute('aria-pressed', String(checked));
+      check.textContent = checked ? '✓' : '○';
+      check.closest('li').querySelector('.pb-check-state').textContent = checked ? 'Tú' : 'Pendiente';
+      progress.value += checked ? 1 : -1;
+      count.textContent = progress.value;
+    });
+  });
+}
+
+function fuentesPlaybookHTML(fuentes) {
+  return fuentes.length ? `<ul class="pb-sources" aria-label="Fuentes">${fuentes.map(f => `<li><code>${esc(f)}</code></li>`).join('')}</ul>` : '';
+}
+
+const PB_DECISION = {verde: 'Cerrar', ambar: 'Vigilar', rojo: 'Contener y escalar'};
+
+function decisionesPlaybookHTML(decisiones, recomendada) {
+  return `<ul class="pb-decisions">${decisiones.map((d, i) => `<li data-tone="${esc(d.color)}">
+    <div class="pb-decision-label"><span>${PB_DECISION[d.color] || 'Decisión'}</span>
+      ${i === recomendada ? '<strong>Vigía recomienda</strong>' : ''}</div>
+    <p>Si: ${esc(d.condicion)}</p><p><b>${esc(d.accion)}</b></p>
+  </li>`).join('')}</ul>`;
+}
+
+function exploradorPlaybooks(playbooks, active) {
+  const archivos = [{id: 'SKILL', titulo: 'Guía general'}, ...playbooks];
+  return `<nav class="pb-explorer" aria-label="Documentos del agente">
+    ${archivos.map(p => `<a href="${enlace('playbooks', p.id)}" title="${esc(p.titulo)}" ${p.id === active ? 'aria-current="page"' : ''}>
+      <code>${esc(p.id)}.md</code><span>${esc(p.titulo)}</span></a>`).join('')}
+  </nav>`;
 }
 
 async function vistaPlaybooks(id) {
-  const P = await api('playbooks');
-  if (id === 'SKILL') {
-    $('#vista').innerHTML = '<p class="sub"><a class="prueba" href="#playbooks">← Playbooks</a></p><h2>Guía del agente</h2><div id="guia-editable" class="tarjeta"></div>';
-    await editorGuia(id);
+  const hash = location.hash;
+  const view = $('#vista');
+  view.innerHTML = '<p class="sub" role="status">Cargando playbooks…</p>';
+  const playbooks = await api('playbooks');
+  if (location.hash !== hash) return;
+  if (!id) {
+    view.innerHTML = `<section class="pb-page">
+      <div class="pb-page-heading"><div><h2>Playbooks</h2>
+        <p>Los ${playbooks.length} runbooks del SOC convertidos en guías paso a paso.</p></div>
+        <a class="pb-doc-link" href="#playbooks/SKILL"><code>SKILL.md</code> Guía general <span aria-hidden="true">→</span></a>
+      </div>
+      <div class="pb-catalog">
+        <section class="pb-workflow" aria-label="Cómo se aplica un playbook"><ol>
+          <li><b>Llega una alerta</b><p>Vigía identifica el playbook según la regla del SIEM.</p></li>
+          <li><b>Vigía hace las comprobaciones</b><p>Cruza logs, inventario, inteligencia y cambios, y marca cada paso con su prueba.</p></li>
+          <li><b>Tú decides</b><p>Revisas lo pendiente (○) y confirmas la decisión que recomienda.</p></li>
+        </ol></section>
+        <ul class="pb-file-list">${playbooks.map(p => `<li><a href="${enlace('playbooks', p.id)}">
+          <span class="pb-file-title"><code>${esc(p.id)}</code><b>${esc(p.titulo)}</b></span>
+          <span class="pb-file-stats"><span>${p.pasos.length} pasos</span><span>${fmt(p.alertas)} alertas</span>
+            <span>${p.casos.length} ${p.casos.length === 1 ? 'caso' : 'casos'}</span></span>
+          <span class="pb-decision-marks" aria-label="${esc(p.decisiones.map(d => PB_DECISION[d.color]).join(', '))}" role="img">
+            ${p.decisiones.map(d => `<i data-tone="${esc(d.color)}"></i>`).join('')}
+          </span>
+        </a></li>`).join('')}</ul>
+      </div>
+    </section>`;
     return;
   }
-  if (id) {
-    const p = P.find(x => x.id === id);
-    $('#vista').innerHTML = `<p class="sub"><a class="prueba" href="#playbooks">← Playbooks</a></p>
-      <div class="pb-hero"><span class="pb-icono grande">${p.icono}</span><div><small class="suave">PLAYBOOK ${esc(p.id)} · ${p.alertas} alertas este mes · ${p.casos.length} ${p.casos.length === 1 ? 'caso' : 'casos'}</small><h2>${esc(p.titulo)}</h2>
-        <div class="srcs">${p.reglas.map(r => `<span>${esc(r)}</span>`).join('')}</div></div></div>
-      <div class="dos">
-        <div class="tarjeta"><h3>1 · Comprueba</h3><ol class="flujo">${p.pasos.map(s => `<li><span class="num">${s.n}</span><div><b>${esc(s.titulo)}</b><div class="suave">${esc(s.texto)}</div>
-          ${s.fuentes.length ? `<div class="srcs">${s.fuentes.map(f => `<span>${esc(f)}</span>`).join('')}</div>` : ''}</div></li>`).join('')}</ol></div>
-        <div><div class="tarjeta"><h3>2 · Decide</h3><div class="decisiones col">${p.decisiones.map(d => `<div class="dec ${d.color}"><div class="si">Si: ${esc(d.condicion)}</div><div class="ent2">→ ${esc(d.accion)}</div></div>`).join('')}</div>
-          <p class="sub" style="margin-top:12px"><small>Verde: cerrar · Ámbar: vigilar · Rojo: contener y escalar</small></p></div>
-          <div class="tarjeta"><h3>3 · Casos reales donde se ha usado</h3>${p.casos.map(c => `<div class="caso-mini" onclick="location.hash='caso/${c.ticket_id}'">${sev(c.severity)} ${esc(c.title)}</div>`).join('') || '<p class="sub">Ningún caso este mes.</p>'}</div></div>
-      </div><div id="guia-editable" class="tarjeta"></div>`;
-    await editorGuia(id);
-    return;
+  const skill = id === 'SKILL';
+  const playbook = playbooks.find(p => p.id === id);
+  const header = skill ? '<h2>Guía general</h2>' : playbook
+    ? `<code>${esc(playbook.id)}</code><h2>${esc(playbook.titulo)}</h2>
+      <p>${fmt(playbook.alertas)} alertas este mes · ${playbook.casos.length} ${playbook.casos.length === 1 ? 'caso' : 'casos'}</p>
+      ${fuentesPlaybookHTML(playbook.reglas)}` : '<h2>Playbook no disponible</h2>';
+  view.innerHTML = `<section class="pb-page">
+    <div class="pb-page-heading"><div><a class="prueba pb-back" href="#playbooks">← Playbooks</a>${header}</div>
+      ${playbook ? '<button type="button" class="sec pb-jump">Ver documento del agente</button>' : ''}</div>
+    <div class="pb-workspace">
+      ${exploradorPlaybooks(playbooks, id)}
+      <div class="pb-workspace-body">
+        ${playbook ? `<div class="pb-runbook-detail">
+          <section><h3>1 · Comprueba</h3><ol class="pb-steps">${playbook.pasos.map(s =>
+            `<li><span class="pb-step-num" aria-hidden="true">${s.n}</span><div><b>${esc(s.titulo)}</b><p>${esc(s.texto)}</p>
+              ${fuentesPlaybookHTML(s.fuentes)}</div></li>`).join('')}</ol></section>
+          <div><section><h3>2 · Decide</h3>${decisionesPlaybookHTML(playbook.decisiones)}
+            <p class="pb-description">Verde: cerrar · Ámbar: vigilar · Rojo: contener y escalar</p></section>
+            <section class="pb-runbook-cases"><h3>3 · Casos reales donde se ha usado</h3>
+              ${playbook.casos.map(c => `<a href="${enlace('caso', c.ticket_id)}">${sev(c.severity)} <span>${esc(c.title)}</span></a>`).join('') || '<p class="pb-description">Ningún caso este mes.</p>'}
+            </section></div>
+        </div>` : ''}
+        ${skill || playbook ? '<section id="guia-editable" class="pb-editor" tabindex="-1"><p role="status">Cargando documento…</p></section>' : ''}
+      </div>
+    </div>
+  </section>`;
+  if (!skill && !playbook) return;
+  const current = $('.pb-explorer [aria-current="page"]');
+  const explorer = current.parentElement;
+  if (explorer.scrollWidth > explorer.clientWidth) {
+    explorer.scrollLeft = current.getBoundingClientRect().left - explorer.getBoundingClientRect().left - 8;
   }
-  $('#vista').innerHTML = `<h2>Playbooks</h2><p class="sub">Los 10 runbooks del SOC convertidos en guías paso a paso. <a class="prueba" href="#playbooks/SKILL">Guía editable del agente →</a></p>
-    <div class="como"><div><span>1</span><b>Llega una alerta</b><small>VIGÍA identifica qué playbook le toca según la regla del SIEM.</small></div><i>→</i>
-      <div><span>2</span><b>VIGÍA hace las comprobaciones</b><small>Cruza logs, inventario, inteligencia y cambios, y marca cada paso con su prueba.</small></div><i>→</i>
-      <div><span>3</span><b>Tú decides</b><small>Revisas lo pendiente (○) y confirmas la decisión que recomienda.</small></div></div>
-    <div class="pb-grid">${P.map(p => `<div class="pb-card" onclick="location.hash='playbooks/${p.id}'"><div class="pb-icono">${p.icono}</div>
-      <small class="suave">${esc(p.id)}</small><b>${esc(p.titulo)}</b>
-      <div class="pb-nums"><span><b>${p.pasos.length}</b> pasos</span><span><b>${fmt(p.alertas)}</b> alertas</span><span><b>${p.casos.length}</b> ${p.casos.length === 1 ? 'caso' : 'casos'}</span></div>
-      <div class="mini-dec">${p.decisiones.map(d => `<i class="${d.color}"></i>`).join('')}</div></div>`).join('')}</div>`;
+  const jump = $('.pb-jump');
+  if (jump) jump.onclick = () => $('#guia-editable').focus();
+  await editorGuia(id);
 }
 
 async function vistaDescartado() {
+  const hash = location.hash;
   const d = await api('descartado');
+  if (location.hash !== hash) return;
   const color = {'Falsa alarma': '#5e5e5e', 'Ataque sin efecto': '#86BC25', 'Actividad autorizada': '#26890D'};
   const horas = d.grupos.reduce((s, g) => s + g.horas, 0);
-  $('#vista').innerHTML = `<h2>Lo que he descartado</h2>
+  $('#vista').innerHTML = `<h2>Descartes</h2>
     <p class="sub">${fmt(d.cerradas)} de ${fmt(d.total)} alertas (${Math.round(100 * d.cerradas / Math.max(1, d.total))} %) elegibles para cierre en el barrido local. Los ejemplos enlazan al expediente con las citas.</p>
     <div class="desc-kpis">
       <div class="tarjeta"><b>${fmt(d.cerradas)}</b><small>cierres elegibles</small></div>
@@ -377,99 +517,20 @@ async function vistaDescartado() {
     b.textContent = `${t.hidden ? 'Ver' : 'Ocultar'} ${b.dataset.n} ejemplos ${t.hidden ? '▾' : '▴'}`; });
 }
 
-// ---------- Análisis en directo: pegar alertas (las del jurado) y ver a VIGÍA trabajar ----------
+// Etiquetas de actividad del triaje y de expedientes archivados.
 const HERR_TXT = {get_asset: a => `Consulta la CMDB: ${a.key}`, get_user: a => `Consulta el directorio y RRHH: ${a.key}`,
   events_for_entity: a => `Busca en los logs la actividad de ${a.value}${a.horas ? ` (±${a.horas} h)` : ''}`, search_logs: a => `Busca "${a.text}" en los logs`,
   get_intel: a => `Consulta la inteligencia sobre ${a.indicator}`, get_sandbox: a => `Consulta la sandbox (${String(a.sha256).slice(0, 12)}…)`,
   get_changes: a => `Revisa el calendario de cambios: "${a.q}"`, get_cve: a => `Cruza las CVE de ${a.host} con KEV y EPSS`,
   alerts_for_entity: a => `Busca otras alertas de ${a.value}`, get_event: a => `Lee el evento ${a.event_id}`};
-const pasoTxt = p => p.tipo === 'herramienta' ? (HERR_TXT[p.nombre] ? HERR_TXT[p.nombre](p.entrada || {}) : p.nombre) : (p.texto || '');
-const PASO_ICONO = {herramienta: '⚙', pensamiento: '💭', motor: '🧹', escudo: '🛡', caso: '📁', fiscal: '⚖'};
+const textoVigia = value => String(value ?? '')
+  .replace(/\bOPENAI_API_KEY\b/gi, 'la clave de Vigía')
+  .replace(/\bOpenAI\b/gi, 'Vigía');
 
-async function vistaDirecto(jid, prellenar = '') {
-  const est = await api('estado');
-  $('#vista').innerHTML = `<h2>Analizar en directo</h2>
-    <p class="sub">Pega IDs del índice, un objeto JSON o un lote JSONL. Vigía contrasta los registros y aplica la política del turno.
-      ${est.openai_disponible ? `Contraste opcional con <b class="ok">${esc(est.modelo || 'OpenAI')}</b>.` : '<b>Análisis local disponible sin clave.</b>'}</p>
-    <div class="dos directo">
-      <div class="tarjeta"><h3>1 · Alertas</h3>
-        <textarea id="entrada" aria-label="Alertas para analizar" spellcheck="false" placeholder="ALR-20261010-011795"></textarea>
-        <div class="botones"><label>Turno <select id="modo-d"><option value="diurno">Horario atendido</option><option value="guardia">Guardia</option></select></label>
-          <label><input type="checkbox" id="remoto-d" ${est.openai_disponible ? 'checked' : 'disabled'}> Contrastar con OpenAI</label></div>
-        <div class="botones"><button class="sec" id="ej">Lote de ensayo</button>
-          <button class="sec" id="ej-nueva">Alerta nueva de ensayo</button>
-          <label class="sec boton-f">Subir fichero<input type="file" id="fich" accept=".json,.jsonl,.txt" hidden></label>
-          <button id="go">▶ Analizar alertas</button></div>
-        <p class="sub" style="margin:8px 0 0"><small>${est.openai_disponible ? 'Con OpenAI activado, Analizar envía la alerta y una selección de evidencias para propuesta y contraste.' : 'Para una alerta nueva, carga el objeto completo con sus entidades y referencias a eventos.'}</small></p></div>
-      <div class="tarjeta"><h3>2 · VIGÍA trabajando <span id="reloj-d" class="mono suave"></span></h3>
-        <div id="estado-d" class="sub" role="status">Esperando alertas…</div><div id="feed" class="feed"></div><div id="res-d"></div></div>
-    </div>`;
-  const entrada = $('#entrada'), go = $('#go'), estado = $('#estado-d');
-  entrada.value = prellenar;
-  const error = texto => { estado.textContent = texto; estado.classList.add('warn'); };
-  $('#ej').onclick = async () => {
-    try { entrada.value = (await api('lote_ensayo')).texto; }
-    catch { error('No se pudo cargar el lote de ensayo.'); }
-  };
-  $('#ej-nueva').onclick = async () => {
-    try { entrada.value = (await api('lote_ensayo?una=true')).texto; }
-    catch { error('No se pudo cargar la alerta de ensayo.'); }
-  };
-  $('#fich').onchange = async e => {
-    const f = e.target.files[0];
-    if (!f) return;
-    try { entrada.value = await f.text(); }
-    catch { error('No se pudo leer el archivo.'); }
-  };
-  go.onclick = async () => {
-    const texto = entrada.value.trim(), remoto = $('#remoto-d').checked;
-    if (!texto) { error('Pega o carga al menos una alerta.'); entrada.focus(); return; }
-    go.disabled = true;
-    estado.classList.remove('warn');
-    estado.textContent = 'Preparando el lote…';
-    try {
-      const r = await post('analizar', {texto, modo: $('#modo-d').value, remoto});
-      const j = await r.json();
-      if (!r.ok || !j.trabajo) throw new Error(mensajeError(j));
-      if (go.isConnected) seguir(j.trabajo);
-    } catch (e) { error(e.message); go.disabled = false; }
-  };
-  if (jid) seguir(jid);
-}
-
-function seguir(jid) {
-  let desde = 0;
-  const feed = $('#feed'), resultados = $('#res-d'), estado = $('#estado-d'), reloj = $('#reloj-d'), go = $('#go');
-  feed.replaceChildren(); resultados.replaceChildren(); go.disabled = true;
-  const tic = async () => {
-    if (!feed.isConnected) return;
-    try {
-      const j = await api(`trabajo/${encodeURIComponent(jid)}?desde=${desde}`);
-      if (!feed.isConnected) return;
-      desde = Number(j.total_pasos) || desde;
-      for (const p of j.pasos || []) {
-        const d = document.createElement('div');
-        d.className = 'fp ' + p.tipo;
-        d.innerHTML = `<span>${esc(PASO_ICONO[p.tipo] || '•')}</span><div>${esc(pasoTxt(p))}${p.tipo === 'herramienta' && p.resultado ? `<small>${esc(String(p.resultado).slice(0, 140))}</small>` : ''}</div>`;
-        feed.appendChild(d);
-      }
-      feed.scrollTop = feed.scrollHeight;
-      reloj.textContent = `${j.segundos} s`;
-      if (j.estado === 'terminado') {
-        estado.innerHTML = `<span class="ok">✓ ${j.tickets.length} de ${esc(j.alertas)} alerta(s) investigadas en ${esc(j.segundos)} s</span>`;
-        resultados.innerHTML = (j.cerradas?.length ? `<h4 class="dec-tit">Cierres registrados</h4>${j.cerradas.map(c => `<div class="paso"><span class="mono">${esc(c.alert_id)}</span> · ${esc(c.reason)}</div>`).join('')}` : '') +
-          (j.tickets?.length ? `<h4 class="dec-tit">Alertas investigadas</h4><div class="casos3">${j.tickets.map(tarjetaCaso).join('')}</div>` : '');
-        go.disabled = false;
-      } else if (j.estado === 'error') {
-        throw new Error(j.error || 'El análisis se interrumpió.');
-      } else {
-        estado.innerHTML = `<span class="pulso"></span> ${esc(j.estado)}…`;
-        setTimeout(tic, 800);
-      }
-    } catch (e) {
-      estado.innerHTML = `<span class="warn">${esc(e.message)}</span>`;
-      go.disabled = false;
-    }
-  };
-  tic();
+function pasoTxt(p) {
+  if (p.tipo === 'herramienta') return HERR_TXT[p.nombre] ? HERR_TXT[p.nombre](p.entrada || {}) : p.nombre;
+  const text = textoVigia(p.texto);
+  if (!['propuesta', 'fiscal'].includes(p.tipo)) return text;
+  const [alertId, , ...detail] = text.split(' · ');
+  return detail.length ? [alertId, 'Vigía', ...detail].join(' · ') : text;
 }

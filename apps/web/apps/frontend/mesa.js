@@ -11,7 +11,7 @@ async function vistaMesaDirecto(jid, prellenar = '') {
   const arrow = icon('M4 12h15m-6-6 6 6-6 6', 'mesa-arrow');
   view.innerHTML = `<section class="mesa" aria-labelledby="mesa-titulo">
     <header class="mesa-heading">
-      <div><h2 id="mesa-titulo">Analizar en directo</h2>
+      <div><h2 id="mesa-titulo">Triaje</h2>
         <p>Carga alertas del SIEM y consulta el informe de cada una.</p></div>
     </header>
     <div class="mesa-intake">
@@ -45,10 +45,10 @@ async function vistaMesaDirecto(jid, prellenar = '') {
               ${ayudaHTML('el turno', 'El turno indica si el equipo está atendiendo el SOC. Las alertas críticas se escalan en ambos modos.')}
             </span>
             <span class="mesa-control">
-              <label class="mesa-control"><input type="checkbox" name="remoto" ${settings.openai_disponible ? '' : 'disabled'}> Contrastar con OpenAI</label>
-              ${ayudaHTML('el contraste con OpenAI', settings.openai_disponible
-                ? 'Añade una propuesta de IA y una segunda revisión que busca contradicciones. Las citas del índice respaldan la decisión.'
-                : 'OpenAI no está disponible en esta sesión. Puedes analizar el lote con el motor local.')}
+              <label class="mesa-control"><input type="checkbox" name="remoto" ${settings.openai_disponible ? '' : 'disabled'}> Contraste de Vigía</label>
+              ${ayudaHTML('el contraste de Vigía', settings.openai_disponible
+                ? 'Añade una propuesta y una segunda revisión que busca contradicciones. Las citas del índice respaldan la decisión.'
+                : 'El contraste remoto no está disponible. Puedes analizar el lote con el motor local.')}
             </span>
           </div>
           <button class="mesa-button mesa-primary" type="submit">Analizar lote ${arrow}</button>
@@ -97,8 +97,8 @@ async function vistaMesaDirecto(jid, prellenar = '') {
         </select>
       </div>
       <p data-error class="mesa-error" role="status"></p>
-    <div class="mesa-scroll" tabindex="0" aria-label="Cola de alertas del análisis en directo">
-      <table class="mesa-table"><caption class="mesa-sr-only">Alertas del análisis en directo</caption>
+    <div class="mesa-scroll" tabindex="0" aria-label="Cola de alertas del triaje">
+      <table class="mesa-table"><caption class="mesa-sr-only">Alertas del triaje</caption>
         <thead><tr>
           <th scope="col" data-column="primera"><button type="button">Hora</button></th>
           <th scope="col" data-column="title"><button type="button">Nombre</button></th>
@@ -256,7 +256,7 @@ async function vistaMesaDirecto(jid, prellenar = '') {
   async function showReport(row) {
     const request = ++reportRequest;
     if (!row.ticket_id) {
-      reportPanel.textContent = row.error || (row.estado === 'pendiente'
+      reportPanel.textContent = textoVigia(row.error) || (row.estado === 'pendiente'
         ? 'La alerta está en cola. El informe estará disponible al finalizar.'
         : 'La investigación todavía no ha guardado un informe.');
       return;
@@ -273,7 +273,7 @@ async function vistaMesaDirecto(jid, prellenar = '') {
         <div class="mesa-actions"><a class="mesa-action" href="${enlace('caso', row.ticket_id)}">Abrir expediente ${arrow}</a>
         <a class="mesa-action mesa-subtle" href="/api/expediente/${encodeURIComponent(row.alert_id)}" download>Exportar JSON</a></div>
       </div>
-      ${row.error ? `<p class="mesa-error">${esc(row.error)} Se muestra el último informe guardado.</p>` : ''}
+      ${row.error ? `<p class="mesa-error">${esc(textoVigia(row.error))} Se muestra el último informe guardado.</p>` : ''}
       ${!ticket.expediente ? `<p>${esc(ticket.summary || row.summary)}</p>` : ''}
       ${expedienteHTML(ticket)}
       <div class="mesa-report-grid">
@@ -461,7 +461,7 @@ async function vistaMesaDirecto(jid, prellenar = '') {
       jobId = null;
       if (job.error) {
         setPhase('error', job.estado === 'error' ? 'Con errores' : 'Terminado con incidencias');
-        formError(job.error);
+        formError(textoVigia(job.error));
       } else {
         setPhase('done', 'Terminado');
       }

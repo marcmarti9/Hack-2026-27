@@ -10,26 +10,31 @@
 <link rel="stylesheet" href="styles.css">
 <link rel="stylesheet" href="mesa.css">
 <link rel="stylesheet" href="informe.css">
+<link rel="stylesheet" href="vistas.css">
+<link rel="stylesheet" href="playbooks.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
 </head>
 <body>
 <header class="shell-bar">
-  <a class="marca" href="#panel" aria-label="Vigía, parte de guardia"><img src="vigia-logo.svg" width="100" height="27" alt=""></a>
+  <a class="marca" href="#panel" aria-label="Vigía, panel"><img src="vigia-logo.svg" width="100" height="27" alt=""></a>
   <span class="shell-tenant">SOC de Tarvia</span>
+  <span class="shell-view" id="ruta-visible">Panel</span>
   <div class="derecha">
-    <span id="demo" class="shell-provider" hidden><span id="proveedor"></span><small id="modelo"></small></span>
+    <span id="demo" class="shell-provider" hidden>Vigía</span>
     <label>Rol <select id="rol"><option>N1</option><option selected>N2</option><option>Responsable</option></select></label>
   </div>
 </header>
 <aside class="shell-sidebar">
   <nav id="navegacion" aria-label="Navegación principal">
-  <a href="#panel" title="Parte de guardia"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M4 5h16v14H4zM4 9h16M8 13h3m-3 3h7"/></svg><span>Parte de guardia</span></a>
-  <a href="#directo" title="Analizar en directo"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M3 12h4l3-6 4 12 3-6h4"/></svg><span>Analizar en directo</span></a>
+  <p class="shell-nav-label" aria-hidden="true">Operaciones</p>
+  <a href="#panel" title="Panel"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M4 5h16v14H4zM4 9h16M8 13h3m-3 3h7"/></svg><span>Panel</span></a>
+  <a href="#directo" title="Triaje"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M3 12h4l3-6 4 12 3-6h4"/></svg><span>Triaje</span></a>
   <a href="#bandeja" title="Casos"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M4 7h6l2 2h8v10H4zM4 7V5h6l2 2h8v2"/></svg><span>Casos</span></a>
-  <a href="#descartado" title="Lo descartado"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M5 6h14M7 6l1 13h8l1-13M9 6V4h6v2m-4 4v5m2-5v5"/></svg><span>Lo descartado</span></a>
+  <a href="#descartado" title="Descartes"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M5 6h14M7 6l1 13h8l1-13M9 6V4h6v2m-4 4v5m2-5v5"/></svg><span>Descartes</span></a>
+  <p class="shell-nav-label" aria-hidden="true">Consulta</p>
   <a href="#playbooks" title="Playbooks"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M12 6a6 6 0 0 0-8-1v13a6 6 0 0 1 8 1 6 6 0 0 1 8-1V5a6 6 0 0 0-8 1v13"/></svg><span>Playbooks</span></a>
-  <a href="#mapa" title="Mapa de Tarvia"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M4 6l5-2 6 2 5-2v14l-5 2-6-2-5 2zm5-2v14m6-12v14"/></svg><span>Mapa de Tarvia</span></a>
-  <a href="#chat" title="Pregúntale a Vigía"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M4 5h16v12h-9l-4 3v-3H4zm4 4h8m-8 4h5"/></svg><span>Pregúntale a Vigía</span></a>
+  <a href="#mapa" title="Mapa"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M4 6l5-2 6 2 5-2v14l-5 2-6-2-5 2zm5-2v14m6-12v14"/></svg><span>Mapa</span></a>
+  <a href="#chat" title="Chat"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M4 5h16v12h-9l-4 3v-3H4zm4 4h8m-8 4h5"/></svg><span>Chat</span></a>
   </nav>
   <button type="button" id="plegar-menu" class="shell-toggle" aria-controls="navegacion" aria-expanded="true" title="Plegar menú">
     <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M4 5h16v14H4zM10 5v14"/></svg><span>Plegar menú</span>

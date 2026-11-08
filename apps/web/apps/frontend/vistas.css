@@ -1,0 +1,248 @@
+/* Hallmark · workbench de investigación · grafito, acento de marca y divisores. */
+.editor-encabezado {
+  margin-bottom: 28px;
+  padding-bottom: 20px;
+  border-block-end: 1px solid var(--borde);
+}
+
+.editor-encabezado h2,
+#vista[data-view="descartado"] > h2 {
+  margin: 0 0 8px;
+  font: 700 clamp(28px, 3vw, 40px)/1.15 var(--font-display);
+  letter-spacing: -.03em;
+}
+
+.editor-encabezado .sub { max-width: 72ch; margin-bottom: 0; }
+.editor-encabezado .editor-ruta { margin-bottom: 12px; }
+.editor-meta-caso { margin-top: 12px; }
+.editor-encabezado + .vigia-report { margin-top: 0; }
+
+.editor-lista {
+  min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--borde);
+  border-radius: var(--radius-card);
+  overflow: clip;
+}
+
+.caso-fila { display: block; color: var(--texto); text-decoration: none; }
+
+.editor-lista .caso-fila {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(4ch, auto);
+  gap: 12px 24px;
+  align-items: start;
+  border: 0;
+  border-radius: 0;
+  padding: 18px 24px;
+  background: transparent;
+  overflow-wrap: anywhere;
+}
+
+.editor-lista > :not(:last-child) { border-block-end: 1px solid var(--borde); }
+.editor-lista :is(.caso-fila, a):hover { background: var(--panel2); }
+.editor-lista a:focus-visible { outline: 2px solid var(--marca); outline-offset: -3px; }
+.editor-lista .t { margin: 0; font: 600 18px/1.3 var(--font-display); }
+.editor-lista .caso p { margin-top: 5px; font-size: 13px; }
+.editor-lista .caso-estado { padding-top: 2px; }
+.editor-lista .caso-estado p { margin-bottom: 0; }
+.editor-lista .caso-tiempo { margin: 3px 0 0; font: 12px var(--font-mono); white-space: nowrap; }
+.editor-lista .editor-vacio { margin: 0; padding: 18px 24px; }
+
+#vista[data-view="panel"] .guardia-casos { margin-top: 32px; }
+#vista[data-view="panel"] .guardia-casos h3 { font-size: 20px; }
+#vista[data-view="panel"] .guardia-bloques { gap: 24px; margin-top: 28px; }
+#vista[data-view="panel"] .guardia-bloques .tarjeta { padding: 20px 24px; }
+
+.editor-busqueda { max-width: 720px; margin: 0 0 24px; }
+.editor-busqueda > label {
+  display: inline-block;
+  margin-bottom: 8px;
+  color: var(--suave);
+  font: 600 13px var(--font-display);
+}
+
+.editor-busqueda > div { display: flex; align-items: stretch; gap: 8px; }
+.editor-busqueda input { min-width: 0; background: var(--fondo); }
+.editor-busqueda button { flex: none; min-height: 44px; }
+
+#vista[data-view="caso"] > :is(.dos, .vigia-report, #historia) { margin-block: 24px; }
+#vista[data-view="caso"] :is(.dos, .editor-expediente-acciones) { gap: 16px; }
+#vista[data-view="caso"] :is(.tarjeta, .raw, .meta) { min-width: 0; overflow-wrap: anywhere; }
+#vista[data-view="caso"] .tarjeta { padding: 20px 24px; }
+#vista[data-view="caso"] .paso { padding-block: 8px; }
+#vista[data-view="caso"] .editor-expediente-resumen { align-items: start; }
+#vista[data-view="caso"] #grafo { background: var(--fondo); }
+#vista[data-view="caso"] .vigia-report + .editor-expediente-resumen { margin-top: 28px; }
+
+.editor-expediente-acciones {
+  display: flex;
+  flex-wrap: wrap;
+  padding-block: 12px;
+  border-block-start: 1px solid var(--borde);
+}
+
+.editor-expediente-acciones button { min-height: 42px; }
+.editor-expediente-evidencia details { margin-top: 16px; }
+.editor-expediente-evidencia summary { cursor: pointer; color: var(--marca); }
+
+.editor-mapa {
+  margin: 0;
+  border: 1px solid var(--borde);
+  border-radius: var(--radius-card);
+  background: var(--panel);
+}
+
+.editor-mapa .mapa-ctrl {
+  display: grid;
+  grid-template-columns: auto minmax(12ch, 1fr) minmax(24ch, auto);
+  align-items: center;
+  gap: 16px 24px;
+  margin: 0;
+  padding: 16px 20px;
+}
+
+.editor-mapa .mapa-ctrl label { display: grid; gap: 4px; font-size: 13px; color: var(--suave); }
+.editor-mapa .mapa-ctrl input[type="range"] { width: 100%; min-width: 0; margin: 0; }
+.editor-mapa .mapa-ctrl button { min-height: 44px; }
+.editor-mapa #reloj-mapa { min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
+.editor-mapa #reloj-mapa .sub { margin: 0; }
+
+.editor-mapa-lienzo { overflow-x: auto; overscroll-behavior-inline: contain; background: var(--fondo); }
+.editor-mapa-lienzo #svg { width: 100%; min-width: 700px; border-radius: 0; }
+.editor-mapa-fondo { fill: var(--fondo); }
+.editor-mapa-fondo.cerrado { fill: color-mix(in srgb, var(--fondo) 85%, black); }
+.editor-mapa-zona { fill: var(--panel); stroke: var(--borde); }
+.editor-mapa-zona-titulo { fill: var(--texto); font: 600 14px var(--font-display); }
+.editor-mapa-ataque, .editor-mapa-alerta.escalada { fill: var(--rojo); }
+.editor-mapa-tramo { stroke: var(--rojo); }
+.editor-mapa-alerta.pendiente { fill: var(--naranja); }
+.editor-mapa-alerta { fill: var(--suave); opacity: .72; }
+
+.editor-mapa-pie {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 14px 20px;
+  border-block-start: 1px solid var(--borde);
+  color: var(--suave);
+}
+
+.editor-mapa-leyenda {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.editor-mapa-leyenda li::before {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-inline-end: 6px;
+  border-radius: 50%;
+  background: var(--suave);
+  content: "";
+}
+
+.editor-mapa-leyenda li:nth-child(2)::before { background: var(--rojo); }
+.editor-mapa-leyenda li:nth-child(3)::before { background: var(--naranja); }
+
+.guardia-metricas.editor-relevo-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 28px; }
+.editor-relevo-caso .caso-fila { padding-bottom: 8px; }
+.editor-relevo-responsables { margin: 0; padding: 0 24px 14px; font-size: 13px; overflow-wrap: anywhere; }
+
+.editor-intro { max-width: 72ch; margin: 0 0 24px; color: var(--suave); }
+.editor-recorrido { max-width: 920px; margin: 0; padding: 0; list-style: none; }
+.editor-recorrido a {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 12px 24px;
+  padding: 18px 24px;
+  color: var(--texto);
+  text-decoration: none;
+}
+.editor-recorrido a strong { font: 600 18px var(--font-display); }
+.editor-recorrido a p { margin: 4px 0 0; color: var(--suave); font-size: 14px; }
+
+.editor-chat {
+  max-width: 920px;
+  padding: 24px;
+  border: 1px solid var(--borde);
+  border-radius: var(--radius-card);
+  background: var(--panel);
+}
+.editor-chat .editor-busqueda { max-width: none; margin: 0; }
+.editor-chat .editor-busqueda .sub { margin: 10px 0 0; font-size: 13px; }
+.editor-chat #resp:not(:empty) { margin-top: 20px; padding-top: 20px; border-block-start: 1px solid var(--borde); }
+.editor-chat #resp > p { max-width: 72ch; margin: 0 0 14px; overflow-wrap: anywhere; }
+.editor-chat-paso { padding: 8px 0; border-block-start: 1px solid var(--borde); color: var(--suave); overflow-wrap: anywhere; }
+.editor-chat-paso b { color: var(--texto); }
+
+#vista[data-view="descartado"] > .sub { max-width: 72ch; margin: 0 0 24px; }
+#vista[data-view="descartado"] .desc-kpis {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(0, 1.6fr);
+  gap: 0;
+  margin-bottom: 28px;
+  border: 1px solid var(--borde);
+  border-radius: var(--radius-card);
+  background: var(--panel);
+}
+#vista[data-view="descartado"] .desc-kpis .tarjeta { padding: 16px 20px; border: 0; border-radius: 0; background: transparent; }
+#vista[data-view="descartado"] .desc-kpis .tarjeta + .tarjeta { border-inline-start: 1px solid var(--borde); }
+#vista[data-view="descartado"] .desc-kpis b { font: 600 clamp(23px, 3vw, 32px)/1.15 var(--font-display); margin-bottom: 4px; }
+#vista[data-view="descartado"] .motivos { grid-template-columns: minmax(0, 1fr); gap: 0; border-block: 1px solid var(--borde); }
+#vista[data-view="descartado"] .motivo { min-width: 0; padding: 22px 4px; border: 0; border-radius: 0; background: transparent; }
+#vista[data-view="descartado"] .motivo + .motivo { border-block-start: 1px solid var(--borde); }
+#vista[data-view="descartado"] .m-cab { align-items: start; }
+#vista[data-view="descartado"] .m-t b { font: 600 18px/1.3 var(--font-display); }
+#vista[data-view="descartado"] .m-por { max-width: 74ch; margin: 10px 0 14px; }
+#vista[data-view="descartado"] .m-fila { grid-template-columns: 82px minmax(0, 1fr); gap: 12px; margin-bottom: 9px; }
+#vista[data-view="descartado"] .m-fila code, #vista[data-view="descartado"] .m-ej { overflow-wrap: anywhere; }
+#vista[data-view="descartado"] .m-ej { table-layout: fixed; }
+#vista[data-view="descartado"] .m-btn { min-height: 36px; }
+
+#vista :is(.editor-busqueda, .editor-mapa, .editor-expediente-acciones, .editor-expediente-evidencia) :focus-visible {
+  outline: 2px solid var(--marca);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1000px) {
+  #vista[data-view="descartado"] .desc-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  #vista[data-view="descartado"] .desc-kpis .ancho {
+    grid-column: 1 / -1;
+    border-inline-start: 0;
+    border-block-start: 1px solid var(--borde);
+  }
+}
+
+@media (max-width: 760px) {
+  .editor-encabezado { margin-bottom: 22px; padding-bottom: 16px; }
+  .editor-lista .caso-fila { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding: 14px 16px; }
+  .editor-lista .caso-identidad { grid-column: 1 / -1; }
+  .editor-lista .caso-tiempo { justify-self: end; }
+  #vista[data-view="caso"] .tarjeta { padding: 16px; }
+  .editor-mapa .mapa-ctrl { grid-template-columns: auto minmax(0, 1fr); gap: 12px 16px; padding: 12px 16px; }
+  .editor-mapa #reloj-mapa { grid-column: 1 / -1; }
+  .editor-mapa-pie { padding: 12px 16px; }
+  .editor-relevo-responsables { padding-inline: 16px; }
+  .guardia-metricas.editor-relevo-kpis > div:nth-child(3) { border-block-start: 0; border-inline-start: 1px solid var(--borde); }
+  .editor-recorrido a { gap: 10px; padding: 14px 16px; }
+  .editor-chat { padding: 16px; }
+  #vista[data-view="descartado"] .desc-kpis .tarjeta { padding-inline: 12px; }
+}
+
+@media (max-width: 400px) {
+  .editor-recorrido a { grid-template-columns: minmax(0, 1fr); }
+  #vista[data-view="descartado"] .m-fila { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor-lista a { transition: none; }
+}

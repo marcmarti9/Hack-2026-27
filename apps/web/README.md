@@ -1,6 +1,6 @@
 # Vigía web
 
-Mesa de triaje de Tarvia en el navegador. **Analizar en directo** recibe lotes nuevos y muestra el progreso y el informe de cada alerta. **Casos** y **Parte de guardia** permiten consultar el histórico. La web comparte el motor de triaje y las reglas de escalado con Vigía escritorio.
+Mesa de triaje de Tarvia en el navegador. **Triaje** recibe lotes nuevos y muestra el progreso y el informe de cada alerta. **Casos** y **Panel** permiten consultar el histórico. La web comparte el motor de triaje y las reglas de escalado con Vigía escritorio.
 
 ## Arranque con Docker Compose
 
@@ -21,9 +21,9 @@ Para activar OpenAI, añade `OPENAI_API_KEY` al `.env` local de la raíz antes d
 
 ## Probar un lote nuevo
 
-1. En **Analizar en directo**, carga un archivo JSONL de hasta 150 alertas y 1 MB. Usa el mismo formato que `03_alertas/alertas.jsonl` del reto, con un objeto por línea y un identificador único para cada alerta nueva.
-2. Selecciona el turno y pulsa **Analizar alertas**. Si activas el contraste con OpenAI, verás cuándo se hacen la propuesta y la revisión. La mesa conserva los resultados, las asignaciones y las decisiones.
-3. Despliega una fila para consultar su informe. **Cerrada por Vigía** indica que el cierre ya está registrado y solo queda consultar el informe. Los perfiles de bajo riesgo habilitados para archivos nuevos son inventario SCCM autorizado, correo informativo identificado y solicitudes WAF cuya resolución queda verificada. Se exige corroborar todas las referencias directas. Si pediste contraste con OpenAI, se exige acuerdo validado con esas pruebas y confianza de al menos 80 %. Las críticas se escalan según la política del SOC. El autocierre registra la decisión, el criterio y sus citas.
+1. En **Triaje**, carga un archivo JSONL de hasta 150 alertas y 1 MB. Usa el mismo formato que `03_alertas/alertas.jsonl` del reto, con un objeto por línea y un identificador único para cada alerta nueva.
+2. Selecciona el turno y pulsa **Analizar lote**. Si activas **Contraste de Vigía**, verás cuándo se hacen la propuesta y la revisión. La mesa conserva los resultados, las asignaciones y las decisiones.
+3. Despliega una fila para consultar su informe. **Cerrada por Vigía** indica que el cierre ya está registrado y solo queda consultar el informe. Los perfiles de bajo riesgo habilitados para archivos nuevos son inventario SCCM autorizado, correo informativo identificado y solicitudes WAF cuya resolución queda verificada. Se exige corroborar todas las referencias directas. Si pediste contraste remoto, se exige acuerdo validado con esas pruebas y confianza de al menos 80 %. Las críticas se escalan según la política del SOC. El autocierre registra la decisión, el criterio y sus citas.
 
 Para ensayar antes de recibir el archivo del jurado, carga el [lote de ensayo](../../eval/lote-presentacion-091.jsonl) o pulsa **Alerta nueva de ensayo** para usar una entrada sintética que referencia un registro de Tarvia.
 
@@ -38,8 +38,8 @@ python -m scripts.run_corpus "${VIGIA_DATA_DIR:-data/dataset}/03_alertas/alertas
   --output out/web/corpus.jsonl --jobs 4
 ```
 
-También puedes indicar su ruta con `VIGIA_WEB_CORPUS`. La web distingue los cierres elegibles del barrido y los cierres registrados en la mesa. Desde **Casos** puedes buscar por ID. **Lo descartado** enlaza a expedientes del barrido. Los runbooks y la guía del agente admiten revisiones versionadas para el contraste.
+También puedes indicar su ruta con `VIGIA_WEB_CORPUS`. La web distingue los cierres elegibles del barrido y los cierres registrados en la mesa. Desde **Casos** puedes buscar por ID. **Descartes** enlaza a expedientes del barrido. Los runbooks y la guía del agente admiten revisiones versionadas para el contraste.
 
 Para enseñar el aislamiento, arranca el simulador oficial en el mismo entorno de red del backend, configura `VIGIA_SIM_PORT` y una clave de práctica de 10 a 128 caracteres en `VIGIA_WEB_N2_PASSWORD`. Vigía muestra la opción solo si el expediente y el puesto cumplen la política. La acción requiere confirmación, justificación y reautenticación N2.
 
-[Guion de la defensa web](../../docs/defensa-web.md) · [EPIC](../../EPIC.md)
+[Guion de la defensa web](../../docs/defensa-web.md) · [Arquitectura e inteligencia de vulnerabilidades](../../docs/arquitectura-inteligencia.md) · [EPIC](../../EPIC.md)

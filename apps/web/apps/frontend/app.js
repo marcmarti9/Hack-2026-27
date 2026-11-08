@@ -14,17 +14,9 @@ const veredicto = v => VERDICTO[v] || v || 'Sin veredicto';
 const confianza = n => typeof n === 'number' && Number.isFinite(n) ? `${Math.round(n * 100)} % de confianza` : 'Sin estimación de confianza';
 const disposicion = d => ({close: 'Cierre recomendado', review: 'Revisión humana', escalate: 'Escalar a N2',
   automatic: 'Cierre automático registrado', accepted: 'Aceptada por el analista', corrected: 'Corregida por el analista'})[d] || d;
-const mensajeError = j => typeof j.detail === 'string' ? j.detail : 'Revisa los datos y vuelve a intentarlo.';
-const CONTENCIONES = ['isolate_host', 'disable_user', 'revoke_sessions', 'reset_password', 'block_ioc', 'purge_email', 'disable_access_key'];
+const mensajeError = j => typeof j.detail === 'string' ? textoVigia(j.detail) : 'Revisa los datos y vuelve a intentarlo.';
 const ACCION = {isolate_host: 'Aislar equipo', disable_user: 'Deshabilitar cuenta', revoke_sessions: 'Revocar sesiones', reset_password: 'Forzar cambio de contraseña',
   block_ioc: 'Bloquear indicador', purge_email: 'Purgar correo', disable_access_key: 'Desactivar clave cloud', escalar_dpo: 'Escalar al DPO', escalar_operaciones: 'Escalar a Operaciones'};
-const MOTIVO = {waf_bloqueado: 'Escaneos de Internet bloqueados por el WAF', newsletter: 'Newsletters legítimas reportadas por error', sccm: 'Inventario de SCCM (cambio aprobado CHG-2026-1031)',
-  viaje_dispositivo: 'Viajes con dispositivo corporativo conocido', dominio_corporativo: 'Software corporativo conocido', spam_sin_clic: 'Spam sin clics: purgado y remitente bloqueado',
-  cdn: 'Subdominios de CDN y nube', sap: 'Excel abriendo SAP (firmado)', vela_cliente: 'Clientes de Vela corrigiendo su pedido', edr_bloqueado: 'Software no deseado bloqueado por el EDR',
-  dns_seguridad: 'Consultas de antivirus y DNSBL', stuffing_sin_exito: 'Credential stuffing sin accesos correctos', spray_sin_exito: 'Password spraying sin accesos correctos',
-  terraform: 'Cambios de terraform desde el CI', pentest: 'Pentest autorizado (CHG-2026-1042)', nessus: 'Escáner NESSUS01 en su ventana', paquete_conocido: 'Paquetes npm conocidos',
-  ot_autorizado: 'ENG-WS01 hablando con OT (autorizado)', cambio_aprobado: 'Dentro de un cambio aprobado', psexec_jump: 'PsExec desde JUMP01 (CHG-2026-1057)',
-  nominas: 'Nóminas a la gestoría (flujo aprobado)', ot_mantenimiento: 'Mantenimiento del clasificador (CHG-2026-1063)', dlp_sin_datos: 'Subidas sin datos personales'};
 const rol = () => $('#rol').value;
 try { $('#rol').value = localStorage.getItem('vigia_rol') || 'N2'; } catch (e) {}
 $('#rol').onchange = () => { try { localStorage.setItem('vigia_rol', rol()); } catch (e) {} ruta(); };
@@ -43,21 +35,24 @@ menuToggle.onclick = () => {
   try { localStorage.setItem('vigia_menu_plegado', collapsed ? '1' : '0'); } catch {}
 };
 
-const tarjetaCaso = t => `<a class="caso" href="${enlace('caso', t.ticket_id)}" style="display:block;color:inherit;text-decoration:none">
-  <div class="meta">${sev(t.severity)} <span>${confianza(t.confidence)}</span>
+const tarjetaCaso = t => `<a class="caso caso-fila" href="${enlace('caso', t.ticket_id)}">
+  <div class="caso-identidad"><div class="t">${esc(t.title)}</div><p>${esc(veredicto(t.verdict))}${t.alert_id ? ` · <span class="mono">${esc(t.alert_id)}</span>` : ''}
+    ${t.alert_ids?.length ? ` · ${t.alert_ids.length} alerta(s)` : ''}${t.primera ? ` · desde ${esc(hora(t.primera))}` : ''}</p></div>
+  <div class="caso-estado"><div class="meta">${sev(t.severity)} <span>${confianza(t.confidence)}</span>
     ${t.out_of_hours ? '<span>· fuera de horario</span>' : ''} ${t.manipulation_detected?.detected ? '<span class="warn">· ⚠ intento de engaño</span>' : ''}
     ${t.human_review ? '<span class="warn">· revisar</span>' : ''}</div>
-  <div class="t">${esc(t.title)}</div><p>${esc(veredicto(t.verdict))}${t.alert_id ? ` · ${esc(t.alert_id)}` : ''}
-    ${t.alert_ids?.length ? ` · ${t.alert_ids.length} alerta(s)` : ''}${t.primera ? ` · desde ${esc(hora(t.primera))}` : ''}</p>
-    ${t.disposition ? `<p>${esc(disposicion(t.disposition))}</p>` : ''}${t.triage_seconds != null ? `<small class="sub">${esc(t.triage_seconds)} s</small>` : ''}</a>`;
+    ${t.disposition ? `<p>${esc(disposicion(t.disposition))}</p>` : ''}</div>
+  ${t.triage_seconds != null ? `<small class="caso-tiempo sub">${esc(t.triage_seconds)} s</small>` : ''}</a>`;
 
 const vistas = {
   async panel() {
+    const hash = location.hash;
     const [r, ts, rg] = await Promise.all([api('resumen'), api('tickets'), api('rgpd')]);
+    if (location.hash !== hash) return;
     const graves = ts.filter(t => t.escalation?.escalate && ['critical', 'high'].includes(t.severity));
     $('#vista').innerHTML = `<section aria-labelledby="guardia-titulo">
       <div class="guardia-encabezado">
-        <div><h2 id="guardia-titulo">Parte de guardia</h2><p class="sub">5 de octubre al 1 de noviembre de 2026</p></div>
+        <div><h2 id="guardia-titulo">Panel</h2><p class="sub">Parte de guardia · 5 de octubre al 1 de noviembre de 2026</p></div>
         <div class="guardia-enlaces">
           <a class="prueba" href="#presentar">Recorrido para el jurado</a>
           <a class="prueba" href="#relevo">Relevo de guardia</a>
@@ -76,7 +71,7 @@ const vistas = {
         ${fmt(r.abstenciones)} sin evidencia suficiente para un veredicto.</p>
       <section class="guardia-casos">
         <h3>Casos graves escalados</h3>
-        <div class="casos3">${graves.slice(0, 6).map(tarjetaCaso).join('') || '<p class="sub">Todavía no hay casos graves escalados en esta mesa.</p>'}</div>
+        <div class="editor-lista">${graves.slice(0, 6).map(tarjetaCaso).join('') || '<p class="editor-vacio sub">Todavía no hay casos graves escalados en esta mesa.</p>'}</div>
       </section>
       <div class="dos guardia-bloques">
         <div class="tarjeta"><h3>Revisión de brechas por el DPO</h3>${rg.map(x => `<div class="reloj">
@@ -92,34 +87,43 @@ const vistas = {
   },
 
   async bandeja() {
+    const hash = location.hash;
     const ts = await api('tickets');
-    $('#vista').innerHTML = `<h2>Casos</h2><p class="sub">Ya investigados por VIGÍA, de más a menos grave. Tú decides.</p>
-      <form class="botones" id="buscar-caso"><label>ID de alerta <input name="consulta" maxlength="80"></label><button>Buscar</button></form>
-      <div class="casos3" id="resultados-caso">${ts.map(tarjetaCaso).join('') || '<p>Sin casos en esta mesa.</p>'}</div>`;
+    if (location.hash !== hash) return;
+    $('#vista').innerHTML = `<div class="editor-encabezado"><h2>Casos</h2><p class="sub">Ya investigados por VIGÍA, de más a menos grave. Tú decides.</p></div>
+      <form class="editor-busqueda" id="buscar-caso"><label for="id-buscar-caso">ID de alerta</label>
+        <div><input id="id-buscar-caso" name="consulta" type="text" maxlength="80"><button type="submit">Buscar</button></div>
+      </form>
+      <div class="editor-lista" id="resultados-caso" aria-live="polite">${ts.map(tarjetaCaso).join('') || '<p class="editor-vacio sub">Sin casos en esta mesa.</p>'}</div>`;
     $('#buscar-caso').onsubmit = async event => {
       event.preventDefault();
       const result = $('#resultados-caso');
+      result.setAttribute('aria-busy', 'true');
       try {
         const casos = await api('tickets?q=' + encodeURIComponent(event.currentTarget.elements.consulta.value.trim()));
-        result.innerHTML = casos.map(tarjetaCaso).join('') || '<p>Sin expedientes con ese ID.</p>';
-      } catch { result.textContent = 'No se pudo completar la búsqueda.'; }
+        result.innerHTML = casos.map(tarjetaCaso).join('') || '<p class="editor-vacio sub">Sin expedientes con ese ID.</p>';
+      } catch {
+        result.innerHTML = '<p class="editor-vacio sub">No se pudo completar la búsqueda.</p>';
+      } finally { result.removeAttribute('aria-busy'); }
     };
   },
 
   async caso(id) {
+    const hash = location.hash;
     if (window._pbCaso !== id) { window._pbTab = 0; window._pbCaso = id; }
     const t = await api('tickets/' + encodeURIComponent(id)), inc = t.incidente;
+    if (location.hash !== hash) return;
     const informe = t.expediente, evidencias = informe?.evidence || t.evidence || [];
     const n2 = rol() !== 'N1';
-    $('#vista').innerHTML = `<p class="sub"><a class="prueba" href="${informe && t.alert_id ? '#directo' : '#bandeja'}">← ${informe && t.alert_id ? 'Analizar en directo' : 'Casos'}</a></p>
+    $('#vista').innerHTML = `<div class="editor-encabezado"><p class="editor-ruta sub"><a class="prueba" href="${informe && t.alert_id ? '#directo' : '#bandeja'}">← ${informe && t.alert_id ? 'Triaje' : 'Casos'}</a></p>
       <h2>${esc(t.title)}</h2>
-      <div class="meta" style="margin:6px 0 18px">${sev(t.severity)} <span>${esc(veredicto(t.verdict))}</span> <span>· ${confianza(t.confidence)}</span>
+      <div class="meta editor-meta-caso">${sev(t.severity)} <span>${esc(veredicto(t.verdict))}</span> <span>· ${confianza(t.confidence)}</span>
         <span>· ${t.alert_ids?.length || 1} alerta(s)</span> ${t.alert_id ? `<span class="mono">· ${esc(t.alert_id)}</span>` : ''} ${t.out_of_hours ? '<span>· empezó con el SOC cerrado</span>' : ''}
-        <span>· escalado: ${esc(t.escalation?.escalate ? t.escalation.to : 'no')}</span></div>
+        <span>· escalado: ${esc(t.escalation?.escalate ? t.escalation.to : 'no')}</span></div></div>
       ${t.manipulation_detected?.detected ? `<div class="aviso"><b>El atacante intentó engañar a la IA.</b> ${esc(t.manipulation_detected.where)}<br>
         <small>VIGÍA lo trata como una prueba más contra el atacante.</small></div>` : ''}
       ${expedienteHTML(t)}
-      <div class="dos">
+      <div class="dos editor-expediente-resumen">
         <div class="tarjeta"><h3>Qué ha pasado</h3><p>${esc(t.summary)}</p>
           <p class="sub" style="margin:0"><small>Severidad: ${esc(t.severity_rationale)}</small></p></div>
         <div class="tarjeta"><h3>Quién y qué está implicado</h3>${informe ? registroHTML(informe.affected) : ''}<div id="grafo"></div></div>
@@ -129,7 +133,7 @@ const vistas = {
         ${informe.timeline.map(p => `<div class="paso"><b>${esc(hora(p.timestamp))}</b> · ${esc(p.source || p.stage)}${p.event_id ? ` · <button class="sec prueba mono" data-ev="${esc(p.event_id)}">${esc(p.event_id)}</button>` : ''}<br>${esc(p.finding)}</div>`).join('')}</div>` : '')}
       ${inc ? `<div class="aviso info"><b>A quién avisar (informe N2):</b> ${esc((inc.notifications || []).join(' · '))}</div>` : ''}
       ${(t.playbooks || []).length ? `<h3 class="seccion">Playbook aplicado <small class="suave">· lo que dice el procedimiento del SOC y lo que ya ha hecho VIGÍA</small></h3>${playbooksCasoHTML(t.playbooks, t.ticket_id)}` : ''}
-      <div class="dos">
+      <div class="dos editor-expediente-evidencia">
         <div class="tarjeta">${informe ? '' : `<h3>Cómo lo investigó VIGÍA</h3>${(t.trace || []).map(p => p.tipo === 'herramienta'
           ? `<div class="paso tool"><b>${esc(pasoTxt(p))}</b> <span class="mono suave">${esc(p.nombre)}</span></div>`
           : `<div class="paso">${esc(p.texto)}</div>`).join('')}`}
@@ -148,7 +152,7 @@ const vistas = {
             ${n2 && informe?.isolation_proposal ? aislamientoHTML(informe.isolation_proposal) : ''}
             <p id="resultado" role="status"></p>${(t.executed_actions || []).map(x => `<p class="sub"><b>${esc(x.target)}</b> · ${esc(x.result || x.status)} · ${esc(x.actor || x.approver)}</p>`).join('')}</div>
           ${decisionHTML(t)}
-          <div class="tarjeta"><button id="reinv">Reinvestigar en directo</button> <button class="sec" id="dl-t">Descargar expediente</button> ${inc ? '<button class="sec" id="dl-i">Descargar informe N2</button>' : ''}</div>
+          <div class="editor-expediente-acciones"><button id="reinv">Reinvestigar en directo</button> <button class="sec" id="dl-t">Descargar expediente</button> ${inc ? '<button class="sec" id="dl-i">Descargar informe N2</button>' : ''}</div>
         </div>
       </div>`;
     document.querySelectorAll('[data-ev]').forEach(el => el.onclick = async () => {
@@ -171,7 +175,9 @@ const vistas = {
   },
 
   async mapa() {
+    const hash = location.hash;
     const m = await api('mapa');
+    if (location.hash !== hash) return;
     const W = 1100, H = 700, BW = 240, BH = 150;
     const sitio = {'HQ-USERS': [40, 60], 'MAD-USERS': [40, 240], 'VPN-POOL': [40, 420], 'IDENTIDAD': [300, 60], 'CORREO': [300, 240],
       'DC-SERVERS': [560, 60], 'DEV': [560, 240], 'DMZ': [820, 60], 'AWS-PROD': [820, 240], 'STORES': [300, 420], 'LOGISTICS-IT': [560, 420],
@@ -185,11 +191,17 @@ const vistas = {
     const cerradoEn = ms => { const l = local(ms), h = l.getUTCHours(), d = l.getUTCDay(); return d === 0 || d === 6 || h < 8 || h >= 20; };
     m.puntos.forEach(p => { p.t = Date.parse(p.ts); const s = sitio[p.zona] || sitio.OTROS, alto = p.zona === 'OTROS' ? 50 : BH - 50;
       p.x = s[0] + 14 + p.px * (BW - 28); p.y = s[1] + 38 + p.py * alto; });
-    $('#vista').innerHTML = `<h2>Mapa de Tarvia</h2><p class="sub">Cuatro semanas de alertas, hora a hora. Las flechas rojas son el atacante moviéndose por la empresa.</p>
-      <div class="mapa-ctrl"><button id="play">▶ Reproducir</button><input type="range" id="t" min="0" max="${(t1 - t0) / HORA}" value="125">
-        <span id="reloj-mapa"></span></div>
-      <svg id="svg" viewBox="0 0 ${W} ${H}" width="100%"></svg>
-      <p class="sub"><small>● gris: cerrada por VIGÍA · ● rojo: escalada · ● naranja: pendiente · se ven las alertas de las últimas 24 h · pasa el ratón por una flecha para ver el caso</small></p>`;
+    $('#vista').innerHTML = `<div class="editor-encabezado"><h2>Mapa</h2><p class="sub">Cuatro semanas de alertas en Tarvia, hora a hora. Las flechas rojas muestran los movimientos del atacante por la empresa.</p></div>
+      <figure class="editor-mapa">
+        <div class="mapa-ctrl"><button id="play" type="button">▶ Reproducir</button>
+          <label for="t">Hora del mapa<input type="range" id="t" min="0" max="${(t1 - t0) / HORA}" value="125"></label>
+          <span id="reloj-mapa"></span></div>
+        <div class="editor-mapa-lienzo" role="region" aria-label="Zonas de Tarvia" tabindex="0"><svg id="svg" role="img" aria-label="Mapa de alertas y movimientos en Tarvia" viewBox="0 0 ${W} ${H}" width="100%"></svg></div>
+        <figcaption class="editor-mapa-pie">
+          <ul class="editor-mapa-leyenda"><li>Cerrada por VIGÍA</li><li>Escalada</li><li>Pendiente</li></ul>
+          <small>Se ven las alertas de las últimas 24 h. Pasa el ratón por una flecha para ver el caso.</small>
+        </figcaption>
+      </figure>`;
     const svg = $('#svg');
     const pinta = () => {
       const ahora = t0 + $('#t').value * HORA, cerrado = cerradoEn(ahora);
@@ -198,16 +210,16 @@ const vistas = {
         `<br><small class="sub">SOC cerrado: ${fmt(cubiertas)} h de vigilancia cubiertas por VIGÍA</small>`;
       const vis = m.puntos.filter(p => p.t <= ahora && p.t > ahora - 24 * HORA);
       const tramos = m.saltos.flatMap(s => s.camino.slice(1).map((c, i) => ({de: s.camino[i], a: c, title: s.title})).filter(x => Date.parse(x.a.ts) <= ahora));
-      svg.innerHTML = `<defs><marker id="fl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#ff5c5c"/></marker></defs>
-        <rect width="${W}" height="${H}" rx="12" fill="${cerrado ? '#050505' : '#111111'}"/>` +
+      svg.innerHTML = `<defs><marker id="fl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" class="editor-mapa-ataque"/></marker></defs>
+        <rect width="${W}" height="${H}" rx="12" class="editor-mapa-fondo${cerrado ? ' cerrado' : ''}"/>` +
         m.zonas.filter(z => sitio[z.zona]).map(z => { const [x, y] = sitio[z.zona], h = z.zona === 'OTROS' ? 80 : BH;
-          return `<rect x="${x}" y="${y}" width="${z.zona === 'OTROS' ? 1020 : BW}" height="${h}" rx="10" fill="#161616" stroke="${cerrado ? '#1e1e1e' : '#2e2e2e'}"/>
-          <text x="${x + 14}" y="${y + 24}" font-size="13" font-weight="600" fill="#f2f2f2">${esc(nombre[z.zona] || z.zona)}</text>`; }).join('') +
-        vis.map(p => `<circle cx="${p.x}" cy="${p.y}" r="${p.estado === 'escalada' ? 5.5 : 2.6}" fill="${p.estado === 'escalada' ? '#ff5c5c' : p.estado === 'pendiente' ? '#ffa62b' : '#5e5e5e'}" opacity="${p.estado === 'escalada' ? 1 : .8}"/>`).join('') +
+          return `<rect x="${x}" y="${y}" width="${z.zona === 'OTROS' ? 1020 : BW}" height="${h}" rx="10" class="editor-mapa-zona"/>
+          <text x="${x + 14}" y="${y + 24}" class="editor-mapa-zona-titulo">${esc(nombre[z.zona] || z.zona)}</text>`; }).join('') +
+        vis.map(p => `<circle cx="${p.x}" cy="${p.y}" r="${p.estado === 'escalada' ? 5.5 : 2.6}" class="editor-mapa-alerta${p.estado === 'escalada' ? ' escalada' : p.estado === 'pendiente' ? ' pendiente' : ''}"/>`).join('') +
         tramos.map(({de, a, title}) => { const A = sitio[de.zona] || sitio.OTROS, B = sitio[a.zona] || sitio.OTROS;
           return `<g style="cursor:help"><title>${esc(title)}: ${esc(de.host)} → ${esc(a.host)}</title>
             <line x1="${A[0] + BW / 2}" y1="${A[1] + BH / 2}" x2="${B[0] + BW / 2}" y2="${B[1] + BH / 2}" stroke="#ff5c5c" stroke-width="10" opacity="0"/>
-            <line x1="${A[0] + BW / 2}" y1="${A[1] + BH / 2}" x2="${B[0] + BW / 2}" y2="${B[1] + BH / 2}" stroke="#ff5c5c" stroke-width="2.5" marker-end="url(#fl)"/></g>`; }).join('');
+            <line x1="${A[0] + BW / 2}" y1="${A[1] + BH / 2}" x2="${B[0] + BW / 2}" y2="${B[1] + BH / 2}" class="editor-mapa-tramo" stroke-width="2.5" marker-end="url(#fl)"/></g>`; }).join('');
     };
     $('#t').oninput = pinta; pinta();
     let timer = null;
@@ -223,33 +235,56 @@ const vistas = {
   async directo(jid) { await vistaMesaDirecto(jid); },
 
   async relevo() {
+    const hash = location.hash;
     const r = await api('relevo');
-    $('#vista').innerHTML = `<h2>Relevo de guardia</h2><p class="sub">Expedientes guardados en el turno de guardia.</p>
-      <div class="tarjeta parte"><b>${fmt(r.investigadas)} investigadas</b> · ${fmt(r.cierres)} cierres registrados · ${fmt(r.pendientes)} pendientes de revisión.</div>
-      <h3>Escalados</h3><div class="casos3">${r.casos.map(t => `<div>${tarjetaCaso(t)}<p class="sub">${esc(t.responsables.join(' · '))}
-        ${t.plazo ? ' · plazo ' + esc(hora(t.plazo)) : ''}</p></div>`).join('') || '<p>Analiza un lote en Guardia para ver aquí sus escalados.</p>'}</div>`;
+    if (location.hash !== hash) return;
+    $('#vista').innerHTML = `<div class="editor-encabezado"><h2>Relevo de guardia</h2><p class="sub">Expedientes guardados en el turno de guardia.</p></div>
+      <dl class="guardia-metricas editor-relevo-kpis">
+        <div><dt>Investigadas</dt><dd>${fmt(r.investigadas)}</dd></div>
+        <div><dt>Cierres registrados</dt><dd>${fmt(r.cierres)}</dd></div>
+        <div><dt>Pendientes de revisión</dt><dd>${fmt(r.pendientes)}</dd></div>
+      </dl>
+      <h3>Escalados</h3><div class="editor-lista">${r.casos.map(t => `<div class="editor-relevo-caso">${tarjetaCaso(t)}<p class="sub editor-relevo-responsables">${esc(t.responsables.join(' · '))}
+        ${t.plazo ? ' · plazo ' + esc(hora(t.plazo)) : ''}</p></div>`).join('') || '<p class="editor-vacio sub">Analiza un lote en Guardia para ver aquí sus escalados.</p>'}</div>`;
   },
 
   presentar() {
-    $('#vista').innerHTML = `<h2>Vigía en cuatro minutos</h2><p class="sub">Tarvia · Del dato a la decisión del SOC</p>
-      <div class="tarjeta parte">El SOC recibe alertas también cuando el equipo está fuera de turno. Vigía cruza registros, inventario y cambios para preparar la decisión con sus evidencias.</div>
-      <div class="casos3">
-        <a class="caso" href="#panel"><div class="meta">01 · 30 s</div><div class="t">El turno completo</div><p>Parte de guardia, alertas y escalados del barrido.</p></a>
-        <a class="caso" href="#caso/VIG-ALR-20261005-000301"><div class="meta">02 · 40 s</div><div class="t">Un cierre comprobable</div><p>SCCM, cambio autorizado y registros que explican el cierre.</p></a>
-        <a class="caso" href="#caso/VIG-ALR-20261010-011795"><div class="meta">03 · 60 s</div><div class="t">Una cadena de preransomware</div><p>Abre la cronología y muestra cómo se vinculan las alertas.</p></a>
-        <a class="caso" href="#directo"><div class="meta">04 · 90 s</div><div class="t">La alerta del jurado</div><p>Carga la entrada y sigue las fases del agente hasta el expediente.</p></a>
-        <a class="caso" href="#relevo"><div class="meta">05 · 20 s</div><div class="t">Quién decide</div><p>Responsables y plazos de guardia en un solo lugar.</p></a>
-      </div>`;
+    $('#vista').innerHTML = `<div class="editor-encabezado"><h2>Vigía en cuatro minutos</h2><p class="sub">Tarvia · Del dato a la decisión del SOC</p></div>
+      <p class="editor-intro">El SOC recibe alertas también cuando el equipo está fuera de turno. Vigía cruza registros, inventario y cambios para preparar la decisión con sus evidencias.</p>
+      <ol class="editor-lista editor-recorrido" role="list">
+        <li><a href="#panel"><div class="meta mono">01 · 30 s</div><div><strong>El turno completo</strong><p>Parte de guardia, alertas y escalados del barrido.</p></div></a></li>
+        <li><a href="#caso/VIG-ALR-20261005-000301"><div class="meta mono">02 · 40 s</div><div><strong>Un cierre comprobable</strong><p>SCCM, cambio autorizado y registros que explican el cierre.</p></div></a></li>
+        <li><a href="#caso/VIG-ALR-20261010-011795"><div class="meta mono">03 · 60 s</div><div><strong>Una cadena de preransomware</strong><p>Abre la cronología y muestra cómo se vinculan las alertas.</p></div></a></li>
+        <li><a href="#directo"><div class="meta mono">04 · 90 s</div><div><strong>La alerta del jurado</strong><p>Carga la entrada y sigue las fases del agente hasta el expediente.</p></div></a></li>
+        <li><a href="#relevo"><div class="meta mono">05 · 20 s</div><div><strong>Quién decide</strong><p>Responsables y plazos de guardia en un solo lugar.</p></div></a></li>
+      </ol>`;
   },
 
   chat() {
-    $('#vista').innerHTML = `<h2>Pregúntale a VIGÍA</h2><p class="sub">Responde con datos de los logs y cita los eventos.</p>
-      <div class="tarjeta"><input type="text" id="q" placeholder="Ej.: ¿Qué hizo marta.puig? · ¿Qué pasó en WMS01? · ¿Quién es ext.logisoft?"><div id="resp"></div></div>`;
+    $('#vista').innerHTML = `<div class="editor-encabezado"><h2>Chat</h2><p class="sub">Vigía responde con datos de los logs y cita los eventos.</p></div>
+      <div class="editor-chat">
+        <form class="editor-busqueda" id="preguntar"><label for="q">Pregunta sobre los logs</label>
+          <div><input type="text" id="q" required aria-describedby="ejemplos-chat"><button type="submit">Consultar</button></div>
+          <p id="ejemplos-chat" class="sub">Ej.: ¿Qué hizo marta.puig? · ¿Qué pasó en WMS01? · ¿Quién es ext.logisoft?</p>
+        </form>
+        <div id="resp" role="status"></div>
+      </div>`;
     $('#q').focus();
-    $('#q').onkeydown = async e => { if (e.key !== 'Enter' || !e.target.value.trim()) return;
-      $('#resp').innerHTML = '<p class="sub">Consultando…</p>';
-      const r = await post('chat', {pregunta: e.target.value}).then(r => r.json());
-      $('#resp').innerHTML = `<p>${esc(r.respuesta).replace(/\n/g, '<br>')}</p>` + (r.pasos || []).map(p => `<div class="paso tool"><b>${esc(p.herramienta)}</b> <span class="mono">${esc(JSON.stringify(p.entrada))}</span></div>`).join(''); };
+    $('#preguntar').onsubmit = async e => {
+      e.preventDefault();
+      const pregunta = $('#q').value.trim();
+      if (!pregunta) return;
+      const respuesta = $('#resp');
+      const boton = e.currentTarget.querySelector('button');
+      boton.disabled = true;
+      respuesta.innerHTML = '<p class="sub">Consultando…</p>';
+      try {
+        const r = await post('chat', {pregunta}).then(r => r.json());
+        respuesta.innerHTML = `<p>${esc(r.respuesta).replace(/\n/g, '<br>')}</p>` + (r.pasos || []).map(p => `<div class="editor-chat-paso"><b>${esc(p.herramienta)}</b> <code>${esc(JSON.stringify(p.entrada))}</code></div>`).join('');
+      } catch {
+        respuesta.innerHTML = '<p class="warn">No se pudo completar la consulta.</p>';
+      } finally { boton.disabled = false; }
+    };
   },
 };
 
@@ -276,12 +311,18 @@ function grafo(t) {
 }
 
 async function ruta() {
-  const [v, raw, prefill] = (location.hash.slice(1) || 'panel').split('/');
-  document.querySelectorAll('nav a').forEach(a => {
-    const current = a.getAttribute('href') === '#' + (v === 'caso' ? 'bandeja' : v);
+  const hash = location.hash;
+  const [requested, raw, prefill] = (hash.slice(1) || 'panel').split('/');
+  const v = Object.hasOwn(vistas, requested) ? requested : 'panel';
+  const parent = {caso: 'bandeja', relevo: 'panel', presentar: 'panel'}[v] || v;
+  const vista = $('#vista');
+  vista.dataset.view = v;
+  document.querySelectorAll('#navegacion a').forEach(a => {
+    const current = a.getAttribute('href') === '#' + parent;
     a.classList.toggle('activo', current);
     if (current) {
       a.setAttribute('aria-current', 'page');
+      $('#ruta-visible').textContent = {caso: 'Expediente', relevo: 'Relevo', presentar: 'Recorrido'}[v] || a.textContent.trim();
       if (a.parentElement.scrollWidth > a.parentElement.clientWidth) {
         a.scrollIntoView({block: 'nearest', inline: 'nearest'});
       }
@@ -291,16 +332,18 @@ async function ruta() {
   });
   try {
     if (v === 'directo' && raw === 'nueva') await vistaMesaDirecto(undefined, decodeURIComponent(prefill || ''));
-    else await (vistas[v] || vistas.panel)(raw && decodeURIComponent(raw));
-    window.scrollTo(0, 0);
+    else await vistas[v](raw && decodeURIComponent(raw));
+    if (location.hash === hash) window.scrollTo(0, 0);
   }
-  catch (e) { $('#vista').innerHTML = `<p>No se pudo cargar (${esc(e.message)}). ¿Está arrancado el backend y has ejecutado el orquestador?</p>`; }
+  catch (e) {
+    if (location.hash === hash) {
+      vista.innerHTML = `<p role="alert">No se pudo cargar la vista (${esc(textoVigia(e.message))}). Comprueba que Vigía esté arrancada.</p>`;
+    }
+  }
 }
 api('estado').then(s => {
   const status = $('#demo');
-  $('#proveedor').innerHTML = s.openai_disponible ? 'OpenAI<span class="shell-connection"> disponible</span>' : 'Motor local';
-  status.title = s.openai_disponible ? 'OpenAI disponible' : 'Motor local';
-  $('#modelo').textContent = s.openai_disponible ? s.modelo : '';
+  status.title = s.openai_disponible ? 'Vigía con contraste remoto' : 'Vigía en modo local';
   status.classList.toggle('vivo', s.openai_disponible);
   status.hidden = false;
 }).catch(() => {});
