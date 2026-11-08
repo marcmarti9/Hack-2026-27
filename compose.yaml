@@ -1,0 +1,33 @@
+services:
+  vigia:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "127.0.0.1:${VIGIA_PORT:-8100}:8100"
+    env_file:
+      - path: ${VIGIA_CONFIG_FILE:-.env}
+        required: false
+    environment:
+      VIGIA_DATA_DIR: /dataset
+      VIGIA_OUT_DIR: /index
+      VIGIA_WEB_OUT: /state
+    volumes:
+      - type: bind
+        source: ${VIGIA_DATASET_PATH:-./data/dataset}
+        target: /dataset
+        read_only: true
+        bind:
+          create_host_path: false
+      - vigia-index:/index
+      - vigia-state:/state
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8100/api/estado', timeout=3).close()"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 45s
+
+volumes:
+  vigia-index:
+  vigia-state:

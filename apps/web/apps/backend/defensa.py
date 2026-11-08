@@ -19,17 +19,19 @@ from apps.backend.config import ROOT as REPO
 from apps.backend.rules.engine import fuera_de_horario, madrid
 from apps.backend.tools import db
 from apps.desktop import assistant, sim_response
-from apps.desktop.defense import ALERT_ID, MAX_ALERTS, MAX_BYTES, _object, parse_alerts
+from apps.desktop.defense import ALERT_ID, MAX_BYTES, _object, parse_alerts
 from apps.desktop.demo import DEMO_USER
 from apps.desktop.review import Reviews, investigate, reviewed_proposal
 from apps.desktop.session import Account
 
 from .config import OUT
+from .live_queue import LiveQueue
 
 router = APIRouter(prefix="/api")
 state = Path(os.getenv("VIGIA_WEB_OUT") or OUT).resolve()
 state.mkdir(parents=True, exist_ok=True)
 reviews = Reviews(state)
+live_queue = LiveQueue(reviews.path)
 pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="triaje-web")
 lock = Lock()
 jobs = {}
@@ -38,6 +40,7 @@ sample_path = REPO / "eval" / "lote-presentacion-091.jsonl"
 showcase = ("ALR-20261010-011795", "ALR-20261011-011800", "ALR-20261014-011817",
             "ALR-20261005-000301", "ALR-20261005-000099")
 log = logging.getLogger(__name__)
+WEB_MAX_ALERTS = 150
 
 
 def model():
@@ -64,17 +67,18 @@ def _batch_text(text):
     except json.JSONDecodeError:
         lines = [line.strip() for line in text.splitlines() if line.strip()]
         if all(ALERT_ID.fullmatch(line) for line in lines):
-            return parse_alerts("\n".join(json.dumps(line) for line in lines).encode())
-        return parse_alerts(text.encode())
+            text = "\n".join(json.dumps(line) for line in lines)
+        return parse_alerts(text.encode(), max_alerts=WEB_MAX_ALERTS, reject_conflicts=True)
     if isinstance(payload, dict) and "items" in payload and "alert_id" not in payload:
         payload = payload["items"]
         if not isinstance(payload, list):
             raise ValueError("El campo items debe ser una lista de alertas.")
     if not isinstance(payload, list):
         payload = [payload]
-    if len(payload) > MAX_ALERTS:
-        raise ValueError(f"El lote admite hasta {MAX_ALERTS} alertas.")
-    return parse_alerts("\n".join(json.dumps(item, ensure_ascii=False) for item in payload).encode("utf-8"))
+    if len(payload) > WEB_MAX_ALERTS:
+        raise ValueError(f"El lote admite hasta {WEB_MAX_ALERTS} alertas.")
+    return parse_alerts("\n".join(json.dumps(item, ensure_ascii=False) for item in payload).encode("utf-8"),
+                        max_alerts=WEB_MAX_ALERTS, reject_conflicts=True)
 
 
 def _input(text):
@@ -300,48 +304,50 @@ def _stage(job, kind, text):
 
 def _run(job, alerts, mode, remote):
     try:
-        results, errors = {}, {}
+        errors = {}
         for alert in alerts:
             aid = alert["alert_id"]
+            live_queue.running(aid)
             _stage(job, "caso", f"{aid} · recuperando registros, inventario y contexto.")
             try:
-                reviews.validate_alert_input(alert)
                 guidance = reviews.guidance(alert["runbook"]) if remote else None
-                results[aid] = investigate(alert, remote, guidance, triage=True, mode=mode,
-                                           on_stage=lambda kind, text: _stage(job, kind, f"{aid} · {text}"))
+                analysis = investigate(alert, remote, guidance, triage=True, mode=mode,
+                                       on_stage=lambda kind, text: _stage(job, kind, f"{aid} · {text}"))
+                saved = reviews.save_analysis(aid, analysis)
+                stored = {}
+                if saved:
+                    report = analysis["report"]
+                    if report["routing"]["automatic"]:
+                        stored = {"decision": "automatic", "verdict": report["verdict"]}
+                else:
+                    _, analysis, report, stored = record(aid)
+                live_queue.finish(aid, report, "")
             except ValueError as error:
                 errors[aid] = str(error)
             except Exception:
                 log.exception("Falló el triaje del expediente %s", aid)
-                errors[aid] = "No se pudo investigar esta alerta. Comprueba el índice."
-        _stage(job, "guardado", "Contrastando identidades y guardando los expedientes del lote.")
-        for aid, (_, error) in reviews.save_batch(results).items():
-            if error:
-                errors[aid] = error
-        rows = reviews.all()
-        cards_out = []
-        for alert in alerts:
-            aid = alert["alert_id"]
+                errors[aid] = "No se pudo guardar el expediente de esta alerta."
             if aid in errors:
+                live_queue.finish(aid, None, errors[aid])
                 _stage(job, "error", f"{aid} · {errors[aid]}")
                 continue
-            report = results[aid]["report"]
-            item = _summary(alert, report, rows.get(aid) or {})
             if report.get("provider_errors"):
-                _stage(job, "aviso", f"{aid} · {next(iter(report['provider_errors'].values()))} Se conserva la decisión verificable.")
-            elif remote and not results[aid].get("review_provider"):
-                _stage(job, "local", f"{aid} · se aplicó la política local de cierre o falta evidencia para el contraste.")
-            cards_out.append(item)
+                _stage(job, "aviso", f"{aid} · {next(iter(report['provider_errors'].values()))}")
+            _stage(job, "guardado", f"{aid} · expediente guardado.")
+            with lock:
+                job["tickets"].append(_summary(alert, report, stored))
         with lock:
-            job.update(estado="terminado" if cards_out else "error", fin=time(), tickets=cards_out,
+            job.update(estado="terminado" if job["tickets"] else "error", fin=time(),
                        error="; ".join(f"{aid}: {value}" for aid, value in errors.items()))
     except Exception:
         log.exception("Falló el guardado del lote web")
+        error = "No se pudo completar el lote."
+        live_queue.fail_pending(job["id"], error)
         with lock:
-            job.update(estado="error", fin=time(), error="No se pudo guardar el lote de análisis.")
+            job.update(estado="error", fin=time(), error=error)
 
 
-def launch(alerts, mode, remote):
+def launch(alerts, mode, remote, origin="Entrada manual"):
     if remote and not model():
         raise HTTPException(409, "Configura OPENAI_API_KEY en el servidor para usar OpenAI.")
     with lock:
@@ -350,6 +356,12 @@ def launch(alerts, mode, remote):
         if len(jobs) >= 32:
             jobs.pop(next(iter(jobs)))
         jid = uuid4().hex
+        try:
+            for alert in alerts:
+                reviews.validate_alert_input(alert)
+            live_queue.add(jid, alerts, origin)
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from None
         job = jobs[jid] = {"id": jid, "estado": "en cola", "pasos": [], "cerradas": [], "tickets": [],
                            "error": "", "inicio": time(), "fin": None, "alertas": len(alerts), "modo_demo": not remote}
     pool.submit(_run, job, alerts, mode, remote)
@@ -360,6 +372,7 @@ class Entrada(BaseModel):
     texto: str = Field(min_length=1, max_length=MAX_BYTES)
     modo: Literal["diurno", "guardia"] = "guardia"
     remoto: bool = False
+    archivo: str = Field(default="", max_length=160)
 
 
 @router.post("/analizar")
@@ -370,7 +383,31 @@ def analyze(entry: Entrada):
         raise HTTPException(400, "El lote tiene demasiados niveles de anidación.") from None
     except ValueError as error:
         raise HTTPException(400, f"Lote inválido: {error}") from None
-    return launch(alerts, entry.modo, entry.remoto)
+    origin = entry.archivo.replace(chr(92), "/").split("/")[-1].strip() or "Entrada manual"
+    return launch(alerts, entry.modo, entry.remoto, origin)
+
+
+@router.get("/directo")
+def live():
+    with lock:
+        active = next((job_id for job_id, job in jobs.items() if not job["fin"]), None)
+    return {"alertas": live_queue.rows(), "trabajo": active}
+
+
+class Assignment(BaseModel):
+    rol: Literal["N1", "N2", "Responsable"]
+    asignarme: bool
+
+
+@router.put("/directo/{aid}/asignacion")
+def assign(aid: str, assignment: Assignment):
+    try:
+        assigned = live_queue.assign(aid, f"analista.{assignment.rol.lower()}", assignment.asignarme)
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from None
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from None
+    return {"asignado": assigned}
 
 
 @router.get("/trabajo/{jid}")

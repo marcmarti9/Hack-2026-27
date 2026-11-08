@@ -248,4 +248,5 @@ def build_report(alert, analysis):
         "triage_seconds": analysis["timing"]["total_ms"] / 1000,
         "consultas": analysis.get("trace", []), "propuesta": proposal, "contraste": contrast,
         "criterio_verificado": basis,
+        **({"declared_evidence": alert["declared_evidence"]} if alert.get("external") and alert.get("declared_evidence") else {}),
     }

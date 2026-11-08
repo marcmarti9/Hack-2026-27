@@ -121,6 +121,18 @@ def _external(item):
     technique = mitre.get("technique_id") if isinstance(mitre, dict) else None
     if isinstance(technique, str) and TECHNIQUE_ID.fullmatch(technique):
         alert["mitre"] = {"technique_id": technique}
+    evidence = item.get("evidence")
+    if evidence is not None:
+        if not isinstance(evidence, dict):
+            raise ValueError("El campo evidence debe ser un objeto.")
+        try:
+            encoded = json.dumps(evidence, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        except (ValueError, RecursionError):
+            raise ValueError("Evidencia declarada inválida.") from None
+        if len(encoded) > 24_000:
+            raise ValueError("La evidencia declarada supera 24 KB por alerta.")
+        if evidence:
+            alert["declared_evidence"] = evidence
     return alert
 
 
@@ -143,7 +155,7 @@ def load_alerts(path: Path) -> list[dict]:
     return parse_alerts(payload)
 
 
-def parse_alerts(payload: bytes) -> list[dict]:
+def parse_alerts(payload: bytes, *, max_alerts: int = MAX_ALERTS, reject_conflicts: bool = False) -> list[dict]:
     """Comparte la validación del lote entre archivos y la entrada web."""
     if len(payload) > MAX_BYTES:
         raise ValueError("El lote supera 1 MB.")
@@ -162,8 +174,8 @@ def parse_alerts(payload: bytes) -> list[dict]:
                 raise ValueError("ID de alerta inválido.")
             if key in entries:
                 raise ValueError(f"Alerta repetida: {key}.")
-            if len(entries) == MAX_ALERTS:
-                raise ValueError(f"El lote admite hasta {MAX_ALERTS} alertas.")
+            if len(entries) == max_alerts:
+                raise ValueError(f"El lote admite hasta {max_alerts} alertas.")
         except json.JSONDecodeError:
             raise ValueError(f"Línea {number}: JSON no válido.") from None
         except RecursionError:
@@ -179,6 +191,8 @@ def parse_alerts(payload: bytes) -> list[dict]:
         for key, (number, item) in entries.items():
             canonical = db.get_alert(key)
             if canonical is not None:
+                if reject_conflicts and isinstance(item, dict) and len(item) > 1 and item != canonical:
+                    raise ValueError(f"Línea {number}: {key} ya existe en el índice con otro contenido.")
                 result.append(canonical)
             elif isinstance(item, dict) and len(item) > 1:
                 try:

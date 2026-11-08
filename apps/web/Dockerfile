@@ -1,8 +1,7 @@
-FROM python:3.11-slim
+FROM python:3.11-slim@sha256:65bd3d9f1d7fa268dd1909973ba7eb4bdf41f6dcf2cfbe76ba9528b170f3fd79
 WORKDIR /vigia
-COPY requirements.txt ./requirements.txt
-COPY apps/web/requirements.txt ./apps/web/requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt -r apps/web/requirements.txt
+COPY apps/web/requirements.lock ./requirements.lock
+RUN pip install --no-cache-dir -r requirements.lock
 COPY apps/backend ./apps/backend
 COPY apps/desktop ./apps/desktop
 COPY apps/__init__.py ./apps/__init__.py
