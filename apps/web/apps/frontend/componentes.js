@@ -152,6 +152,9 @@ function expedienteHTML(t) {
   const tienePropuesta = Object.keys(propuesta).length > 0;
   const tieneContraste = Object.keys(contraste).length > 0;
   const tieneLimites = Object.keys(errores).length > 0;
+  const fuentesConsultadas = [...new Set(consultas.map(c => c.tool).filter(Boolean))];
+  const citasDecisivas = [...(crit.citations || []), ...(crit.sandbox_refs || [])];
+  const paso = numero => `<span class="vigia-report-step" aria-hidden="true">${numero}</span>`;
   const duracion = informe.timing_ms == null ? ''
     : informe.timing_ms < 1000 ? `${fmt(informe.timing_ms)} ms`
       : `${(informe.timing_ms / 1000).toLocaleString('es-ES', {maximumFractionDigits: 1})} s`;
@@ -193,29 +196,46 @@ function expedienteHTML(t) {
         ${humana ? etiqueta('Ruta de triaje', [disposicion(ruta.recommendation), ruta.reason !== motivo ? ruta.reason : ''].filter(Boolean).join(' · '), 'vigia-report-owners') : ''}
       </dl>
     </section>
-    <div class="vigia-report-grid">
+    <section class="vigia-report-rationale" aria-label="Cómo se llegó a la decisión">
+      <h3>Cómo se llegó a la decisión</h3>
+      <div class="vigia-report-stage">
+        <h4>${paso('01')} Datos consultados</h4>
+        <p class="vigia-report-muted">${esc(fuentesConsultadas.slice(0, 4).join(' · ') || 'El expediente no conserva consultas al índice.')}
+          ${fuentesConsultadas.length > 4 ? ` · ${fmt(fuentesConsultadas.length - 4)} más` : ''}</p>
+        <details class="vigia-report-fold vigia-report-index">
+          <summary>Consultas al índice <span class="vigia-report-count">${fmt(consultas.length)}</span></summary>
+          ${consultas.length ? `<ul class="vigia-report-queries">${consultas.map(c => `<li>
+            <div><strong>${esc(c.tool || c)}</strong>${c.query ? `<p>${esc(c.query)}</p>` : ''}${c.note ? `<p>${esc(c.note)}</p>` : ''}</div>
+            ${c.count != null ? `<span>${fmt(c.count)} ${c.count === 1 ? 'resultado' : 'resultados'}</span>` : ''}
+          </li>`).join('')}</ul>` : '<p class="vigia-report-muted">Sin consultas registradas.</p>'}
+        </details>
+      </div>
+      <div class="vigia-report-grid">
       <section class="vigia-report-section">
-        <h3>Hallazgos y contexto</h3>
+        <h4>${paso('02')} Hallazgos y contexto</h4>
         <div class="vigia-report-observation">
           <span class="vigia-report-marker ${corroborado ? 'verificado' : ''}"></span>
           <div><strong>${corroborado ? 'Hallazgo corroborado' : 'Sin hallazgo corroborado'}</strong>
             <p>${esc(crit.summary || (recuperados ? 'Los registros recuperados aportan contexto para seguir investigando.'
               : 'El índice no devolvió registros para verificar esta alerta.'))}</p></div>
         </div>
+        ${citasDecisivas.length ? `<p class="vigia-report-citations">Citas decisivas · ${citasDecisivas.slice(0, 3).map(id => `<code>${esc(id)}</code>`).join(' · ')}${citasDecisivas.length > 3 ? ` · ${fmt(citasDecisivas.length - 3)} más` : ''}</p>` : ''}
         ${preguntas.length ? desplegable('Qué falta por comprobar', registroHTML(preguntas)) : ''}
         ${registro('Criterio y referencias', crit)}
         ${desplegable('Contexto técnico', contexto)}
       </section>
       <section class="vigia-report-section">
-        <h3>Propuesta y revisión adversarial ${ayudaHTML('la revisión adversarial', 'La segunda revisión busca pruebas en contra y comprueba si las citas respaldan la propuesta inicial.')}</h3>
+        <h4>${paso('03')} Propuesta y revisión adversarial ${ayudaHTML('la revisión adversarial', 'La segunda revisión busca pruebas en contra y comprueba si las citas respaldan la propuesta inicial.')}</h4>
         <ol class="vigia-report-review">
           <li><strong>${fuente === 'Reglas locales' ? 'Comprobación local' : 'Primera propuesta'}</strong>
             <span>${fuente === 'Reglas locales' ? 'Reglas locales' : fuente ? 'Vigía' : 'Sin proveedor registrado'}</span>
+            ${fuente && fuente !== 'Reglas locales' && propuesta.summary ? `<p>${esc(textoVigia(propuesta.summary))}</p>` : ''}
             ${registro('Propuesta registrada', propuesta)}
           </li>
           <li><strong>${informe.review_provider ? 'Contraste del fiscal' : 'Contraste de la evidencia'}</strong>
             <span>${informe.review_provider ? 'Vigía' : tieneContraste ? 'Verificación de los registros' : 'Sin contraste registrado'}</span>
             ${informe.review_reason ? `<p>${esc(informe.review_reason)}</p>` : ''}
+            ${contraste.summary ? `<p>${esc(textoVigia(contraste.summary))}</p>` : ''}
             ${registro('Contraste registrado', contraste)}
           </li>
         </ol>
@@ -226,16 +246,14 @@ function expedienteHTML(t) {
         </div>` : ''}
         ${!tienePropuesta && !tieneContraste ? '<p class="vigia-report-muted">Este expediente se limita a las consultas y evidencias registradas.</p>' : ''}
       </section>
-    </div>
+      </div>
+      <div class="vigia-report-stage">
+        <h4>${paso('04')} Criterio aplicado</h4>
+        <p class="vigia-report-muted">${esc(informe.severity_rationale || ruta.reason || 'El expediente no conserva el criterio de prioridad.')}</p>
+        ${crit.basis && crit.basis !== motivo ? `<p class="vigia-report-muted">${esc(crit.basis)}</p>` : ''}
+      </div>
+    </section>
     ${inteligenciaHTML(informe.threat_intel)}
-    <details class="vigia-report-fold vigia-report-section vigia-report-index">
-      <summary>Consultas al índice <span class="vigia-report-count">${fmt(consultas.length)}</span></summary>
-      <p class="vigia-report-muted">Fuentes consultadas, resultados y límites de cada búsqueda.</p>
-      ${consultas.length ? `<ul class="vigia-report-queries">${consultas.map(c => `<li>
-        <div><strong>${esc(c.tool)}</strong><p>${esc(c.query)}</p>${c.note ? `<p>${esc(c.note)}</p>` : ''}</div>
-        ${c.count != null ? `<span>${fmt(c.count)} ${c.count === 1 ? 'resultado' : 'resultados'}</span>` : ''}
-      </li>`).join('')}</ul>` : '<p class="vigia-report-muted">Sin consultas registradas.</p>'}
-    </details>
   </div>`;
 }
 

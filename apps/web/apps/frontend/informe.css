@@ -81,6 +81,14 @@
 .vigia-report-meta dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; }
 .vigia-report-owners { grid-column: 1 / -1; }
 
+.vigia-report-rationale { display: grid; gap: 20px; }
+.vigia-report-rationale > h3 { margin: 0; font-size: 20px; }
+.vigia-report-rationale h4 { display: flex; align-items: baseline; gap: 10px; margin: 0 0 10px; font-size: 16px; }
+.vigia-report-stage { padding-inline: clamp(12px, 3cqi, 24px); }
+.vigia-report-stage .vigia-report-index { margin-top: 10px; padding-inline: 0; }
+.vigia-report-step { color: var(--report-accent); font: 500 12px var(--font-mono); }
+.vigia-report .vigia-report-citations { margin-bottom: 12px; color: var(--report-muted); font-size: 13px; }
+
 .vigia-report-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
