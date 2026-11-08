@@ -22,7 +22,7 @@ al humano solo la decisión. **La IA investiga, la persona decide.**
 
 1. Instala **Python 3.11 o superior** desde python.org marcando "Add python.exe to PATH".
 2. Copia el dataset de Deloitte dentro de `data\dataset\` (carpetas `01_contexto` ... `06_herramientas`). Ya está copiado en este equipo.
-3. Copia `.env.example` como `.env` y pon tu clave de Anthropic (`ANTHROPIC_API_KEY=sk-ant-...`). Sin clave, VIGÍA arranca en **modo demo**.
+3. Copia `.env.example` como `.env` y pon tu clave de OpenAI (`OPENAI_API_KEY=sk-...`) o, si lo preferís, la de Anthropic con `VIGIA_PROVEEDOR=claude`. Sin clave, VIGÍA arranca en **modo demo**.
 4. Desde la carpeta `vigia`:
 
 ```powershell
@@ -41,8 +41,8 @@ Opciones: `-Demo` fuerza el modo demo aunque haya clave; `-Rehacer` vuelve a eje
 | `python -m apps.backend.ingest` | Carga el dataset en `out\tarvia.duckdb` | No |
 | `python -m scripts.run_all --solo-reglas` | Motor de reglas, escudo, grupos y caza | No |
 | `$env:VIGIA_MOCK="1"; python -m scripts.run_all --n2` | Todo con agentes simulados (datos reales) | No |
-| `python -m scripts.run_all --max 3` | Los 3 casos más graves con Claude | Sí |
-| `python -m scripts.run_all --n2` | Todo con Claude: 17 casos + informes N2 | Sí |
+| `python -m scripts.run_all --max 3` | Los 3 casos más graves con la IA real | Sí |
+| `python -m scripts.run_all --n2` | Todo con la IA real: 17 casos + informes N2 | Sí |
 | `python -m scripts.alertas_directo` y `python -m scripts.run_all --fichero out\alertas_directo.jsonl --salida out\directo --n2` | Ensayo de alertas del directo | Sí |
 | `python -m scripts.evaluar` | Métricas contra `eval\etiquetas.csv` | No |
 | `python -m scripts.test_todo` | Las 13 comprobaciones | No |
@@ -56,7 +56,7 @@ alertas.jsonl ─► motor de reglas (sin IA) ─► cerradas con explicación (
                        ▼
                 escudo anti-manipulación ─► agrupación (17 casos)
                        ▼
-            agente N1 (Claude + 10 herramientas sobre DuckDB y CVE)
+            agente N1 (OpenAI o Claude + 10 herramientas sobre DuckDB y CVE)
                        ▼
      validador de pruebas + severidad por matriz ─► fiscal (IA revisora)
                        ▼
@@ -88,14 +88,14 @@ alertas.jsonl ─► motor de reglas (sin IA) ─► cerradas con explicación (
 
 ## Modo demo (VIGIA_MOCK=1)
 
-Imita a Claude con el mismo interfaz: consulta las herramientas de verdad, cita solo eventos que existen y aplica
+Imita al modelo real con el mismo interfaz: consulta las herramientas de verdad, cita solo eventos que existen y aplica
 heurísticas por regla. Sirve para enseñar la web sin clave o si falla la conexión. Los tickets llevan la marca
-"[modo demo]" y la web muestra la etiqueta MODO DEMO. **No sustituye al razonamiento de Claude.**
+"[modo demo]" y la web muestra la etiqueta MODO DEMO. **No sustituye al razonamiento del modelo real.**
 
 ## Límites conocidos
 
 - Las reglas del motor se han ajustado mirando este dataset; con datos nuevos, lo que no encaje exactamente pasa al agente.
-- El camino con Claude real está probado con clientes simulados; hay que validarlo con la clave (primer caso: fraude de IBAN).
+- El camino con la IA real está probado con un transporte simulado (`python -m scripts.check_openai --e2e`); hay que validarlo con la clave (`python -m scripts.probar_ia --caso`, primer caso: fraude de IBAN).
 - La descarga de CISA KEV y EPSS (`python -m apps.backend.tools.cve`) necesita Internet una vez; sin caché, VIGÍA dice "sin datos externos".
 - El grafo de entidades carga Cytoscape desde Internet; sin conexión se indica y el resto funciona.
 - Algunas CVE del dataset parecen inventadas y no tienen datos externos.
@@ -104,3 +104,13 @@ heurísticas por regla. Sirve para enseñar la web sin clave o si falla la conex
 
 El dataset de Deloitte, `out/` y `.env` están en `.gitignore` y **no se suben a Git**. No se visita ni descarga ningún
 indicador del dataset: solo se consultan el TIP y la sandbox locales.
+
+## Proveedor de IA
+
+Los agentes están escritos una sola vez y funcionan con OpenAI o con Claude:
+
+- **OpenAI (por defecto)**: `apps/backend/agents/openai_client.py` traduce los mensajes y herramientas a la Responses API. `gpt-6-luna` investiga, redacta el informe N2 y responde el chat; `gpt-6.1-sol` hace de fiscal, así quien revisa es un modelo distinto del que investiga. Se cambian con `OPENAI_MODEL`, `OPENAI_REVIEW_MODEL` y `VIGIA_RAZONAMIENTO` en `.env`.
+- **Claude**: `VIGIA_PROVEEDOR=claude` y `ANTHROPIC_API_KEY`.
+- La clave de la API se factura aparte de la suscripción de ChatGPT. Para ensayar sin gastar está el modo demo.
+
+Comprobaciones: `python -m scripts.check_openai` (sin red ni gasto), `python -m scripts.probar_ia` (una llamada por modelo) y `python -m scripts.probar_ia --caso`.

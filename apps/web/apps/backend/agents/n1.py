@@ -9,7 +9,7 @@ CTX = Contexto(DATA)
 POLITICA = (DATA / "01_contexto/politica_soc.md").read_text(encoding="utf-8")
 EMPRESA = (DATA / "01_contexto/empresa_tarvia.md").read_text(encoding="utf-8")
 RUNBOOK = lambda rb: (DATA / f"01_contexto/runbooks/{rb}.md").read_text(encoding="utf-8")
-client = llm_client()          # Claude, o el simulado si VIGIA_MOCK=1
+client = llm_client()          # OpenAI o Claude, o el simulado si VIGIA_MOCK=1
 
 def _o(props: dict, required: list) -> dict:
     return {"type": "object", "properties": props, "required": required, "additionalProperties": False}

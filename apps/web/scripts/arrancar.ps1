@@ -20,7 +20,7 @@ Write-Host "Instalando dependencias..." -ForegroundColor Cyan
 
 # 2. Configuración: .env y modo demo automático si no hay clave
 if (-not (Test-Path ".env")) { Copy-Item ".env.example" ".env" }
-$HayClave = Select-String -Path ".env" -Pattern '^ANTHROPIC_API_KEY=sk-ant-(?!\.\.\.)' -Quiet
+$HayClave = Select-String -Path ".env" -Pattern '^(OPENAI_API_KEY=sk-|ANTHROPIC_API_KEY=sk-ant-)(?!\.\.\.)' -Quiet
 if ($Demo -or -not $HayClave) {
     $env:VIGIA_MOCK = "1"
     Write-Host "MODO DEMO: agentes simulados (no hay clave de API o has usado -Demo)." -ForegroundColor Yellow
