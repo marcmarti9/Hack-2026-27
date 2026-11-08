@@ -280,12 +280,16 @@ const vistas = {
       </ol>`;
   },
 
-  chat() {
+  async chat() {
+    const hash = location.hash;
+    const settings = await api('estado').catch(() => ({}));
+    if (location.hash !== hash) return;
     $('#vista').innerHTML = `<div class="editor-encabezado"><h2>Chat</h2><p class="sub">Vigía responde con datos de los logs y cita los eventos.</p></div>
       <div class="editor-chat">
         <form class="editor-busqueda" id="preguntar"><label for="q">Pregunta sobre los logs</label>
-          <div><input type="text" id="q" required aria-describedby="ejemplos-chat"><button type="submit">Consultar</button></div>
-          <p id="ejemplos-chat" class="sub">Ej.: ¿Qué hizo marta.puig? · ¿Qué pasó en WMS01? · ¿Quién es ext.logisoft?</p>
+          <div><input type="text" id="q" required maxlength="2000" aria-describedby="ejemplos-chat"><button type="submit">Consultar</button></div>
+          <p id="ejemplos-chat" class="sub">¿Qué pasó con Marta Puig? · ¿Qué actividad hubo en WMS01? · ¿Quién es ext.logisoft?</p>
+          ${settings.openai_disponible ? '<label class="editor-chat-mode"><input type="checkbox" name="remoto" checked> Resumir con IA</label>' : ''}
         </form>
         <div id="resp" role="status"></div>
       </div>`;
@@ -299,8 +303,15 @@ const vistas = {
       boton.disabled = true;
       respuesta.innerHTML = '<p class="sub">Consultando…</p>';
       try {
-        const r = await post('chat', {pregunta}).then(r => r.json());
-        respuesta.innerHTML = `<p>${esc(r.respuesta).replace(/\n/g, '<br>')}</p>` + (r.pasos || []).map(p => `<div class="editor-chat-paso"><b>${esc(p.herramienta)}</b> <code>${esc(JSON.stringify(p.entrada))}</code></div>`).join('');
+        const reply = await post('chat', {pregunta, remoto: Boolean(e.currentTarget.elements.remoto?.checked)});
+        const r = await reply.json();
+        if (!reply.ok) throw new Error(mensajeError(r));
+        respuesta.innerHTML = `<p>${esc(textoVigia(r.respuesta)).replace(/\n/g, '<br>')}</p>` + (r.pasos || []).map(p =>
+          `<details class="editor-chat-paso" data-evento="${esc(p.entrada)}"><summary>Registro <code>${esc(p.entrada)}</code></summary><div class="raw" hidden></div></details>`).join('');
+        respuesta.querySelectorAll('[data-evento]').forEach(item => item.addEventListener('toggle', () => {
+          const record = item.querySelector('.raw');
+          if (item.open && record.hidden) mostrarEvento(item.dataset.evento, record);
+        }));
       } catch {
         respuesta.innerHTML = '<p class="warn">No se pudo completar la consulta.</p>';
       } finally { boton.disabled = false; }

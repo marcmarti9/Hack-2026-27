@@ -10,7 +10,7 @@ Abre [Vigía](http://127.0.0.1:8100/#panel). El menú lateral se puede plegar. L
 | **Descartes** | Alertas del barrido local elegibles para cierre, agrupadas por motivo. Los ejemplos llevan a expedientes con sus citas. Los cierres registrados en la mesa se consultan en Triaje. |
 | **Playbooks** | Los diez runbooks del SOC, con reglas, comprobaciones, decisiones y ejemplos. Abre el texto operativo completo y su revisión, o selecciona **Guía general** para consultar la SKILL. N1 lee y N2 o Responsable pueden guardar una revisión en esta mesa. |
 | **Mapa** | Reproducción horaria del escenario de Tarvia. Usa el deslizador para elegir una hora y consulta las zonas y los casos señalados. |
-| **Chat** | Preguntas sobre los registros de Tarvia. La respuesta muestra los identificadores de los eventos recuperados. |
+| **Chat** | Pregunta en lenguaje natural por un nombre completo, cuenta, equipo o alerta. Prueba «¿Qué pasó con Marta Puig?» o «¿Cuáles fueron sus últimos inicios de sesión?» indicando la cuenta en cada consulta. Si está disponible, **Resumir con IA** sintetiza los registros recuperados. Abre un identificador para consultar el registro original. |
 | **Relevo** | Investigación del turno de guardia, cierres, revisiones y escalados con responsables y plazos. Se abre desde Panel. |
 
 En un **expediente**, empieza por la decisión. Abre la cronología, los hallazgos y el contraste para comprobar cómo se llegó al veredicto. Las citas de la IA y los registros verificados aparecen diferenciados. Una coincidencia de inteligencia pública aporta contexto de exposición. Para corregir un veredicto se guarda un motivo. La acción de aislamiento del recorrido LSASS requiere aprobación N2 en el simulador de práctica.

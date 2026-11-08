@@ -59,8 +59,10 @@ def local_answer(alert: dict | None, events: list[dict]) -> str:
         lines += [f"{alert['alert_id']} · {alert['rule_name']}",
                   f"Prioridad preliminar: {priority.level} · {priority.sla}",
                   priority.rationale, alert["description"]]
-    fields = (("timestamp", "Fecha"), ("hostname", "Equipo"), ("user", "Usuario"),
-              ("action", "Acción"), ("status", "Estado"), ("event_type", "Tipo"),
+    fields = (("timestamp", "Fecha"), ("hostname", "Equipo"), ("user", "Usuario"), ("user_upn", "Cuenta"),
+              ("process_name", "Proceso"), ("operation", "Operación"), ("app", "Aplicación"), ("result", "Resultado"),
+              ("src_ip", "IP de origen"), ("dst_ip", "IP de destino"), ("action", "Acción"), ("event_type", "Tipo"),
+              ("status", "Estado"), ("query", "Consulta"), ("subject", "Asunto"),
               ("eventName", "Evento"), ("detail", "Detalle"))
     for event in events:
         lines.extend(["", f"{event['event_id']} ({event['source']})"])

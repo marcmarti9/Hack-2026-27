@@ -12,6 +12,39 @@ from apps.backend.config import DATA, ROOT
 from apps.backend.tools import db
 
 
+def check_chat(client):
+    def ask(question, remote=False):
+        response = client.post("/api/chat", json={"pregunta": question, "remoto": remote})
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    reformulations = ("¿Qué pasó con Márta Puig?", "Cuéntame la actividad de Puig, Marta", "¿Qué hizo marta.puig?")
+    answers = [ask(question) for question in reformulations]
+    assert all(answer["pasos"] == answers[0]["pasos"] for answer in answers)
+    assert "ALR-20261009-011791" in answers[0]["respuesta"]
+    assert {step["entrada"] for step in answers[0]["pasos"]} >= {"EDR-0123400", "EDR-0123412"}
+    signins = ask("¿Cuáles fueron los últimos inicios de sesión de Marta Puig?")
+    assert signins["pasos"] and all(step["entrada"].startswith("SIGN-") for step in signins["pasos"])
+    host = ask("Cuéntame qué actividad se registró en wms01")
+    assert host["pasos"] and "WMS01" in host["respuesta"]
+    for query in ("¿Quién es ext.logisoft?", "¿Qué rol tiene Logisoft?"):
+        profile = ask(query)
+        assert "Cuenta de proveedor" in profile["respuesta"] and not profile["pasos"]
+    assert not ask("¿Quién es Marta?")["pasos"]
+    assert "varias coincidencias" in ask("Compara Marta Puig y WMS01")["respuesta"]
+
+    with patch("apps.engine.assistant.openai_message", return_value="EDR-0123412 registra acceso a LSASS.") as model:
+        summarized = ask(reformulations[0], remote=True)
+        assert "Texto generado" in summarized["respuesta"] and summarized["pasos"] == answers[0]["pasos"]
+        assert {event["event_id"] for event in model.call_args.args[1]["eventos"]} == {
+            item["entrada"] for item in summarized["pasos"]
+        }
+    with patch("apps.engine.assistant.openai_message", return_value="EDR-0999999 confirma el caso."):
+        rejected = ask(reformulations[0], remote=True)
+        assert "no devolvió referencias verificables" in rejected["respuesta"]
+        assert "EDR-0999999" not in rejected["respuesta"] and rejected["pasos"] == answers[0]["pasos"]
+
+
 def check_incident_projection(client, corroborated, unrelated):
     recovery = db.get_alert("ALR-20261010-011798")
     external = {"ALR-20261010-999991": "EDR-0123415", "ALR-20261010-999992": "EDR-0123416"}
@@ -90,6 +123,7 @@ def main():
         batch = (corroborated, unknown, routine, blocked, missing, mismatched, dns, dns_missing, dns_wrong_domain)
         body = "\n".join(json.dumps(row) for row in batch)
         with TestClient(app) as client:
+            check_chat(client)
             assert client.get("/api/directo").json() == {"alertas": [], "trabajo": None}
             bad = client.post("/api/analizar", json={"texto": body + "\n{incorrecto}", "modo": "guardia"})
             assert bad.status_code == 400

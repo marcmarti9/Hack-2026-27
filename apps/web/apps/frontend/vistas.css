@@ -180,10 +180,11 @@
 }
 .editor-chat .editor-busqueda { max-width: none; margin: 0; }
 .editor-chat .editor-busqueda .sub { margin: 10px 0 0; font-size: 13px; }
+.editor-chat .editor-chat-mode { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
 .editor-chat #resp:not(:empty) { margin-top: 20px; padding-top: 20px; border-block-start: 1px solid var(--borde); }
 .editor-chat #resp > p { max-width: 72ch; margin: 0 0 14px; overflow-wrap: anywhere; }
 .editor-chat-paso { padding: 8px 0; border-block-start: 1px solid var(--borde); color: var(--suave); overflow-wrap: anywhere; }
-.editor-chat-paso b { color: var(--texto); }
+.editor-chat-paso summary { cursor: pointer; color: var(--texto); }
 
 #vista[data-view="descartado"] > .sub { max-width: 72ch; margin: 0 0 24px; }
 #vista[data-view="descartado"] .desc-kpis {

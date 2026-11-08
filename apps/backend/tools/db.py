@@ -88,7 +88,7 @@ def alerts_citing_events(event_ids: list[str]) -> list[str]:
 
 
 def events_for_entity(value: str, around: str | None = None, horas: int = 24,
-                      source: str | None = None, limit: int = 100) -> list[dict]:
+                      source: str | None = None, limit: int = 100, *, latest: bool = False) -> list[dict]:
     value = _normalize(value)
     if not value:
         raise ValueError("Indica una entidad para buscar eventos.")
@@ -106,7 +106,8 @@ def events_for_entity(value: str, around: str | None = None, horas: int = 24,
     if source:
         sql += " AND source = ?"
         params.append(source)
-    return [_event(row) for row in _rows(sql + " ORDER BY ts, event_id LIMIT ?", [*params, _limit(limit)])]
+    order = "ts DESC, event_id DESC" if latest else "ts, event_id"
+    return [_event(row) for row in _rows(sql + f" ORDER BY {order} LIMIT ?", [*params, _limit(limit)])]
 
 
 @lru_cache(maxsize=64)
@@ -180,12 +181,23 @@ def sandbox(sha256: str) -> dict | None:
     return rows[0] if rows else None
 
 
-def alerts_for_entity(value: str, limit: int = 50) -> list[dict]:
-    return [json.loads(row["raw"]) for row in _rows("""
+def alerts_for_entity(value: str, limit: int = 50, *, priority: bool = False) -> list[dict]:
+    order = ("CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, "
+             "ts DESC, alert_id" if priority else "ts, alert_id")
+    return [json.loads(row["raw"]) for row in _rows(f"""
         SELECT raw FROM alerts
         WHERE alert_id IN (SELECT alert_id FROM alert_entities WHERE value = ?)
-        ORDER BY ts, alert_id LIMIT ?
+        ORDER BY {order} LIMIT ?
     """, [_normalize(value), _limit(limit)])]
+
+
+def chat_directory() -> list[dict]:
+    return _rows("""
+        SELECT 'cuenta' AS kind, username AS key, display_name AS name, upn AS address,
+               title AS role, department AS area, workstation AS workstation FROM users
+        UNION ALL
+        SELECT 'equipo', hostname, hostname, ip, type, business_service, NULL FROM assets
+    """)
 
 
 def related_activity(keys: list[tuple[str, str]], alert_id: str, around: str) -> tuple[list[dict], list[dict]]:

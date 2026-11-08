@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from apps.backend.config import ROOT as REPO
 from apps.backend.rules.engine import LEVELS, fuera_de_horario, madrid
 from apps.backend.tools import db
-from apps.engine import assistant, sim_response
+from apps.engine import assistant, chat, sim_response
 from apps.engine.defense import ALERT_ID, MAX_BYTES, _object, parse_alerts
 from apps.engine.practice import DEMO_USER
 from apps.engine.review import Reviews, investigate, reviewed_proposal
@@ -614,21 +614,9 @@ class Question(BaseModel):
 @router.post("/chat")
 def ask(entry: Question):
     question = entry.pregunta.strip()
-    with db.read_session():
-        alert, events = assistant.context_for(question, None)
-        if not events:
-            for word in question.replace("?", " ").replace("¿", " ").split():
-                if "." in word or "-" in word or word.isupper():
-                    events = db.events_for_entity(word.strip(".,;!"), limit=6)
-                    if events:
-                        break
-    try:
-        answer = (assistant.openai_answer(question, alert, events)
-                  if entry.remoto and events and model() else assistant.local_answer(alert, events))
-    except ValueError as error:
-        answer = f"{error}\n\n{assistant.local_answer(alert, events)}"
-    return {"respuesta": answer, "pasos": [{"herramienta": "Registro recuperado", "entrada": item["event_id"]}
-                                         for item in events]}
+    if not question:
+        raise HTTPException(400, "Escribe una pregunta sobre los registros de Tarvia.")
+    return chat.answer(question, remote=entry.remoto and bool(model()))
 
 
 class Isolation(BaseModel):
