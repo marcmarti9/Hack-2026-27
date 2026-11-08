@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VIGÍA · SOC de Tarvia</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700;800&family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+</head>
+<body>
+<header>
+  <a class="marca" href="#panel"><span class="ojo">◉</span> VIGÍA <small>el SOC que no se apaga</small></a>
+  <nav>
+    <a href="#panel">Parte de guardia</a><a href="#bandeja">Casos</a><a href="#playbooks">Playbooks</a><a href="#mapa">Mapa de Tarvia</a>
+    <a href="#descartado">Lo descartado</a><a href="#directo">Analizar en directo</a><a href="#chat">Pregúntale a VIGÍA</a>
+  </nav>
+  <div class="derecha">
+    <span id="demo" class="chip" hidden>MODO DEMO</span>
+    <label>Rol <select id="rol"><option>N1</option><option selected>N2</option><option>Responsable</option></select></label>
+  </div>
+</header>
+<main id="vista"></main>
+<script src="componentes.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

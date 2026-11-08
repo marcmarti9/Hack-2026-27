@@ -70,16 +70,17 @@ Vigía enseña casos ya investigados y decisiones, no listas de alertas.
 - Evitar: tablas largas de alertas como pantalla principal, JSON a la vista, mapas de calor, gráficos de tarta y efectos "hacker".
 - Prueba de los 5 segundos: si alguien dice "son alertas", hay que rehacer la pantalla. Si dice "ya está resuelto y me pide decidir", está bien.
 
-## 6. Prototipo web con Claude (fuera de este repositorio)
+## 6. Prototipo web con Claude (`apps/web/`)
 
-Marc tiene en local un prototipo web completo construido con la guía técnica: FastAPI en el puerto 8100, la API simulada en el 8000, agentes con `claude-sonnet-5-5` y modo demo sin API (`VIGIA_MOCK=1`).
+Prototipo web completo construido con la guía técnica: FastAPI en el puerto 8100, la API simulada en el 8000, agentes con `claude-sonnet-5-5` y modo demo sin API (`VIGIA_MOCK=1`). Instrucciones en [apps/web/README.md](../apps/web/README.md).
 
 - Pasa 13 de 13 comprobaciones (`scripts/test_todo.py`) con las cifras de la sección 2.
 - Los 17 tickets y los 13 informes N2 que genera en modo demo cumplen los schemas de Deloitte.
 - La aprobación con token funciona contra la API simulada.
-- Añade un reloj RGPD con las horas ganadas: por ejemplo, 27,5 h en el túnel de WMS01.
-
-Puede servir como referencia o subirse como rama si el equipo lo decide.
+- Línea de tiempo interactiva por fases, "Lo descartado" con el motivo de cada regla y los 10 runbooks oficiales como playbooks visuales aplicados a cada caso.
+- "Analizar en directo": se pegan alertas en JSON y se ve al agente investigar paso a paso; cada caso se puede reinvestigar en vivo.
+- Paleta corporativa verde sobre negro como guiño a Deloitte, sin logotipos ajenos.
+- Falta probarlo con una clave real de Anthropic (`.env`, nunca en Git).
 
 ## 7. Pendiente para ganar, por prioridad
 
