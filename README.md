@@ -1,5 +1,7 @@
 # Vigía
 
+web: https://marcs-and-co.vercel.app/
+
 **Triaje de alertas para el SOC de Tarvia.** Vigía investiga alertas del SIEM, cruza los registros con el inventario y los cambios autorizados, y guarda un expediente por alerta. Cierra los casos que cumplen criterios verificables y escala los que requieren una decisión humana.
 
 [Guía de uso](docs/guia-web.md) · [Arquitectura](docs/arquitectura-vigia.md) · [Defensa en tres minutos](docs/defensa-web.md) · [Página para el comité](docs/comite-tarvia.md)
