@@ -7,7 +7,7 @@ RAIZ=$(pwd); export PYTHONUTF8=1
 PY=$RAIZ/.venv/bin/python
 $PY -m pip install --quiet --upgrade pip && $PY -m pip install --quiet -r requirements.txt
 [ -f .env ] || cp .env.example .env
-if [[ " $* " == *" --demo "* ]] || ! grep -qE '^ANTHROPIC_API_KEY=sk-ant-[^.]' .env; then
+if [[ " $* " == *" --demo "* ]] || ! grep -qE '^(OPENAI_API_KEY=sk-|ANTHROPIC_API_KEY=sk-ant-)[^.]' .env; then
   export VIGIA_MOCK=1; echo "MODO DEMO: agentes simulados."
 else export VIGIA_MOCK=0; fi
 [ -d data/dataset/04_logs ] || { echo "Falta el dataset en data/dataset"; exit 1; }

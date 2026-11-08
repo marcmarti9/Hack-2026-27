@@ -1,7 +1,7 @@
-"""Fiscal: otra llamada a Claude que intenta refutar el ticket con los mismos datos."""
+"""Fiscal: otra llamada a la IA (otro modelo con OpenAI) que intenta refutar el ticket con los mismos datos."""
 import json
 from apps.backend.agents import llm
-from apps.backend.config import DATA, MODEL_AGENT, llm_client
+from apps.backend.config import DATA, MODEL_REVIEW, llm_client
 from apps.backend.tools import db
 
 client = llm_client()
@@ -31,7 +31,7 @@ PRUEBAS CITADAS: {json.dumps(pruebas, ensure_ascii=False, default=str)[:20000]}
 Responde llamando a submit_review."""
     msgs = [{"role": "user", "content": prompt}]
     for _ in range(3):
-        r = llm.crear(client, model=MODEL_AGENT, max_tokens=1500, tools=[REVIEW], tool_choice={"type": "auto"}, messages=msgs)
+        r = llm.crear(client, model=MODEL_REVIEW, max_tokens=1500, tools=[REVIEW], tool_choice={"type": "auto"}, messages=msgs)
         rev = next((dict(b.input) for b in r.content if b.type == "tool_use" and b.name == "submit_review"), None)
         if rev:
             return rev
