@@ -151,7 +151,8 @@ def main():
     benign = db.get_alert("ALR-20261005-000279")
     fast = investigate(benign, triage=True, remote=True)
     assert fast["routing"]["automatic"] and fast["provider"] == "Reglas locales"
-    assert not investigate({**benign, "external": True}, triage=True)["routing"]["automatic"]
+    assert investigate({**benign, "alert_id": "ALR-20261005-990986", "external": True},
+                       triage=True)["routing"]["automatic"]
     iban = investigate(db.get_alert("ALR-20261008-011789"), triage=True)
     assert iban["severity"] == "critical" and "Tesorería" in iban["routing"]["recipients"]
     assert not iban["routing"]["automatic"]

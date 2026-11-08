@@ -9,6 +9,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from apps.backend.config import DATA, ROOT
+from apps.backend.tools import db
 
 
 def main():
@@ -27,7 +28,13 @@ def main():
         unknown = {**corroborated, "alert_id": "ALR-20261201-990981", "created_at": "2026-12-01T00:00:00Z",
                    "severity": "critical", "related_events": ["EDR-0999999"], "entities": {},
                    "evidence": {"action": "detected", "details": {"target": "lsass.exe"}}}
-        body = "\n".join(json.dumps(row) for row in (corroborated, unknown))
+        routine = {**db.get_alert("ALR-20261005-000279"), "alert_id": "ALR-20261005-990982"}
+        blocked = {**db.get_alert("ALR-20261005-000173"), "alert_id": "ALR-20261005-990983"}
+        missing = {**routine, "alert_id": "ALR-20261005-990984",
+                   "related_events": [*routine["related_events"], "EML-0999999"]}
+        mismatched = {**routine, "alert_id": "ALR-20261005-990987",
+                      "evidence": {**routine["evidence"], "message_id": "<different@retailforum.example>"}}
+        body = "\n".join(json.dumps(row) for row in (corroborated, unknown, routine, blocked, missing, mismatched))
         with TestClient(app) as client:
             assert client.get("/api/directo").json() == {"alertas": [], "trabajo": None}
             bad = client.post("/api/analizar", json={"texto": body + "\n{incorrecto}", "modo": "guardia"})
@@ -36,14 +43,14 @@ def main():
             valid = client.post("/api/analizar", json={"texto": body, "modo": "guardia", "archivo": "alertas_nuevas.jsonl"})
             assert valid.status_code == 200, valid.json()
             job_id = valid.json()["trabajo"]
-            assert len(client.get("/api/directo").json()["alertas"]) == 2
+            assert len(client.get("/api/directo").json()["alertas"]) == 6
             until = monotonic() + 25
             while monotonic() < until:
                 job = client.get(f"/api/trabajo/{job_id}").json()
                 if job["fin"]:
                     break
                 sleep(0.08)
-            assert job["estado"] == "terminado" and len(job["tickets"]) == 2, job["error"]
+            assert job["estado"] == "terminado" and len(job["tickets"]) == 6, job["error"]
             rows = {row["alert_id"]: row for row in client.get("/api/directo").json()["alertas"]}
             first, second = rows[corroborated["alert_id"]], rows[unknown["alert_id"]]
             assert first["verdict"] == "true_positive" and first["estado"] == "escalada"
@@ -52,6 +59,16 @@ def main():
             report = client.get(f"/api/tickets/{second['ticket_id']}").json()["expediente"]
             assert report["declared_evidence"] == unknown["evidence"] and not report["evidence"]
             assert not report["routing"]["automatic"]
+            for alert, verdict in ((routine, "false_positive"), (blocked, "true_positive")):
+                closed = rows[alert["alert_id"]]
+                assert closed["estado"] == "cerrada" and closed["verdict"] == verdict
+                assert not closed["asignado"] and closed["motivo_cierre"]
+                report = client.get(f"/api/tickets/{closed['ticket_id']}").json()["expediente"]
+                assert report["routing"]["automatic"] and not report["executed_actions"]
+                history = defensa.reviews.history(alert["alert_id"])
+                assert history[0]["kind"] == "Cierre automático"
+                assert history[0]["data"]["citations"] == alert["related_events"]
+            assert all(rows[alert["alert_id"]]["estado"] != "cerrada" for alert in (missing, mismatched))
             assign = f"/api/directo/{first['alert_id']}/asignacion"
             assert client.put(assign, json={"rol": "N2", "asignarme": True}).json()["asignado"] == "analista.n2"
             assert client.put(assign, json={"rol": "N1", "asignarme": True}).status_code == 409
@@ -89,7 +106,16 @@ def main():
             assert analysis["verdict"] == "needs_more_info" and analysis["confidence"] is None
             assert analysis["routing"]["recommendation"] == "escalate"
 
-    print("Mesa web: formato oficial, lote nuevo, informe, escalado, asignación, persistencia y contraste sin red.")
+        agreement = {**result, "verdict": "false_positive", "summary": "Reporte del ejercicio sin entrega real.",
+                     "citations": routine["related_events"]}
+        with patch("apps.desktop.review.openai_message", return_value=json.dumps(agreement)) as request:
+            analysis = investigate(_external(routine), remote=True, triage=True)
+            assert request.call_count == 2 and analysis["routing"]["automatic"]
+        with patch("apps.desktop.review.openai_message", side_effect=[json.dumps(agreement), json.dumps(result)]):
+            analysis = investigate(_external(routine), remote=True, triage=True)
+            assert analysis["review_error"] and not analysis["routing"]["automatic"]
+
+    print("Mesa web: lote nuevo, autocierre auditado, escalado, asignación, persistencia y contraste sin red.")
 
 
 if __name__ == "__main__":

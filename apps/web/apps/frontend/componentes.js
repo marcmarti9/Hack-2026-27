@@ -88,39 +88,121 @@ async function mostrarEvento(id, destino) {
 function expedienteHTML(t) {
   const informe = t.expediente;
   if (!informe) return '';
-  const ruta = t.routing || informe.routing || {}, crit = informe.criterio_verificado || {}, propuesta = informe.propuesta || {}, contraste = informe.contraste || {};
+  const ruta = t.routing || informe.routing || {};
+  const crit = informe.criterio_verificado || {};
+  const propuesta = informe.propuesta || {};
+  const contraste = informe.contraste || {};
   const errores = t.provider_errors || informe.provider_errors || {};
   const consultas = informe.consultas || [];
-  const mostrar = (titulo, dato) => dato && Object.keys(dato).length
-    ? `<details><summary>${titulo}</summary>${registroHTML(dato)}</details>` : '';
-  const escalar = ruta.recommendation === 'escalate';
-  return `<div class="dos"><div class="tarjeta"><h3>Resultado de la investigación</h3>
-    <p class="${escalar ? 'warn' : 'sub'}"><b>${esc(disposicion(ruta.recommendation) || 'Revisión pendiente')}</b>${ruta.reason ? ` · ${esc(ruta.reason)}` : ''}</p>
-    ${ruta.recipients?.length ? `<p class="sub"><b>Responsables</b> · ${esc(ruta.recipients.join(' · '))}</p>` : ''}
-    ${ruta.deadline_at ? `<p class="sub"><b>Plazo</b> · ${esc(hora(ruta.deadline_at))}</p>` : ''}
-    <p class="sub">${esc(informe.confidence_basis)}${informe.timing_ms != null ? ` · ${esc(informe.timing_ms)} ms` : ''}</p>
-    ${crit.summary ? `<p>${esc(crit.summary)}</p>` : '<p class="sub">Sin un hallazgo verificado adicional.</p>'}
-    ${mostrar('Criterio verificado', crit)}${mostrar('Enriquecimiento del índice', informe.enrichment)}${mostrar('Vulnerabilidades', informe.vulnerabilities)}
-    ${mostrar('Entidades declaradas', informe.declared_entities)}${mostrar('Discrepancias de entidades', informe.entity_discrepancies)}
-    ${mostrar('Alertas relacionadas', informe.related_alerts)}${mostrar('Técnicas MITRE', informe.mitre)}
-    ${mostrar('Alcance del incidente N2', informe.incident?.scope)}
-    </div><div class="tarjeta"><h3>Propuesta y revisión adversarial</h3>
-    <p class="sub">Propuesta · ${esc(t.provider || informe.provider || 'Índice local')}
-      ${informe.review_provider ? ' · Revisión · ' + esc(informe.review_provider) : ''}</p>
-    ${informe.review_reason ? `<p class="sub">${esc(informe.review_reason)}</p>` : ''}
-    ${Object.keys(errores).length ? `<p class="warn">El proveedor o la revisión no pudo corroborar parte del análisis. Consulta el hallazgo local y revisa la alerta.</p>${registroHTML(errores)}` : ''}
-    ${mostrar('Propuesta registrada', propuesta)}${mostrar('Contraste registrado', contraste)}
-    ${!Object.keys(propuesta).length && !Object.keys(contraste).length ? '<p class="sub">Este expediente no tiene una propuesta de modelo registrada.</p>' : ''}
-    <h3>Consultas al índice</h3>${consultas.map(c => `<div class="paso tool"><b>${esc(c.tool)}</b> · ${esc(c.query)}${c.count != null ? ` · ${fmt(c.count)} resultados` : ''}${c.note ? `<br><small>${esc(c.note)}</small>` : ''}</div>`).join('') || '<p class="sub">Sin consultas registradas.</p>'}</div></div>`;
+  const decision = t.decision_actual || informe.decision_actual;
+  const automatica = decision?.decision === 'automatic';
+  const humana = ['accepted', 'corrected'].includes(decision?.decision);
+  const cerrada = automatica || humana;
+  const escalada = ruta.recommendation === 'escalate';
+  const tono = !automatica && escalada ? 'escalada' : cerrada ? 'cerrada' : 'pendiente';
+  const titulo = automatica ? 'Cerrada por Vigía'
+    : humana ? disposicion(decision.decision) : disposicion(ruta.recommendation) || 'Revisión pendiente';
+  const motivo = decision?.reason || ruta.reason;
+  const veredictoActual = decision?.verdict || t.verdict || informe.verdict;
+  const estimada = informe.confidence > 0 && Number.isFinite(informe.confidence);
+  const corroborado = Boolean(crit.citations?.length || crit.sandbox_refs?.length);
+  const recuperados = informe.evidence?.length || 0;
+  const preguntas = informe.open_questions || [];
+  const fuente = t.provider || informe.provider;
+  const tienePropuesta = Object.keys(propuesta).length > 0;
+  const tieneContraste = Object.keys(contraste).length > 0;
+  const tieneLimites = Object.keys(errores).length > 0;
+  const duracion = informe.timing_ms == null ? ''
+    : informe.timing_ms < 1000 ? `${fmt(informe.timing_ms)} ms`
+      : `${(informe.timing_ms / 1000).toLocaleString('es-ES', {maximumFractionDigits: 1})} s`;
+  const desplegable = (nombre, contenido) => contenido
+    ? `<details class="vigia-report-fold"><summary>${nombre}</summary><div class="vigia-report-fold-content">${contenido}</div></details>`
+    : '';
+  const registro = (nombre, dato) => desplegable(nombre, dato && Object.keys(dato).length ? registroHTML(dato) : '');
+  const etiqueta = (nombre, valor, clase = '') => valor
+    ? `<div${clase ? ` class="${clase}"` : ''}><dt>${nombre}</dt><dd>${esc(valor)}</dd></div>` : '';
+  const icono = cerrada ? '<path d="m5 12 4 4 10-10"/>'
+    : escalada ? '<path d="M12 19V5m-5 5 5-5 5 5"/>' : '<path d="M12 7v5l3 2m6-2a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/>';
+
+  return `<div class="vigia-report">
+    <section class="vigia-report-decision ${tono}">
+      <div class="vigia-report-decision-lead">
+        <span class="vigia-report-glyph" aria-hidden="true"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${icono}</svg></span>
+        <div>
+          <p class="vigia-report-label">${cerrada ? 'Decisión registrada' : 'Resultado de la investigación'}</p>
+          <h3>${esc(titulo)}</h3>
+          <p class="vigia-report-verdict">${esc(veredicto(veredictoActual))}${automatica ? '<span>Sin intervención pendiente</span>' : ''}</p>
+          ${motivo ? `<p class="vigia-report-muted">${esc(motivo)}</p>` : ''}
+          ${informe.confidence_basis ? `<p class="vigia-report-confidence-note">${esc(informe.confidence_basis)}</p>` : ''}
+        </div>
+      </div>
+      <dl class="vigia-report-meta">
+        ${etiqueta('Confianza del triaje', estimada ? `${Math.round(informe.confidence * 100)} %` : 'Sin estimación')}
+        ${etiqueta('Duración', duracion)}
+        ${etiqueta('Plazo', !automatica && hora(ruta.deadline_at))}
+        ${etiqueta('Responsables', ruta.recipients?.join(' · '), 'vigia-report-owners')}
+        ${humana ? etiqueta('Ruta de triaje', [disposicion(ruta.recommendation), ruta.reason !== motivo ? ruta.reason : ''].filter(Boolean).join(' · '), 'vigia-report-owners') : ''}
+      </dl>
+    </section>
+    <div class="vigia-report-grid">
+      <section class="vigia-report-section">
+        <h3>Hallazgos y contexto</h3>
+        <div class="vigia-report-observation">
+          <span class="vigia-report-marker ${corroborado ? 'verificado' : ''}"></span>
+          <div><strong>${corroborado ? 'Hallazgo corroborado' : 'Sin hallazgo corroborado'}</strong>
+            <p>${esc(crit.summary || (recuperados ? 'Los registros recuperados aportan contexto para seguir investigando.'
+              : 'El índice no devolvió registros para verificar esta alerta.'))}</p></div>
+        </div>
+        ${preguntas.length ? desplegable('Qué falta por comprobar', registroHTML(preguntas)) : ''}
+        ${registro('Criterio y referencias', crit)}
+        ${registro('Enriquecimiento del índice', informe.enrichment)}
+        ${registro('Vulnerabilidades', informe.vulnerabilities)}
+        ${registro('Entidades declaradas', informe.declared_entities)}
+        ${registro('Discrepancias de entidades', informe.entity_discrepancies)}
+        ${registro('Alertas relacionadas', informe.related_alerts)}
+        ${registro('Técnicas MITRE', informe.mitre)}
+        ${registro('Alcance del incidente N2', informe.incident?.scope)}
+      </section>
+      <section class="vigia-report-section">
+        <h3>Propuesta y revisión adversarial</h3>
+        <ol class="vigia-report-review">
+          <li><strong>${fuente === 'Reglas locales' ? 'Comprobación local' : 'Primera propuesta'}</strong>
+            <span>${esc(fuente || 'Sin proveedor registrado')}</span>
+            ${registro('Propuesta registrada', propuesta)}
+          </li>
+          <li><strong>${informe.review_provider ? 'Contraste del fiscal' : 'Contraste de la evidencia'}</strong>
+            <span>${esc(informe.review_provider || (tieneContraste ? 'Verificación de los registros' : 'Sin contraste registrado'))}</span>
+            ${informe.review_reason ? `<p>${esc(informe.review_reason)}</p>` : ''}
+            ${registro('Contraste registrado', contraste)}
+          </li>
+        </ol>
+        ${tieneLimites ? `<div class="vigia-report-limit"><strong>Límites de la revisión</strong>
+          ${errores.proposal ? `<p><b>Propuesta</b> · ${esc(errores.proposal)}</p>` : ''}
+          ${errores.review ? `<p><b>Contraste</b> · ${esc(errores.review)}</p>` : ''}
+          ${registro('Registro de incidencias', Object.fromEntries(Object.entries(errores).filter(([fase]) => !['proposal', 'review'].includes(fase))))}
+        </div>` : ''}
+        ${!tienePropuesta && !tieneContraste ? '<p class="vigia-report-muted">Este expediente se limita a las consultas y evidencias registradas.</p>' : ''}
+      </section>
+    </div>
+    <section class="vigia-report-section">
+      <h3>Consultas al índice <span class="vigia-report-count">${fmt(consultas.length)}</span></h3>
+      ${consultas.length ? `<ul class="vigia-report-queries">${consultas.map(c => `<li>
+        <div><strong>${esc(c.tool)}</strong><p>${esc(c.query)}</p>${c.note ? `<p>${esc(c.note)}</p>` : ''}</div>
+        ${c.count != null ? `<span>${fmt(c.count)} ${c.count === 1 ? 'resultado' : 'resultados'}</span>` : ''}
+      </li>`).join('')}</ul>` : '<p class="vigia-report-muted">Sin consultas registradas.</p>'}
+    </section>
+  </div>`;
 }
 
 function decisionHTML(t) {
   if (!t.alert_id || !t.expediente) return '';
   const decision = t.decision_actual;
   const cerrada = ['accepted', 'corrected'].includes(decision?.decision);
+  const automatica = decision?.decision === 'automatic';
   return `<div class="tarjeta"><h3>Decisión e historial</h3>
     ${decision ? `<p class="ok"><b>${esc(disposicion(decision.decision))}</b> · ${esc(veredicto(decision.verdict))}${decision.reviewer ? ` · ${esc(decision.reviewer)}` : ''}</p>${decision.reason ? `<p class="sub">${esc(decision.reason)}</p>` : ''}` : '<p class="sub">Pendiente de decisión humana.</p>'}
-    ${cerrada ? '' : `<div class="botones">${t.puede_aceptar ? '<button id="aceptar-alerta">Aceptar veredicto</button>' : ''}<button id="abrir-correccion" class="sec">Corregir veredicto</button></div>
+    ${automatica ? '<p class="sub">El cierre ya está registrado. Puedes consultar el informe o corregirlo si aparece nueva evidencia.</p>' : ''}
+    ${cerrada ? '' : `<div class="botones">${t.puede_aceptar ? '<button id="aceptar-alerta">Aceptar veredicto</button>' : ''}<button id="abrir-correccion" class="sec">${automatica ? 'Registrar una corrección' : 'Corregir veredicto'}</button></div>
       <form id="corregir-alerta" hidden><div class="botones"><label>Veredicto <select name="verdict" required><option value="">Selecciona</option>${Object.entries(VERDICTO).filter(([id]) => id !== 'needs_more_info').map(([id, texto]) => `<option value="${id}">${esc(texto)}</option>`).join('')}</select></label>
         <label>Motivo <input name="reason" type="text" required maxlength="700"></label><button>Registrar corrección</button></div></form>`}
     <p class="sub" id="estado-decision" role="status"></p>

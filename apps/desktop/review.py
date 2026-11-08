@@ -189,7 +189,7 @@ class Reviews:
                 """, (analysis["verdict"], actor, now(), alert_id))
                 self._record(connection, alert_id, "Cierre automático", actor, {
                     "verdict": analysis["verdict"], "reason": analysis["routing"]["reason"],
-                    "citations": analysis["proposal"]["citations"],
+                    "citations": analysis["verified_finding"]["citations"],
                 })
         return bool(update.rowcount)
 

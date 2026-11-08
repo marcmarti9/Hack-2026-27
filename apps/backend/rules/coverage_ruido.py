@@ -185,6 +185,16 @@ def _web(alert, analysis, direct, proof):
     if not _waf_target_matches(alert, direct):
         return proof("needs_more_info", direct, "La URL declarada no coincide con el destino y la ruta del WAF.",
                      questions=("¿Qué registro corresponde al destino indicado en el aviso?",))
+    if alert.get("external"):
+        declared = alert.get("declared_evidence") or alert.get("evidence") or {}
+        wrong_rule = "rule_id" in declared and any(
+            str(declared["rule_id"]) != str(event.get("rule_id")) for event in direct
+        )
+        wrong_action = ("action" in declared and declared["action"] != "blocked"
+                        and all(_waf_blocked(event) for event in direct))
+        if wrong_rule or wrong_action:
+            return proof("needs_more_info", direct, "Los campos declarados discrepan de la firma o el bloqueo del WAF.",
+                         questions=("¿A qué solicitud corresponde el registro declarado por el sensor?",))
     if not all(_waf_blocked(event) for event in direct):
         return None
     exact_attack = all(_waf_attack(event) for event in direct)

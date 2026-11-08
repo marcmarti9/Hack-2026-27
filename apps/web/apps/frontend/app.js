@@ -98,13 +98,14 @@ const vistas = {
     const t = await api('tickets/' + encodeURIComponent(id)), inc = t.incidente;
     const informe = t.expediente, evidencias = informe?.evidence || t.evidence || [];
     const n2 = rol() !== 'N1';
-    $('#vista').innerHTML = `<p class="sub"><a class="prueba" href="#bandeja">← Casos</a></p>
+    $('#vista').innerHTML = `<p class="sub"><a class="prueba" href="${informe && t.alert_id ? '#directo' : '#bandeja'}">← ${informe && t.alert_id ? 'Analizar en directo' : 'Casos'}</a></p>
       <h2>${esc(t.title)}</h2>
       <div class="meta" style="margin:6px 0 18px">${sev(t.severity)} <span>${esc(veredicto(t.verdict))}</span> <span>· ${confianza(t.confidence)}</span>
         <span>· ${t.alert_ids?.length || 1} alerta(s)</span> ${t.alert_id ? `<span class="mono">· ${esc(t.alert_id)}</span>` : ''} ${t.out_of_hours ? '<span>· empezó con el SOC cerrado</span>' : ''}
         <span>· escalado: ${esc(t.escalation?.escalate ? t.escalation.to : 'no')}</span></div>
       ${t.manipulation_detected?.detected ? `<div class="aviso"><b>El atacante intentó engañar a la IA.</b> ${esc(t.manipulation_detected.where)}<br>
         <small>VIGÍA lo trata como una prueba más contra el atacante.</small></div>` : ''}
+      ${expedienteHTML(t)}
       <div class="dos">
         <div class="tarjeta"><h3>Qué ha pasado</h3><p>${esc(t.summary)}</p>
           <p class="sub" style="margin:0"><small>Severidad: ${esc(t.severity_rationale)}</small></p></div>
@@ -115,18 +116,18 @@ const vistas = {
         ${informe.timeline.map(p => `<div class="paso"><b>${esc(hora(p.timestamp))}</b> · ${esc(p.source || p.stage)}${p.event_id ? ` · <button class="sec prueba mono" data-ev="${esc(p.event_id)}">${esc(p.event_id)}</button>` : ''}<br>${esc(p.finding)}</div>`).join('')}</div>` : '')}
       ${inc ? `<div class="aviso info"><b>A quién avisar (informe N2):</b> ${esc((inc.notifications || []).join(' · '))}</div>` : ''}
       ${(t.playbooks || []).length ? `<h3 class="seccion">Playbook aplicado <small class="suave">· lo que dice el procedimiento del SOC y lo que ya ha hecho VIGÍA</small></h3>${playbooksCasoHTML(t.playbooks, t.ticket_id)}` : ''}
-      ${expedienteHTML(t)}
       <div class="dos">
         <div class="tarjeta">${informe ? '' : `<h3>Cómo lo investigó VIGÍA</h3>${(t.trace || []).map(p => p.tipo === 'herramienta'
           ? `<div class="paso tool"><b>${esc(pasoTxt(p))}</b> <span class="mono suave">${esc(p.nombre)}</span></div>`
           : `<div class="paso">${esc(p.texto)}</div>`).join('')}`}
           <h3>Pruebas</h3>${evidencias.map(e => `<div class="paso"><button class="sec prueba mono" data-ev="${esc(e.event_id)}">${esc(e.event_id)}</button>
             · ${esc(e.source)}${e.relation ? ` · ${esc(e.relation)}${e.cited ? ' · citada' : ' · sin citar'}` : ''}<br><small>${esc(e.finding)}</small></div>`).join('') || '<p class="sub">Sin pruebas recuperadas.</p>'}
-          <div id="evento" class="raw" hidden></div></div>
+          <div id="evento" class="raw" hidden></div>
+          ${informe?.declared_evidence && Object.keys(informe.declared_evidence).length ? `<details><summary>Evidencia declarada por el sensor</summary>${registroHTML(informe.declared_evidence)}</details>` : ''}</div>
         <div>
-          <div class="tarjeta">${informe ? '' : `<h3>La IA revisora (fiscal)</h3>${t.fiscal ? `<p class="${t.fiscal.agrees ? 'ok' : 'warn'}">${t.fiscal.agrees ? '✓ No ha podido tumbar el veredicto.' : '⚠ Tiene objeciones: decide el humano.'}</p>
-            ${(t.fiscal.objections || []).map(o => `<div class="paso">${esc(o)}</div>`).join('')}<p class="sub"><small>${esc(t.fiscal.comment)}</small></p>` : '<p class="sub">Sin revisión registrada.</p>'}`}
-            ${(t.open_questions || []).length ? `<h3>Lo que VIGÍA no sabe</h3>${t.open_questions.map(q => `<div class="paso">${esc(q)}</div>`).join('')}` : ''}</div>
+          ${informe ? '' : `<div class="tarjeta"><h3>La IA revisora (fiscal)</h3>${t.fiscal ? `<p class="${t.fiscal.agrees ? 'ok' : 'warn'}">${t.fiscal.agrees ? '✓ No ha podido tumbar el veredicto.' : '⚠ Tiene objeciones: decide el humano.'}</p>
+            ${(t.fiscal.objections || []).map(o => `<div class="paso">${esc(o)}</div>`).join('')}<p class="sub"><small>${esc(t.fiscal.comment)}</small></p>` : '<p class="sub">Sin revisión registrada.</p>'}
+            ${(t.open_questions || []).length ? `<h3>Lo que VIGÍA no sabe</h3>${t.open_questions.map(q => `<div class="paso">${esc(q)}</div>`).join('')}` : ''}</div>`}
           <div class="tarjeta"><h3>Acciones propuestas</h3><p class="sub"><small>Estás como <b>${esc(rol())}</b>.</small></p>
             <table>${(t.recommended_actions || []).map((a, i) => {
               return `<tr><td><b>${esc(ACCION[a.action] || a.action)}</b> <span class="mono">${esc(a.target)}</span><br><small class="sub">${esc(a.justification)}</small></td>
@@ -263,7 +264,18 @@ function grafo(t) {
 
 async function ruta() {
   const [v, raw, prefill] = (location.hash.slice(1) || 'panel').split('/');
-  document.querySelectorAll('nav a').forEach(a => a.classList.toggle('activo', a.getAttribute('href') === '#' + (v === 'caso' ? 'bandeja' : v)));
+  document.querySelectorAll('nav a').forEach(a => {
+    const current = a.getAttribute('href') === '#' + (v === 'caso' ? 'bandeja' : v);
+    a.classList.toggle('activo', current);
+    if (current) {
+      a.setAttribute('aria-current', 'page');
+      if (a.parentElement.scrollWidth > a.parentElement.clientWidth) {
+        a.scrollIntoView({block: 'nearest', inline: 'nearest'});
+      }
+    } else {
+      a.removeAttribute('aria-current');
+    }
+  });
   try {
     if (v === 'directo' && raw === 'nueva') await vistaMesaDirecto(undefined, decodeURIComponent(prefill || ''));
     else await (vistas[v] || vistas.panel)(raw && decodeURIComponent(raw));

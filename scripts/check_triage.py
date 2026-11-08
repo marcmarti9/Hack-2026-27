@@ -20,8 +20,16 @@ def main():
     assert local_finding(routine, closure) is None
     closure_event["command_line"] = closure_event["command_line"].removesuffix(" & otra-orden")
 
-    external = investigate({**routine, "external": True}, triage=True)
-    assert not external["routing"]["automatic"]
+    external = {**routine, "alert_id": "ALR-20261005-990985", "external": True}
+    assert investigate(external, triage=True)["routing"]["automatic"]
+    for unsafe in (
+        {**external, "severity": "high"},
+        {**external, "created_at": "2026-10-06T08:00:00Z"},
+        {**external, "related_events": [*routine["related_events"], "EDR-0999999"]},
+        {**external, "entities": {**routine["entities"],
+                                 "hosts": [{**routine["entities"]["hosts"][0], "ip": "192.0.2.99"}]}},
+    ):
+        assert not investigate(unsafe, triage=True)["routing"]["automatic"]
     with TemporaryDirectory() as directory:
         store = Reviews(Path(directory))
         for _ in range(2):

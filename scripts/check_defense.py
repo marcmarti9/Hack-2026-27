@@ -98,7 +98,7 @@ def main():
         ticket, = run_cli(path)
         assert ticket["external"] is True and ticket["alert_ids"] == [external_id]
         assert ticket["mitre"] == ["T1059.001"]
-        assert ticket["routing"]["mode"] == "guardia" and not ticket["routing"]["automatic"]
+        assert ticket["routing"]["mode"] == "guardia" and ticket["routing"]["automatic"]
         write_batch(path, [{**external, "mitre": {"technique_id": "T1059.001 extra"}}])
         assert "mitre" not in defense.load_alerts(path)[0]
         verify_incident_membership(path)
@@ -154,7 +154,7 @@ def main():
     print(f"Guardia: {outcomes}; {sum(row['escalation']['escalate'] for row in tickets)} escalados; "
           f"{sum(row['timing_ms'] for row in tickets)} ms acumulados de triaje oficial; "
           f"{ticket['timing_ms']} ms para el externo.")
-    print("Validación: canónico intacto, externo no automático, IDs ausentes/repetidos y entradas inválidas rechazados.")
+    print("Validación: canónico intacto, externo corroborado, IDs ausentes/repetidos y entradas inválidas rechazados.")
     print("Incidente: membresía externa compartida con una fila por alerta, en ambos turnos.")
 
 

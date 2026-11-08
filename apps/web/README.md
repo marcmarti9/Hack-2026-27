@@ -23,7 +23,7 @@ Para activar OpenAI, añade `OPENAI_API_KEY` al `.env` local de la raíz antes d
 
 1. En **Analizar en directo**, carga un archivo JSONL de hasta 150 alertas y 1 MB. Usa el mismo formato que `03_alertas/alertas.jsonl` del reto, con un objeto por línea y un identificador único para cada alerta nueva.
 2. Selecciona el turno y pulsa **Analizar alertas**. Si activas el contraste con OpenAI, verás cuándo se hacen la propuesta y la revisión. La mesa conserva los resultados, las asignaciones y las decisiones.
-3. Despliega una fila para consultar su informe. La evidencia declarada procede del archivo del SIEM. La evidencia recuperada se puede comprobar en el índice mediante las citas. Cuando falta corroboración suficiente, Vigía deja el resultado pendiente de verificación. Los casos críticos se escalan según la política del SOC.
+3. Despliega una fila para consultar su informe. **Cerrada por Vigía** indica que el cierre ya está registrado y solo queda consultar el informe. Los perfiles de bajo riesgo habilitados para archivos nuevos son inventario SCCM autorizado, correo informativo identificado y solicitudes WAF cuya resolución queda verificada. Se exige corroborar todas las referencias directas. Si pediste contraste con OpenAI, se exige acuerdo validado con esas pruebas y confianza de al menos 80 %. Las críticas se escalan según la política del SOC. El autocierre registra la decisión, el criterio y sus citas.
 
 Para ensayar antes de recibir el archivo del jurado, carga el [lote de ensayo](../../eval/lote-presentacion-091.jsonl) o pulsa **Alerta nueva de ensayo** para usar una entrada sintética que referencia un registro de Tarvia.
 

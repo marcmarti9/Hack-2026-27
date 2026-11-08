@@ -13,6 +13,11 @@ SCCM_SCRIPT = ("$inv = Get-CimInstance Win32_Product | Select Name,Version | Con
 WINDOWS_POWERSHELL = r"c:\windows\system32\windowspowershell\v1.0\powershell.exe"
 SCCM_COMMAND = ("powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand "
                 + b64encode("$inv = Get-CimInstance Win32_Product".encode("utf-16-le")).decode("ascii"))
+EXTERNAL_ROUTINE_RULES = {
+    ("UC-EDR-002", "EDR", "RB-02"),
+    ("UC-EML-001", "EMAIL_GW", "RB-01"),
+    ("UC-WEB-001", "WAF", "RB-05"),
+}
 
 
 def _proof(verdict, events, summary, *, actions=(), questions=(), basis=""):
@@ -133,6 +138,18 @@ def _sccm_match(alert, direct, context, hosts):
         return None
     event = direct[0]
     details = event.get("details") or {}
+    if alert.get("external"):
+        asset_ips = {row["hostname"].lower(): row["ip"] for row in context["activos"]}
+        if hosts != {event.get("hostname", "").lower()} or any(
+            host.get("ip") and host["ip"] != asset_ips.get(host.get("hostname", "").lower())
+            for host in alert["entities"].get("hosts", [])
+        ):
+            return None
+        process_fields = (("name", "process_name"), ("parent", "parent_name"), ("command_line", "command_line"))
+        if any(str(process[key]).lower() != str(event.get(field, "")).lower()
+               for process in alert["entities"].get("processes", [])
+               for key, field in process_fields if key in process):
+            return None
     if (_same_host(event, hosts) and event["source"] == "edr_events" and event.get("event_type") == "process_start"
             and event.get("process_path", "").lower() == WINDOWS_POWERSHELL
             and event.get("parent_name", "").lower() == "ccmexec.exe"
@@ -275,6 +292,21 @@ def route(alert, analysis, mode, finding):
     analysis.update(severity=severity, severity_rationale=priority.rationale, sla=priority.sla)
     local = (analysis["provider"] == "Reglas locales" and not alert.get("external")
              and alert["severity"] != "critical")
+    current_refs = set(analysis["requested"]) - set(analysis.get("context_event_ids", []))
+    # A pasted alert cannot grant itself permission. Every reference must be
+    # current and covered by the deterministic finding before it can close.
+    external_routine = (
+        alert.get("external") and matched and severity in {"informational", "low"}
+        and (alert["rule_id"], alert.get("source_product"), alert.get("runbook")) in EXTERNAL_ROUTINE_RULES
+        and (alert["rule_id"] != "UC-WEB-001" or alert["entities"].get("urls"))
+        and alert["severity"] in {"informational", "low", "medium"}
+        and initial_severity in {"informational", "low", "medium"}
+        and current_refs and current_refs == set(analysis["requested"])
+        and current_refs <= set(finding["citations"])
+        and not missing_references(analysis)
+        and not any(asset["zone"] == "LOGISTICS-OT" for asset in analysis["context"]["activos"])
+        and (analysis["provider"] == "Reglas locales" or (analysis["confidence"] or 0) >= 80)
+    )
     result = {"mode": mode, "recommendation": "review", "recipients": [], "automatic": False,
               "reason": "Revisión pendiente. Hace falta evidencia suficiente o una decisión humana."}
     if critical:
@@ -290,14 +322,14 @@ def route(alert, analysis, mode, finding):
         result.update(recommendation="close", reason=finding.get("basis") or finding["summary"])
         old_rule = (alert["rule_id"] == "UC-EDR-002"
                     and alert["severity"] in {"informational", "low", "medium"} and initial_severity != "high")
-        result["automatic"] = local and bool(finding.get("auto_close") or old_rule)
+        result["automatic"] = bool((local or external_routine) and (finding.get("auto_close") or old_rule))
     elif (matched and verdict == "true_positive" and finding.get("resolved")
           and finding.get("verified_prevention") and severity in {"informational", "low"}):
-        result.update(recommendation="close", automatic=local, reason=finding["verified_prevention"])
+        result.update(recommendation="close", automatic=bool(local or external_routine),
+                      reason=finding["verified_prevention"])
     if result["recommendation"] == "close" and missing_references(analysis):
         result.update(recommendation="review", automatic=False,
                       reason="Faltan referencias directas. Revisar la cobertura antes de cerrar.")
-    current_refs = set(analysis["requested"]) - set(analysis.get("context_event_ids", []))
     assets = analysis["context"]["activos"]
     if alert.get("external") and matched and finding.get("citations"):
         checked = set(finding["citations"])

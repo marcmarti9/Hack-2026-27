@@ -94,6 +94,12 @@ def _known_mail(alert, message, analysis):
         url.scheme, url.netloc, url.query, url.fragment
     ) != ("https", domain, "", "") or not re.fullmatch(r"/[cl]/[0-9a-f]{6}", url.path):
         return False
+    if alert.get("external"):
+        declared = alert.get("declared_evidence") or alert.get("evidence") or {}
+        if (declared.get("message_id") != message["message_id"]
+                or {entry.lower() for entry in alert["entities"].get("domains", [])} != {domain}
+                or any(key in declared and declared[key] != message.get(key) for key in ("sender", "subject"))):
+            return False
     if _suspicious(analysis, domain, message.get("sender_ip")):
         return False
     clicks = db.events_for_entity(message["message_id"], source="email_clicks", limit=4)

@@ -9,7 +9,36 @@ header { display:flex; align-items:center; gap:24px; padding:12px 24px; border-b
 .marca small { font-weight:400; font-size:12px; color:var(--suave); letter-spacing:0; margin-left:6px; } .ojo { color:var(--marca); }
 nav { display:flex; gap:18px; flex-wrap:wrap; flex:1; } nav a { color:var(--suave); text-decoration:none; } nav a:hover, nav a.activo { color:var(--texto); }
 nav a.activo { box-shadow:0 2px 0 var(--marca); }
+body > header nav a { transition: color 150ms ease, box-shadow 150ms ease; }
+body > header nav a:focus-visible {
+  outline: 2px solid #a4cdb6;
+  outline-offset: 3px;
+  border-radius: 2px;
+}
 .derecha { display:flex; gap:12px; align-items:center; color:var(--suave); font-size:13px; }
+@media (max-width: 1100px) {
+  body > header {
+    gap: 8px 12px;
+    padding: 10px 16px;
+    justify-content: space-between;
+  }
+  body > header nav {
+    order: 3;
+    flex: 0 0 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding: 4px;
+    scrollbar-width: thin;
+  }
+  body > header nav a { flex: none; white-space: nowrap; }
+}
+@media (max-width: 600px) {
+  body > header .marca small { display: none; }
+  body > header .derecha { flex-wrap: wrap; gap: 6px 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  body > header nav a { transition: none; }
+}
 select { background:var(--panel); color:var(--texto); border:1px solid var(--borde); border-radius:6px; padding:4px 8px; }
 .chip { border:1px solid var(--naranja); color:var(--naranja); border-radius:999px; padding:2px 10px; font-size:11px; font-weight:700; }
 main { padding:28px 24px 60px; max-width:1240px; margin:0 auto; }
