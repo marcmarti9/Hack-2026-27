@@ -140,6 +140,11 @@ def load_alerts(path: Path) -> list[dict]:
         raise ValueError("Selecciona un archivo JSONL.")
     with path.open("rb") as stream:
         payload = stream.read(MAX_BYTES + 1)
+    return parse_alerts(payload)
+
+
+def parse_alerts(payload: bytes) -> list[dict]:
+    """Comparte la validación del lote entre archivos y la entrada web."""
     if len(payload) > MAX_BYTES:
         raise ValueError("El lote supera 1 MB.")
     try:

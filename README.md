@@ -4,11 +4,11 @@
 
 [Revisión adversarial y matriz de requisitos](docs/revision-adversarial.md) · [Una página para el comité de Tarvia](docs/comite-tarvia.md)
 
-Vigía es una aplicación de escritorio en español. El flujo empieza con el inicio de sesión, muestra el estado de carga y abre la mesa de trabajo con alertas, expedientes y chat.
+La entrega de presentación de Vigía es una web. El panel reúne el parte de guardia, los casos, la cronología, los playbooks y el análisis en directo con OpenAI. El escritorio comparte el motor de triaje. [Arranque web y Docker](apps/web/README.md) · [Guion del jurado](docs/defensa-web.md)
 
 Tarvia es una empresa ficticia. Su SOC necesita investigar alertas y mantener cobertura fuera de horario. Vigía prepara evidencias, un veredicto, una prioridad y una recomendación para el analista. [Enunciado, datos y presentación de Deloitte](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/5d7569232756eaf0a8723b22c428b70e8f67824f)
 
-## Instalar Vigía
+## Instalar Vigía escritorio
 
 [Descargar los instaladores verificados de Vigía 0.9.1](https://github.com/marcmarti9/Hack-2026-27/actions/runs/42433308471)
 

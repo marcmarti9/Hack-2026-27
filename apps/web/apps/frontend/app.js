@@ -1,12 +1,20 @@
 // VIGÍA · web de la demo. Vistas por hash: #panel, #bandeja, #caso/<id>, #playbooks[/RB-xx], #mapa, #descartado, #chat
 const $ = s => document.querySelector(s);
 const api = p => fetch('/api/' + p).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
-const post = (p, body) => fetch('/api/' + p, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
-const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
-const sev = s => `<span class="sev ${s}">${s}</span>`;
+const post = (p, body, method = 'POST') => fetch('/api/' + p, {method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const severidades = {critical: 'Crítica', high: 'Alta', medium: 'Media', low: 'Baja', informational: 'Informativa'};
+const sev = s => `<span class="sev ${esc(s)}">${esc(severidades[s] || s || 'Sin evaluar')}</span>`;
+const enlace = (vista, id) => `#${vista}/${encodeURIComponent(id)}`;
 const fmt = n => Number(n || 0).toLocaleString('de-DE');   // 3.386 (es-ES no agrupa 4 cifras)
 const hora = iso => iso ? new Date(iso).toLocaleString('es-ES', {timeZone: 'Europe/Madrid', weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'}) : '';
-const VERDICTO = {true_positive: 'Ataque real', benign_true_positive: 'Actividad autorizada', false_positive: 'Falsa alarma', needs_more_info: 'Falta información'};
+const VERDICTO = {true_positive: 'Ataque real', benign_true_positive: 'Actividad autorizada', false_positive: 'Falso positivo',
+  false_negative: 'Falso negativo', true_negative: 'Verdadero negativo', needs_more_info: 'Falta información'};
+const veredicto = v => VERDICTO[v] || v || 'Sin veredicto';
+const confianza = n => typeof n === 'number' && Number.isFinite(n) ? `${Math.round(n * 100)} % de confianza` : 'Sin estimación de confianza';
+const disposicion = d => ({close: 'Cierre recomendado', review: 'Revisión humana', escalate: 'Escalar a N2',
+  automatic: 'Cierre automático registrado', accepted: 'Aceptada por el analista', corrected: 'Corregida por el analista'})[d] || d;
+const mensajeError = j => typeof j.detail === 'string' ? j.detail : 'Revisa los datos y vuelve a intentarlo.';
 const CONTENCIONES = ['isolate_host', 'disable_user', 'revoke_sessions', 'reset_password', 'block_ioc', 'purge_email', 'disable_access_key'];
 const ACCION = {isolate_host: 'Aislar equipo', disable_user: 'Deshabilitar cuenta', revoke_sessions: 'Revocar sesiones', reset_password: 'Forzar cambio de contraseña',
   block_ioc: 'Bloquear indicador', purge_email: 'Purgar correo', disable_access_key: 'Desactivar clave cloud', escalar_dpo: 'Escalar al DPO', escalar_operaciones: 'Escalar a Operaciones'};
@@ -26,38 +34,40 @@ function contar(el, hasta) {      // números que cuentan hacia arriba
   const paso = t => { const k = Math.min(1, (t - t0) / dur); el.textContent = fmt(Math.round(hasta * (1 - Math.pow(1 - k, 3)))); if (k < 1) requestAnimationFrame(paso); };
   requestAnimationFrame(paso);
 }
-const tarjetaCaso = t => `<div class="caso" onclick="location.hash='caso/${t.ticket_id}'">
-  <div class="meta">${sev(t.severity)} <span>${Math.round(t.confidence * 100)}% confianza</span>
+const tarjetaCaso = t => `<a class="caso" href="${enlace('caso', t.ticket_id)}" style="display:block;color:inherit;text-decoration:none">
+  <div class="meta">${sev(t.severity)} <span>${confianza(t.confidence)}</span>
     ${t.out_of_hours ? '<span>· fuera de horario</span>' : ''} ${t.manipulation_detected?.detected ? '<span class="warn">· ⚠ intento de engaño</span>' : ''}
     ${t.human_review ? '<span class="warn">· revisar</span>' : ''}</div>
-  <div class="t">${esc(t.title)}</div><p>${esc(VERDICTO[t.verdict])} · ${t.alert_ids.length} alerta(s) · desde ${esc(hora(t.primera))}</p></div>`;
+  <div class="t">${esc(t.title)}</div><p>${esc(veredicto(t.verdict))}${t.alert_id ? ` · ${esc(t.alert_id)}` : ''}
+    ${t.alert_ids?.length ? ` · ${t.alert_ids.length} alerta(s)` : ''}${t.primera ? ` · desde ${esc(hora(t.primera))}` : ''}</p>
+    ${t.disposition ? `<p>${esc(disposicion(t.disposition))}</p>` : ''}${t.triage_seconds != null ? `<small class="sub">${esc(t.triage_seconds)} s</small>` : ''}</a>`;
 
 const vistas = {
   async panel() {
     const [r, ts, rg] = await Promise.all([api('resumen'), api('tickets'), api('rgpd')]);
-    const reales = ts.filter(t => t.verdict === 'true_positive');
-    const graves = reales.filter(t => ['critical', 'high'].includes(t.severity));
-    const noche = graves.filter(t => t.out_of_hours).length;
+    const graves = ts.filter(t => t.escalation?.escalate && ['critical', 'high'].includes(t.severity));
     $('#vista').innerHTML = `<h2>Parte de guardia</h2><p class="sub">Del 5 de octubre al 1 de noviembre de 2026 · SOC de Tarvia</p>
-      <div class="tarjeta parte">He revisado <b>${fmt(r.alertas)} alertas</b>. <b>${fmt(r.cerradas_por_reglas)}</b> eran ruido o actividad autorizada y las he cerrado con su motivo.
-        He investigado las <b>${fmt(r.al_agente)}</b> restantes y las he agrupado en <b>${fmt(r.grupos)} casos</b>: ${reales.length} son ataques reales,
-        <b>${graves.length} graves</b>, y ${noche} de ellos empezaron con el SOC cerrado. He detectado <b>${r.manipulaciones} intentos de engañar a la IA</b>
-        y ${r.hallazgos_caza} actividades sospechosas que no generaron ninguna alerta. <b>Necesitas decidir en ${graves.length} casos.</b></div>
+      <div class="tarjeta parte">El SIEM de Tarvia registró <b>${fmt(r.alertas)} alertas</b>.
+        ${r.corpus_completo ? 'El barrido local cubrió el dataset oficial.' : 'Las cifras de análisis corresponden a esta sesión.'}
+        Hay <b>${fmt(r.investigadas)} expedientes</b>, <b>${fmt(r.escaladas)} escalados</b> y
+        <b>${fmt(r.abstenciones)} alertas sin evidencia suficiente para un veredicto</b>.
+        Se han registrado ${fmt(r.cierres_ejecutados)} cierres automáticos en esta mesa.
+        <p><a class="prueba" href="#presentar">Recorrido para el jurado →</a> · <a class="prueba" href="#relevo">Relevo de guardia →</a></p></div>
       <div class="embudo">
         <div class="paso-e"><b data-n="${r.alertas}">0</b><small>alertas del SIEM</small></div>
-        <div class="paso-e"><b data-n="${r.cerradas_por_reglas}">0</b><small>cerradas con su explicación</small></div>
-        <div class="paso-e"><b data-n="${r.al_agente}">0</b><small>investigadas por la IA</small></div>
-        <div class="paso-e final"><b data-n="${r.grupos}">0</b><small>casos para el humano</small></div>
+        <div class="paso-e"><b data-n="${r.cerradas_por_reglas}">0</b><small>cierres elegibles en el barrido</small></div>
+        <div class="paso-e"><b data-n="${r.investigadas}">0</b><small>expedientes generados</small></div>
+        <div class="paso-e final"><b data-n="${r.escaladas}">0</b><small>alertas con escalado propuesto</small></div>
       </div>
       <h3>Los casos más graves</h3><div class="casos3">${graves.slice(0, 6).map(tarjetaCaso).join('') || '<p>Sin casos todavía: ejecuta el orquestador.</p>'}</div>
       <div class="dos" style="margin-top:16px">
-        <div class="tarjeta"><h3>Reloj RGPD · 72 h para notificar a la AEPD</h3>${rg.map(x => `<div class="reloj">
-          <div><b>${esc(x.title)}</b><br><small>Empieza ${esc(hora(x.inicio))} · límite ${esc(hora(x.limite))}<br>VIGÍA lo detectó en segundos.
-          ${x.horas_sin_vigia > 0 ? `Sin VIGÍA, el SOC lo habría visto el ${esc(x.apertura_soc)}, perdiendo ${x.horas_sin_vigia} h del plazo.` : 'Ocurrió con el SOC abierto: VIGÍA lo entregó ya investigado al analista.'}</small></div>
-          <div class="h">${x.horas_sin_vigia > 0 ? x.horas_sin_vigia + ' h<br><small style="font-size:11px;color:var(--suave)">ganadas</small>' : '<small style="font-size:12px;color:var(--suave)">SOC abierto</small>'}</div></div>`).join('') || '<p>Ninguna fuga de datos personales.</p>'}</div>
+        <div class="tarjeta"><h3>Reloj RGPD · escenarios de revisión por DPO</h3>${rg.map(x => `<div class="reloj">
+          <div><a class="prueba" href="${enlace('caso', x.ticket_id)}"><b>${esc(x.title)}</b></a><br><small>Alerta ${esc(hora(x.inicio))} · referencia +72 h ${esc(hora(x.limite))}<br>
+          El DPO confirma si hay brecha y cuándo se tuvo constancia.</small></div>
+          <div class="h">${x.horas_sin_vigia > 0 ? esc(x.horas_sin_vigia) + ' h<br><small>hasta la apertura</small>' : '<small>SOC abierto</small>'}</div></div>`).join('') || '<p>Sin escenarios registrados para revisión por el DPO.</p>'}</div>
         <div class="tarjeta"><h3>Lo que el turno de noche no habría visto</h3>
-          <p><b class="ok">${r.fuera_de_horario_al_agente}%</b> de lo que llega a la IA es de noche o fin de semana, frente al ${r.fuera_de_horario_total}% del total de alertas.</p>
-          <p><b>${fmt(Math.round(r.cerradas_por_reglas * 15 / 60))} h</b> de analista ahorradas (15 min por alerta cerrada).</p>
+          <p><b class="ok">${esc(r.fuera_de_horario_total)} %</b> de las alertas del SIEM saltaron con el SOC cerrado.</p>
+          ${r.benchmark?.p50_ms != null ? `<p>Barrido offline · mediana ${esc(r.benchmark.p50_ms)} ms y p95 ${esc(r.benchmark.p95_ms)} ms por alerta.</p>` : ''}
           <p><a class="prueba" href="#descartado">Ver todo lo que he descartado y por qué →</a></p></div>
       </div>
       <div class="tarjeta listo"><h3>Listo para un SOC gestionado</h3><div class="listo-g">
@@ -71,61 +81,79 @@ const vistas = {
   async bandeja() {
     const ts = await api('tickets');
     $('#vista').innerHTML = `<h2>Casos</h2><p class="sub">Ya investigados por VIGÍA, de más a menos grave. Tú decides.</p>
-      <div class="casos3">${ts.map(tarjetaCaso).join('') || '<p>Sin casos todavía: ejecuta el orquestador.</p>'}</div>`;
+      <form class="botones" id="buscar-caso"><label>ID de alerta <input name="consulta" maxlength="80"></label><button>Buscar</button></form>
+      <div class="casos3" id="resultados-caso">${ts.map(tarjetaCaso).join('') || '<p>Sin casos en esta mesa.</p>'}</div>`;
+    $('#buscar-caso').onsubmit = async event => {
+      event.preventDefault();
+      const result = $('#resultados-caso');
+      try {
+        const casos = await api('tickets?q=' + encodeURIComponent(event.currentTarget.elements.consulta.value.trim()));
+        result.innerHTML = casos.map(tarjetaCaso).join('') || '<p>Sin expedientes con ese ID.</p>';
+      } catch { result.textContent = 'No se pudo completar la búsqueda.'; }
+    };
   },
 
   async caso(id) {
     if (window._pbCaso !== id) { window._pbTab = 0; window._pbCaso = id; }
-    const t = await api('tickets/' + id), inc = t.incidente;
+    const t = await api('tickets/' + encodeURIComponent(id)), inc = t.incidente;
+    const informe = t.expediente, evidencias = informe?.evidence || t.evidence || [];
     const n2 = rol() !== 'N1';
     $('#vista').innerHTML = `<p class="sub"><a class="prueba" href="#bandeja">← Casos</a></p>
       <h2>${esc(t.title)}</h2>
-      <div class="meta" style="margin:6px 0 18px">${sev(t.severity)} <span>${esc(VERDICTO[t.verdict])}</span> <span>· ${Math.round(t.confidence * 100)}% confianza</span>
-        <span>· ${t.alert_ids.length} alerta(s)</span> ${t.out_of_hours ? '<span>· empezó con el SOC cerrado</span>' : ''}
+      <div class="meta" style="margin:6px 0 18px">${sev(t.severity)} <span>${esc(veredicto(t.verdict))}</span> <span>· ${confianza(t.confidence)}</span>
+        <span>· ${t.alert_ids?.length || 1} alerta(s)</span> ${t.alert_id ? `<span class="mono">· ${esc(t.alert_id)}</span>` : ''} ${t.out_of_hours ? '<span>· empezó con el SOC cerrado</span>' : ''}
         <span>· escalado: ${esc(t.escalation?.escalate ? t.escalation.to : 'no')}</span></div>
       ${t.manipulation_detected?.detected ? `<div class="aviso"><b>El atacante intentó engañar a la IA.</b> ${esc(t.manipulation_detected.where)}<br>
         <small>VIGÍA lo trata como una prueba más contra el atacante.</small></div>` : ''}
       <div class="dos">
         <div class="tarjeta"><h3>Qué ha pasado</h3><p>${esc(t.summary)}</p>
           <p class="sub" style="margin:0"><small>Severidad: ${esc(t.severity_rationale)}</small></p></div>
-        <div class="tarjeta"><h3>Quién y qué está implicado</h3><div id="grafo"></div></div>
+        <div class="tarjeta"><h3>Quién y qué está implicado</h3>${informe ? registroHTML(informe.affected) : ''}<div id="grafo"></div></div>
       </div>
-      ${historiaHTML(t.linea)}
+      ${historiaHTML(t.linea) || (informe?.timeline?.length ? `<div class="tarjeta"><h3>Línea de tiempo</h3>
+        ${(informe.alert_ids || []).length > 1 ? `<p class="sub">Alertas vinculadas · ${esc(informe.alert_ids.join(' · '))}</p>` : ''}
+        ${informe.timeline.map(p => `<div class="paso"><b>${esc(hora(p.timestamp))}</b> · ${esc(p.source || p.stage)}${p.event_id ? ` · <button class="sec prueba mono" data-ev="${esc(p.event_id)}">${esc(p.event_id)}</button>` : ''}<br>${esc(p.finding)}</div>`).join('')}</div>` : '')}
       ${inc ? `<div class="aviso info"><b>A quién avisar (informe N2):</b> ${esc((inc.notifications || []).join(' · '))}</div>` : ''}
       ${(t.playbooks || []).length ? `<h3 class="seccion">Playbook aplicado <small class="suave">· lo que dice el procedimiento del SOC y lo que ya ha hecho VIGÍA</small></h3>${playbooksCasoHTML(t.playbooks, t.ticket_id)}` : ''}
+      ${expedienteHTML(t)}
       <div class="dos">
-        <div class="tarjeta"><h3>Cómo lo investigó VIGÍA</h3>${(t.trace || []).map(p => p.tipo === 'herramienta'
+        <div class="tarjeta">${informe ? '' : `<h3>Cómo lo investigó VIGÍA</h3>${(t.trace || []).map(p => p.tipo === 'herramienta'
           ? `<div class="paso tool"><b>${esc(pasoTxt(p))}</b> <span class="mono suave">${esc(p.nombre)}</span></div>`
-          : `<div class="paso">${esc(p.texto)}</div>`).join('')}
-          <h3 style="margin-top:18px">Pruebas</h3>${t.evidence.map(e => `<div class="paso"><span class="prueba mono" data-ev="${esc(e.event_id)}">${esc(e.event_id)}</span>
-            · ${esc(e.source)}<br><small>${esc(e.finding)}</small></div>`).join('') || '<p class="sub">Sin pruebas citadas.</p>'}
-          <pre id="evento" hidden></pre></div>
+          : `<div class="paso">${esc(p.texto)}</div>`).join('')}`}
+          <h3>Pruebas</h3>${evidencias.map(e => `<div class="paso"><button class="sec prueba mono" data-ev="${esc(e.event_id)}">${esc(e.event_id)}</button>
+            · ${esc(e.source)}${e.relation ? ` · ${esc(e.relation)}${e.cited ? ' · citada' : ' · sin citar'}` : ''}<br><small>${esc(e.finding)}</small></div>`).join('') || '<p class="sub">Sin pruebas recuperadas.</p>'}
+          <div id="evento" class="raw" hidden></div></div>
         <div>
-          <div class="tarjeta"><h3>La IA revisora (fiscal)</h3>${t.fiscal ? `<p class="${t.fiscal.agrees ? 'ok' : 'warn'}">${t.fiscal.agrees ? '✓ No ha podido tumbar el veredicto.' : '⚠ Tiene objeciones: decide el humano.'}</p>
-            ${t.fiscal.objections.map(o => `<div class="paso">${esc(o)}</div>`).join('')}<p class="sub"><small>${esc(t.fiscal.comment)}</small></p>` : '<p class="sub">No aplica (severidad baja).</p>'}
+          <div class="tarjeta">${informe ? '' : `<h3>La IA revisora (fiscal)</h3>${t.fiscal ? `<p class="${t.fiscal.agrees ? 'ok' : 'warn'}">${t.fiscal.agrees ? '✓ No ha podido tumbar el veredicto.' : '⚠ Tiene objeciones: decide el humano.'}</p>
+            ${(t.fiscal.objections || []).map(o => `<div class="paso">${esc(o)}</div>`).join('')}<p class="sub"><small>${esc(t.fiscal.comment)}</small></p>` : '<p class="sub">Sin revisión registrada.</p>'}`}
             ${(t.open_questions || []).length ? `<h3>Lo que VIGÍA no sabe</h3>${t.open_questions.map(q => `<div class="paso">${esc(q)}</div>`).join('')}` : ''}</div>
-          <div class="tarjeta"><h3>Acciones propuestas</h3><p class="sub"><small>Estás como <b>${esc(rol())}</b>. ${n2 ? '' : 'El N1 solo puede ejecutar purgar correo y bloquear indicadores.'}</small></p>
-            <table>${t.recommended_actions.map((a, i) => {
-              const cont = CONTENCIONES.includes(a.action), puede = cont && (n2 || !a.requires_approval);
+          <div class="tarjeta"><h3>Acciones propuestas</h3><p class="sub"><small>Estás como <b>${esc(rol())}</b>.</small></p>
+            <table>${(t.recommended_actions || []).map((a, i) => {
               return `<tr><td><b>${esc(ACCION[a.action] || a.action)}</b> <span class="mono">${esc(a.target)}</span><br><small class="sub">${esc(a.justification)}</small></td>
-                <td>${cont ? `<button data-i="${i}" ${puede ? '' : 'disabled'}>${a.requires_approval ? 'Aprobar' : 'Ejecutar'}</button>` : '<small class="warn">lo gestiona una persona</small>'}</td></tr>`; }).join('')}</table>
-            <p id="resultado"></p>${(t.executed_actions || []).length ? `<p class="ok"><small>Ya ejecutadas: ${t.executed_actions.map(x => esc(x.action + ' → ' + x.target + ' (' + x.approver + ')')).join(' · ')}</small></p>` : ''}</div>
-          <div class="tarjeta"><button id="reinv">🔁 Reinvestigar con IA en directo</button> <button class="sec" id="dl-t">Descargar ticket (JSON)</button> ${inc ? '<button class="sec" id="dl-i">Descargar informe N2 (JSON)</button>' : ''}</div>
+                <td><small class="warn">lo gestiona una persona</small></td></tr>`; }).join('')}</table>
+            ${n2 && informe?.isolation_proposal ? aislamientoHTML(informe.isolation_proposal) : ''}
+            <p id="resultado" role="status"></p>${(t.executed_actions || []).map(x => `<p class="sub"><b>${esc(x.target)}</b> · ${esc(x.result || x.status)} · ${esc(x.actor || x.approver)}</p>`).join('')}</div>
+          ${decisionHTML(t)}
+          <div class="tarjeta"><button id="reinv">Reinvestigar en directo</button> <button class="sec" id="dl-t">Descargar expediente</button> ${inc ? '<button class="sec" id="dl-i">Descargar informe N2</button>' : ''}</div>
         </div>
       </div>`;
     document.querySelectorAll('[data-ev]').forEach(el => el.onclick = async () => {
-      const pre = $('#evento'); pre.hidden = false; pre.textContent = JSON.stringify(await api('evento/' + el.dataset.ev), null, 2); pre.scrollIntoView({block: 'nearest'}); });
-    document.querySelectorAll('button[data-i]').forEach(b => b.onclick = async () => {
-      const a = t.recommended_actions[b.dataset.i];
-      const r = await post('aprobar', {ticket_id: t.ticket_id, action: a.action, target: a.target, approver: 'analista.' + rol().toLowerCase(), rol: rol(), reason: a.justification});
-      const j = await r.json();
-      $('#resultado').innerHTML = r.ok ? `<span class="ok">✓ Ejecutado en la API del SOC${j.requiere.length ? ' con aprobación de ' + esc(j.requiere.join(' + ')) : ''}.</span>`
-                                       : `<span class="warn">✗ ${esc(j.detail || 'Rechazado')}</span>`; });
-    const bajar = (obj, nombre) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(obj, null, 2)], {type: 'application/json'})); a.download = nombre; a.click(); };
-    $('#reinv').onclick = async () => { const j = await (await post('reinvestigar/' + t.ticket_id, {})).json(); location.hash = 'directo/' + j.trabajo; };
-    $('#dl-t').onclick = () => { const c = {...t}; delete c.alertas; delete c.incidente; bajar(c, t.ticket_id + '.json'); };
-    if (inc) $('#dl-i').onclick = () => bajar(inc, inc.incident_id + '.json');
-    grafo(t); activarHistoria(); activarPlaybooks();
+      const evento = $('#evento'); await mostrarEvento(el.dataset.ev, evento); evento.scrollIntoView({block: 'nearest'}); });
+    if ($('#aislar-alerta')) activarAislamiento(t);
+    const bajar = (url, nombre) => { const a = document.createElement('a'); a.href = url; a.download = nombre; a.click(); };
+    $('#reinv').onclick = async () => {
+      if (t.alert_id) { location.hash = enlace('directo/nueva', t.alert_id); return; }
+      const r = await post('reinvestigar/' + encodeURIComponent(t.ticket_id), {}), j = await r.json();
+      if (r.ok) location.hash = enlace('directo', j.trabajo);
+      else $('#resultado').textContent = mensajeError(j);
+    };
+    $('#dl-t').onclick = () => {
+      if (informe && t.alert_id) { bajar('/api/expediente/' + encodeURIComponent(t.alert_id), `${t.alert_id}.json`); return; }
+      const {alertas, incidente, ...caso} = t;
+      descargarRegistro(caso, t.ticket_id + '.json');
+    };
+    if (inc) $('#dl-i').onclick = () => descargarRegistro(inc, inc.incident_id + '.json');
+    grafo(t); activarHistoria(); activarPlaybooks(); activarDecision(t);
   },
 
   async mapa() {
@@ -180,6 +208,26 @@ const vistas = {
 
   async directo(jid) { await vistaDirecto(jid); },
 
+  async relevo() {
+    const r = await api('relevo');
+    $('#vista').innerHTML = `<h2>Relevo de guardia</h2><p class="sub">Expedientes guardados en el turno de guardia.</p>
+      <div class="tarjeta parte"><b>${fmt(r.investigadas)} investigadas</b> · ${fmt(r.cierres)} cierres registrados · ${fmt(r.pendientes)} pendientes de revisión.</div>
+      <h3>Escalados</h3><div class="casos3">${r.casos.map(t => `<div>${tarjetaCaso(t)}<p class="sub">${esc(t.responsables.join(' · '))}
+        ${t.plazo ? ' · plazo ' + esc(hora(t.plazo)) : ''}</p></div>`).join('') || '<p>Analiza un lote en Guardia para ver aquí sus escalados.</p>'}</div>`;
+  },
+
+  presentar() {
+    $('#vista').innerHTML = `<h2>Vigía en cuatro minutos</h2><p class="sub">Tarvia · Del dato a la decisión del SOC</p>
+      <div class="tarjeta parte">El SOC recibe alertas también cuando el equipo está fuera de turno. Vigía cruza registros, inventario y cambios para preparar la decisión con sus evidencias.</div>
+      <div class="casos3">
+        <a class="caso" href="#panel"><div class="meta">01 · 30 s</div><div class="t">El turno completo</div><p>Parte de guardia, alertas y escalados del barrido.</p></a>
+        <a class="caso" href="#caso/VIG-ALR-20261005-000301"><div class="meta">02 · 40 s</div><div class="t">Un cierre comprobable</div><p>SCCM, cambio autorizado y registros que explican el cierre.</p></a>
+        <a class="caso" href="#caso/VIG-ALR-20261010-011795"><div class="meta">03 · 60 s</div><div class="t">Una cadena de preransomware</div><p>Abre la cronología y muestra cómo se vinculan las alertas.</p></a>
+        <a class="caso" href="#directo"><div class="meta">04 · 90 s</div><div class="t">La alerta del jurado</div><p>Carga la entrada y sigue las fases del agente hasta el expediente.</p></a>
+        <a class="caso" href="#relevo"><div class="meta">05 · 20 s</div><div class="t">Quién decide</div><p>Responsables y plazos de guardia en un solo lugar.</p></a>
+      </div>`;
+  },
+
   chat() {
     $('#vista').innerHTML = `<h2>Pregúntale a VIGÍA</h2><p class="sub">Responde con datos de los logs y cita los eventos.</p>
       <div class="tarjeta"><input type="text" id="q" placeholder="Ej.: ¿Qué hizo marta.puig? · ¿Qué pasó en WMS01? · ¿Quién es ext.logisoft?"><div id="resp"></div></div>`;
@@ -214,10 +262,14 @@ function grafo(t) {
 }
 
 async function ruta() {
-  const [v, arg] = (location.hash.slice(1) || 'panel').split('/');
+  const [v, raw, prefill] = (location.hash.slice(1) || 'panel').split('/');
   document.querySelectorAll('nav a').forEach(a => a.classList.toggle('activo', a.getAttribute('href') === '#' + (v === 'caso' ? 'bandeja' : v)));
-  try { await (vistas[v] || vistas.panel)(arg); window.scrollTo(0, 0); }
+  try {
+    if (v === 'directo' && raw === 'nueva') await vistaDirecto(undefined, decodeURIComponent(prefill || ''));
+    else await (vistas[v] || vistas.panel)(raw && decodeURIComponent(raw));
+    window.scrollTo(0, 0);
+  }
   catch (e) { $('#vista').innerHTML = `<p>No se pudo cargar (${esc(e.message)}). ¿Está arrancado el backend y has ejecutado el orquestador?</p>`; }
 }
-api('estado').then(s => { const d = $('#demo'); d.hidden = false; d.textContent = s.modo_demo ? 'MODO DEMO' : 'IA EN VIVO · ' + s.modelo; d.classList.toggle('vivo', !s.modo_demo); }).catch(() => {});
+api('estado').then(s => { const d = $('#demo'); d.hidden = false; d.textContent = s.modo_demo ? 'MOTOR LOCAL' : 'OPENAI DISPONIBLE · ' + s.modelo; d.classList.toggle('vivo', !s.modo_demo); }).catch(() => {});
 window.onhashchange = ruta; ruta();

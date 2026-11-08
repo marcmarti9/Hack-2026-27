@@ -9,3 +9,10 @@
 !requirements-desktop.txt
 !packaging/
 !packaging/**
+!eval/
+eval/*
+!eval/lote-presentacion-091.jsonl
+**/.env
+**/.venv
+apps/web/data
+apps/web/out

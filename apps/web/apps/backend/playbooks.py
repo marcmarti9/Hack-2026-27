@@ -1,6 +1,6 @@
 """Playbooks guiados a partir de los runbooks oficiales: pasos, decisiones y qué ha comprobado ya VIGÍA en cada caso."""
 import json, re
-from apps.backend.config import DATA
+from .config import DATA
 
 # Qué fuente de datos o herramienta corresponde a cada pista que aparece en el texto del runbook
 PISTAS = [(r"`email`|spf|dkim|dmarc|remitente", ["email"], ["get_event"]), (r"email_clicks|clic", ["email_clicks"], []),
@@ -20,9 +20,9 @@ ICONOS = {"RB-01": "✉", "RB-02": "💻", "RB-03": "🔑", "RB-04": "📤", "RB
 def _limpio(t):
     return re.sub(r"\*\*|`", "", t).strip()
 
-def cargar() -> list[dict]:
+def cargar(dataset=DATA) -> list[dict]:
     out = []
-    for p in sorted((DATA / "01_contexto/runbooks").glob("RB-*.md")):
+    for p in sorted((dataset / "01_contexto/runbooks").glob("RB-*.md")):
         txt = p.read_text(encoding="utf-8")
         titulo = txt.splitlines()[0].lstrip("# ").split(" ", 1)[1]
         reglas = re.findall(r"UC-[A-Z]+-\d+", txt.split("## Comprobaciones")[0])

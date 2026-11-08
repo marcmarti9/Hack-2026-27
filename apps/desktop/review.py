@@ -404,7 +404,7 @@ def _compact_events(events: list[dict]) -> list[dict]:
 
 
 def investigate(alert: dict, remote: bool = False, guidance: dict | None = None, *,
-                triage: bool = False, mode: str = "diurno") -> dict:
+                triage: bool = False, mode: str = "diurno", on_stage=None) -> dict:
     if mode not in {"diurno", "guardia"}:
         raise ValueError("Modo de triaje desconocido.")
     started = perf_counter()
@@ -424,7 +424,7 @@ def investigate(alert: dict, remote: bool = False, guidance: dict | None = None,
                          and not missing_references(analysis)
                          and (finding.get("auto_close") or finding.get("resolved")))
     if remote and analysis["events"] and not local_closure:
-        _analyze(alert, analysis, guidance or {}, finding)
+        _analyze(alert, analysis, guidance or {}, finding, on_stage)
     elif triage or remote:
         analysis["provider"] = "Reglas locales"
         analysis["proposal"] = finding
@@ -493,7 +493,7 @@ def replay_demo(alert: dict, ticket: dict) -> dict:
     return analysis
 
 
-def _analyze(alert: dict, analysis: dict, guidance: dict, finding: dict | None) -> None:
+def _analyze(alert: dict, analysis: dict, guidance: dict, finding: dict | None, on_stage=None) -> None:
     analysis["provider"] = available_model()
     verified = bool(finding and (finding.get("citations") or finding.get("sandbox_refs")))
     if verified:
@@ -508,6 +508,8 @@ def _analyze(alert: dict, analysis: dict, guidance: dict, finding: dict | None) 
     evidence = {"alerta": alert, "eventos": analysis["sent_events"], "contexto": analysis["context"],
                 "severidad_calculada": priority, "guía_editable": guidance}
     allowed = {event["event_id"] for event in analysis["sent_events"]}
+    if on_stage:
+        on_stage("propuesta", f"{analysis['provider']} · propuesta con {len(allowed)} registros recuperados.")
     start = perf_counter()
     try:
         proposal = _ask("Actúa como analista N1 de Tarvia y propón un veredicto.", evidence, allowed)
@@ -530,6 +532,8 @@ def _analyze(alert: dict, analysis: dict, guidance: dict, finding: dict | None) 
     review_provider = review_model() if review_reason else analysis["provider"]
     analysis["review_provider"] = review_provider
     analysis["review_reason"] = review_reason or "Contraste ordinario con evidencia adicional cuando existe."
+    if on_stage:
+        on_stage("fiscal", f"{review_provider} · {analysis['review_reason']}")
     start = perf_counter()
     try:
         additional = _compact_events(events[8:12])

@@ -11,7 +11,7 @@ function chipEntidad(e) {
     const tip = [i.pais, i.org, i.tipo, i.reputacion && `TIP: ${i.reputacion}${i.familia ? ' · ' + i.familia : ''}`].filter(Boolean).join(' · ');
     return `<span class="ent ip ${mala ? 'mala' : sosp ? 'sosp' : ''}" title="${esc(tip)}">🌍 ${esc(e.valor)}${i.pais ? ' · ' + esc(i.pais) : ''}${i.tipo ? ' · ' + esc(i.tipo) : ''}${mala ? ' · ' + esc(i.familia || 'maliciosa') : ''}</span>`;
   }
-  return `<span class="ent ${e.tipo}">${e.tipo === 'usuario' ? '👤' : e.tipo === 'equipo' ? '💻' : '🛒'} ${esc(e.valor)}</span>`;
+  return `<span class="ent ${esc(e.tipo)}">${e.tipo === 'usuario' ? '👤' : e.tipo === 'equipo' ? '💻' : '🛒'} ${esc(e.valor)}</span>`;
 }
 
 function historiaHTML(L) {
@@ -24,10 +24,10 @@ function historiaHTML(L) {
         <div><b>${esc(L.duracion || '—')}</b><small>de principio a fin</small></div>
         <div><b>${alcanzadas}/10</b><small>fases del ataque</small></div>
         <div><b>${L.pasos.length}</b><small>pasos · ${hitos} alertas</small></div>
-        <div><b class="${L.fuera_de_horario ? 'rojo' : ''}">${L.fuera_de_horario}</b><small>con el SOC cerrado</small></div>
+        <div><b class="${L.fuera_de_horario ? 'rojo' : ''}">${fmt(L.fuera_de_horario)}</b><small>con el SOC cerrado</small></div>
       </div></div>
     <div class="cadena">${L.fases.map(f => `<button class="fase ${f.n ? 'on' : ''}" data-fase="${esc(f.fase)}" style="--c:${FASE_COLOR[f.fase]}" ${f.n ? '' : 'disabled'}
-        title="${f.n ? f.n + ' pasos · desde ' + esc(f.primera) : 'No alcanzada'}"><span>${esc(f.fase)}</span>${f.n ? `<b>${f.n}</b>` : ''}</button>`).join('<i class="flecha">›</i>')}</div>
+        title="${f.n ? fmt(f.n) + ' pasos · desde ' + esc(f.primera) : 'No alcanzada'}"><span>${esc(f.fase)}</span>${f.n ? `<b>${fmt(f.n)}</b>` : ''}</button>`).join('<i class="flecha">›</i>')}</div>
     <div class="filtros"><button class="vista-btn" id="ver-todo">Ver los ${L.pasos.length} pasos</button><span class="sep"></span>
       <button class="filtro activo" data-fuente="">Todas las fuentes</button>${L.fuentes.map(f => `<button class="filtro" data-fuente="${esc(f)}">${esc(f)}</button>`).join('')}</div>
     <div class="tl2 resumen">${L.pasos.map((p, i) => {
@@ -37,12 +37,12 @@ function historiaHTML(L) {
         <div class="cuando">${esc(p.hora_local.slice(0, 5))}<b>${esc(p.hora_local.slice(6))}</b>${p.fuera_de_horario ? '<span title="SOC cerrado">🌙</span>' : ''}</div>
         <div class="nodo"></div>
         <div class="cuerpo">
-          <div class="meta2"><span class="fuente">${p.icono} ${esc(p.fuente_nombre)}</span><span class="tag-fase">${esc(p.fase)}</span>
+          <div class="meta2"><span class="fuente">${esc(p.icono)} ${esc(p.fuente_nombre)}</span><span class="tag-fase">${esc(p.fase)}</span>
             ${p.mitre ? `<span class="mono suave">${esc(p.mitre)}</span>` : ''}${p.hito ? sev(p.severidad) : ''}
-            ${p.repeticiones > 1 ? `<span class="rep">×${p.repeticiones}</span>` : ''}<span class="mono suave id">${esc(p.id)}</span></div>
+            ${p.repeticiones > 1 ? `<span class="rep">×${fmt(p.repeticiones)}</span>` : ''}<span class="mono suave id">${esc(p.id)}</span></div>
           <div class="tit2">${esc(p.titulo)}</div>${p.detalle ? `<div class="det2">${esc(p.detalle)}</div>` : ''}
           ${p.entidades.length ? `<div class="ents">${p.entidades.slice(0, 4).map(chipEntidad).join('')}</div>` : ''}
-          <pre class="raw" hidden></pre></div></div>`; }).join('')}</div></div>`;
+          <div class="raw" hidden></div></div></div>`; }).join('')}</div></div>`;
 }
 
 function activarHistoria() {
@@ -56,8 +56,148 @@ function activarHistoria() {
   box.querySelectorAll('.filtro').forEach(b => b.onclick = () => { fuente = b.dataset.fuente;
     box.querySelectorAll('.filtro').forEach(x => x.classList.toggle('activo', x === b)); aplica(); });
   box.querySelectorAll('.paso2[data-evr]').forEach(p => { if (!p.dataset.evr) return; p.onclick = async () => {
-    const pre = p.querySelector('.raw'); if (!pre.hidden) { pre.hidden = true; return; }
-    pre.textContent = JSON.stringify(await api('evento/' + p.dataset.evr), null, 2); pre.hidden = false; }; });
+    const destino = p.querySelector('.raw'); if (!destino.hidden) { destino.hidden = true; return; }
+    await mostrarEvento(p.dataset.evr, destino); }; });
+}
+
+const NOMBRES_CAMPO = {event_id: 'Evento', alert_id: 'Alerta', alert_ids: 'Alertas vinculadas', timestamp: 'Fecha', source: 'Fuente',
+  hostname: 'Equipo', hosts: 'Equipos', users: 'Cuentas', upn: 'Cuenta', business_services: 'Servicios afectados',
+  reason: 'Motivo', finding: 'Hallazgo', summary: 'Resumen', citations: 'Citas', context_citations: 'Citas de contexto',
+  verdict: 'Veredicto', questions: 'Preguntas abiertas', actions: 'Acciones', scope: 'Alcance', confidence: 'Confianza',
+  false_hypotheses: 'Hipótesis descartadas', recipient: 'Destinatario', requires_approval: 'Requiere aprobación'};
+
+function registroHTML(value) {
+  if (Array.isArray(value)) return value.length ? `<ul>${value.map(v => `<li>${registroHTML(v)}</li>`).join('')}</ul>` : 'Sin datos';
+  if (value && typeof value === 'object') {
+    return Object.entries(value).map(([key, dato]) => {
+      const nombre = NOMBRES_CAMPO[key] || key.replaceAll('_', ' ');
+      return `<div class="paso"><b>${esc(nombre)}</b> · ${registroHTML(key === 'verdict' ? veredicto(dato) : dato)}</div>`;
+    }).join('') || 'Sin datos';
+  }
+  if (typeof value === 'boolean') return value ? 'Sí' : 'No';
+  return esc(value == null || value === '' ? 'Sin datos' : value).replace(/\n/g, '<br>');
+}
+
+async function mostrarEvento(id, destino) {
+  destino.hidden = false;
+  destino.textContent = 'Consultando el evento…';
+  try { destino.innerHTML = registroHTML(await api('evento/' + encodeURIComponent(id))); }
+  catch { destino.textContent = 'No se pudo recuperar el evento del índice.'; }
+}
+
+function expedienteHTML(t) {
+  const informe = t.expediente;
+  if (!informe) return '';
+  const ruta = t.routing || informe.routing || {}, crit = informe.criterio_verificado || {}, propuesta = informe.propuesta || {}, contraste = informe.contraste || {};
+  const errores = t.provider_errors || informe.provider_errors || {};
+  const consultas = informe.consultas || [];
+  const mostrar = (titulo, dato) => dato && Object.keys(dato).length
+    ? `<details><summary>${titulo}</summary>${registroHTML(dato)}</details>` : '';
+  const escalar = ruta.recommendation === 'escalate';
+  return `<div class="dos"><div class="tarjeta"><h3>Resultado de la investigación</h3>
+    <p class="${escalar ? 'warn' : 'sub'}"><b>${esc(disposicion(ruta.recommendation) || 'Revisión pendiente')}</b>${ruta.reason ? ` · ${esc(ruta.reason)}` : ''}</p>
+    ${ruta.recipients?.length ? `<p class="sub"><b>Responsables</b> · ${esc(ruta.recipients.join(' · '))}</p>` : ''}
+    ${ruta.deadline_at ? `<p class="sub"><b>Plazo</b> · ${esc(hora(ruta.deadline_at))}</p>` : ''}
+    <p class="sub">${esc(informe.confidence_basis)}${informe.timing_ms != null ? ` · ${esc(informe.timing_ms)} ms` : ''}</p>
+    ${crit.summary ? `<p>${esc(crit.summary)}</p>` : '<p class="sub">Sin un hallazgo verificado adicional.</p>'}
+    ${mostrar('Criterio verificado', crit)}${mostrar('Enriquecimiento del índice', informe.enrichment)}${mostrar('Vulnerabilidades', informe.vulnerabilities)}
+    ${mostrar('Entidades declaradas', informe.declared_entities)}${mostrar('Discrepancias de entidades', informe.entity_discrepancies)}
+    ${mostrar('Alertas relacionadas', informe.related_alerts)}${mostrar('Técnicas MITRE', informe.mitre)}
+    ${mostrar('Alcance del incidente N2', informe.incident?.scope)}
+    </div><div class="tarjeta"><h3>Propuesta y revisión adversarial</h3>
+    <p class="sub">Propuesta · ${esc(t.provider || informe.provider || 'Índice local')}
+      ${informe.review_provider ? ' · Revisión · ' + esc(informe.review_provider) : ''}</p>
+    ${informe.review_reason ? `<p class="sub">${esc(informe.review_reason)}</p>` : ''}
+    ${Object.keys(errores).length ? `<p class="warn">El proveedor o la revisión no pudo corroborar parte del análisis. Consulta el hallazgo local y revisa la alerta.</p>${registroHTML(errores)}` : ''}
+    ${mostrar('Propuesta registrada', propuesta)}${mostrar('Contraste registrado', contraste)}
+    ${!Object.keys(propuesta).length && !Object.keys(contraste).length ? '<p class="sub">Este expediente no tiene una propuesta de modelo registrada.</p>' : ''}
+    <h3>Consultas al índice</h3>${consultas.map(c => `<div class="paso tool"><b>${esc(c.tool)}</b> · ${esc(c.query)}${c.count != null ? ` · ${fmt(c.count)} resultados` : ''}${c.note ? `<br><small>${esc(c.note)}</small>` : ''}</div>`).join('') || '<p class="sub">Sin consultas registradas.</p>'}</div></div>`;
+}
+
+function decisionHTML(t) {
+  if (!t.alert_id || !t.expediente) return '';
+  const decision = t.decision_actual;
+  const cerrada = ['accepted', 'corrected'].includes(decision?.decision);
+  return `<div class="tarjeta"><h3>Decisión e historial</h3>
+    ${decision ? `<p class="ok"><b>${esc(disposicion(decision.decision))}</b> · ${esc(veredicto(decision.verdict))}${decision.reviewer ? ` · ${esc(decision.reviewer)}` : ''}</p>${decision.reason ? `<p class="sub">${esc(decision.reason)}</p>` : ''}` : '<p class="sub">Pendiente de decisión humana.</p>'}
+    ${cerrada ? '' : `<div class="botones">${t.puede_aceptar ? '<button id="aceptar-alerta">Aceptar veredicto</button>' : ''}<button id="abrir-correccion" class="sec">Corregir veredicto</button></div>
+      <form id="corregir-alerta" hidden><div class="botones"><label>Veredicto <select name="verdict" required><option value="">Selecciona</option>${Object.entries(VERDICTO).filter(([id]) => id !== 'needs_more_info').map(([id, texto]) => `<option value="${id}">${esc(texto)}</option>`).join('')}</select></label>
+        <label>Motivo <input name="reason" type="text" required maxlength="700"></label><button>Registrar corrección</button></div></form>`}
+    <p class="sub" id="estado-decision" role="status"></p>
+    ${(t.historial || []).map(h => `<div class="paso"><b>${esc(h.kind)}</b> · ${esc(h.actor)} · ${esc(hora(h.created_at))}${h.reason ? `<br>${esc(h.reason)}` : ''}</div>`).join('') || '<p class="sub">Sin cambios de historial registrados.</p>'}</div>`;
+}
+
+function aislamientoHTML(propuesta) {
+  return `<details><summary>Aislamiento en el simulador de Tarvia</summary>
+    <p class="sub">Puesto propuesto · <b>${esc(propuesta.target)}</b></p>
+    <form id="aislar-alerta">
+      <label>Clave N2 de práctica <input name="password" type="password" required maxlength="128" autocomplete="off"></label>
+      <label>Justificación <input name="reason" required maxlength="500"></label>
+      <label><input name="confirmed" type="checkbox" required> Confirmo el aislamiento simulado</label>
+      <button>Ejecutar en el simulador</button>
+    </form></details>`;
+}
+
+function activarAislamiento(t) {
+  const form = $('#aislar-alerta'), status = $('#resultado');
+  form.onsubmit = async event => {
+    event.preventDefault();
+    const control = form.querySelector('button');
+    control.disabled = true;
+    const payload = {target: t.expediente.isolation_proposal.target, password: form.elements.password.value,
+      reason: form.elements.reason.value, confirmed: form.elements.confirmed.checked};
+    form.elements.password.value = '';
+    try {
+      const r = await post('aislar/' + encodeURIComponent(t.alert_id), payload), body = await r.json();
+      if (!r.ok) throw new Error(mensajeError(body));
+      await ruta();
+    } catch (error) { status.textContent = error.message; control.disabled = false; }
+  };
+}
+
+async function editorGuia(name) {
+  const block = $('#guia-editable'), doc = await api('documentos/' + encodeURIComponent(name));
+  block.innerHTML = `<details><summary>Documento del agente · revisión ${doc.revision}</summary>
+    <form><textarea aria-label="Documento del agente" maxlength="16000" required ${rol() === 'N1' ? 'readonly' : ''}></textarea>
+      ${rol() === 'N1' ? '' : '<button>Guardar revisión</button>'}
+      <p class="sub" role="status"></p>
+    </form></details>`;
+  const form = block.querySelector('form'), input = form.querySelector('textarea');
+  input.value = doc.texto;
+  form.onsubmit = async event => {
+    event.preventDefault();
+    try {
+      const r = await post('documentos/' + encodeURIComponent(name), {revision: doc.revision, texto: input.value, rol: rol()}, 'PUT');
+      if (!r.ok) throw new Error(mensajeError(await r.json()));
+      await editorGuia(name);
+      block.querySelector('details').open = true;
+      block.querySelector('[role="status"]').textContent = 'Revisión guardada.';
+    } catch (error) { form.querySelector('[role="status"]').textContent = error.message; }
+  };
+}
+
+function activarDecision(t) {
+  const forma = $('#corregir-alerta'), aceptar = $('#aceptar-alerta'), estado = $('#estado-decision');
+  if (!forma) return;
+  $('#abrir-correccion').onclick = () => { forma.hidden = !forma.hidden; if (!forma.hidden) forma.elements.verdict.focus(); };
+  const guardarDecision = async (decision, verdict, reason) => {
+    const botones = [aceptar, forma.querySelector('button')].filter(Boolean);
+    botones.forEach(b => b.disabled = true);
+    estado.textContent = 'Guardando decisión…';
+    try {
+      const r = await post('decision/' + encodeURIComponent(t.alert_id), {decision, verdict, reason, rol: rol()});
+      if (!r.ok) throw new Error(mensajeError(await r.json()));
+      await ruta();
+    } catch (e) { estado.textContent = e.message; }
+    finally { botones.forEach(b => b.disabled = false); }
+  };
+  if (aceptar) aceptar.onclick = () => guardarDecision('accepted', t.verdict, '');
+  forma.onsubmit = e => {
+    e.preventDefault();
+    const reason = forma.elements.reason.value.trim();
+    if (!reason) { estado.textContent = 'Escribe el motivo de la corrección.'; return; }
+    guardarDecision('corrected', forma.elements.verdict.value, reason);
+  };
 }
 
 function playbookHTML(pbk, tid) {
@@ -95,6 +235,11 @@ function activarPlaybooks() {
 
 async function vistaPlaybooks(id) {
   const P = await api('playbooks');
+  if (id === 'SKILL') {
+    $('#vista').innerHTML = '<p class="sub"><a class="prueba" href="#playbooks">← Playbooks</a></p><h2>Guía del agente</h2><div id="guia-editable" class="tarjeta"></div>';
+    await editorGuia(id);
+    return;
+  }
   if (id) {
     const p = P.find(x => x.id === id);
     $('#vista').innerHTML = `<p class="sub"><a class="prueba" href="#playbooks">← Playbooks</a></p>
@@ -106,10 +251,11 @@ async function vistaPlaybooks(id) {
         <div><div class="tarjeta"><h3>2 · Decide</h3><div class="decisiones col">${p.decisiones.map(d => `<div class="dec ${d.color}"><div class="si">Si: ${esc(d.condicion)}</div><div class="ent2">→ ${esc(d.accion)}</div></div>`).join('')}</div>
           <p class="sub" style="margin-top:12px"><small>Verde: cerrar · Ámbar: vigilar · Rojo: contener y escalar</small></p></div>
           <div class="tarjeta"><h3>3 · Casos reales donde se ha usado</h3>${p.casos.map(c => `<div class="caso-mini" onclick="location.hash='caso/${c.ticket_id}'">${sev(c.severity)} ${esc(c.title)}</div>`).join('') || '<p class="sub">Ningún caso este mes.</p>'}</div></div>
-      </div>`;
+      </div><div id="guia-editable" class="tarjeta"></div>`;
+    await editorGuia(id);
     return;
   }
-  $('#vista').innerHTML = `<h2>Playbooks</h2><p class="sub">Los 10 runbooks del SOC convertidos en guías paso a paso. VIGÍA los aplica solo en cada caso; tú solo revisas lo pendiente.</p>
+  $('#vista').innerHTML = `<h2>Playbooks</h2><p class="sub">Los 10 runbooks del SOC convertidos en guías paso a paso. <a class="prueba" href="#playbooks/SKILL">Guía editable del agente →</a></p>
     <div class="como"><div><span>1</span><b>Llega una alerta</b><small>VIGÍA identifica qué playbook le toca según la regla del SIEM.</small></div><i>→</i>
       <div><span>2</span><b>VIGÍA hace las comprobaciones</b><small>Cruza logs, inventario, inteligencia y cambios, y marca cada paso con su prueba.</small></div><i>→</i>
       <div><span>3</span><b>Tú decides</b><small>Revisas lo pendiente (○) y confirmas la decisión que recomienda.</small></div></div>
@@ -124,10 +270,10 @@ async function vistaDescartado() {
   const color = {'Falsa alarma': '#5e5e5e', 'Ataque sin efecto': '#86BC25', 'Actividad autorizada': '#26890D'};
   const horas = d.grupos.reduce((s, g) => s + g.horas, 0);
   $('#vista').innerHTML = `<h2>Lo que he descartado</h2>
-    <p class="sub">${fmt(d.cerradas)} de ${fmt(d.total)} alertas (${Math.round(100 * d.cerradas / d.total)}%) cerradas por reglas que se explican en una frase. Cada motivo dice el criterio exacto, en qué se apoya y cómo evitar que vuelva a saltar.</p>
+    <p class="sub">${fmt(d.cerradas)} de ${fmt(d.total)} alertas (${Math.round(100 * d.cerradas / Math.max(1, d.total))} %) elegibles para cierre en el barrido local. Los ejemplos enlazan al expediente con las citas.</p>
     <div class="desc-kpis">
-      <div class="tarjeta"><b>${fmt(d.cerradas)}</b><small>alertas cerradas</small></div>
-      <div class="tarjeta"><b>${fmt(horas)} h</b><small>de analista ahorradas</small></div>
+      <div class="tarjeta"><b>${fmt(d.cerradas)}</b><small>cierres elegibles</small></div>
+      <div class="tarjeta"><b>${fmt(horas)} h</b><small>estimación a 15 min por alerta</small></div>
       <div class="tarjeta"><b>${d.grupos.length}</b><small>motivos distintos</small></div>
       <div class="tarjeta ancho"><small>Tipo de descarte</small><div class="apilada">${d.tipos.map(([t, n]) => `<i style="width:${100 * n / d.cerradas}%;background:${color[t]}" title="${esc(t)}: ${fmt(n)}"></i>`).join('')}</div>
         <div class="leyenda">${d.tipos.map(([t, n]) => `<span><i style="background:${color[t]}"></i>${esc(t)} · ${fmt(n)}</span>`).join('')}</div></div>
@@ -143,7 +289,7 @@ async function vistaDescartado() {
       ${g.recomendacion && g.recomendacion !== '—' ? `<div class="m-reco">💡 <b>Para ingeniería de detección:</b> ${esc(g.recomendacion)}</div>` : ''}
       <button class="sec m-btn" data-n="${g.ejemplos.length}">Ver ${g.ejemplos.length} ejemplos ▾</button>
       <table class="m-ej" hidden><tr><th>Cuándo</th><th>Alerta</th><th>Quién</th><th>Dato clave</th></tr>${g.ejemplos.map(e => `<tr><td class="mono">${esc(e.cuando)}</td>
-        <td class="mono">${esc(e.alert_id.slice(-6))}</td><td>${esc(e.quien)}</td><td class="suave">${Object.entries(e.datos).map(([k, v]) => `<b>${esc(k)}</b> ${esc(v)}`).join(' · ')}</td></tr>`).join('')}</table>
+        <td class="mono"><a class="prueba" href="${enlace('caso', 'VIG-' + e.alert_id)}">${esc(e.alert_id)}</a></td><td>${esc(e.quien)}</td><td class="suave">${Object.entries(e.datos).map(([k, v]) => `<b>${esc(k)}</b> ${esc(v)}`).join(' · ')}</td></tr>`).join('')}</table>
     </div>`).join('')}</div>`;
   document.querySelectorAll('.m-btn').forEach(b => b.onclick = () => { const t = b.nextElementSibling; t.hidden = !t.hidden;
     b.textContent = `${t.hidden ? 'Ver' : 'Ocultar'} ${b.dataset.n} ejemplos ${t.hidden ? '▾' : '▴'}`; });
@@ -158,52 +304,90 @@ const HERR_TXT = {get_asset: a => `Consulta la CMDB: ${a.key}`, get_user: a => `
 const pasoTxt = p => p.tipo === 'herramienta' ? (HERR_TXT[p.nombre] ? HERR_TXT[p.nombre](p.entrada || {}) : p.nombre) : (p.texto || '');
 const PASO_ICONO = {herramienta: '⚙', pensamiento: '💭', motor: '🧹', escudo: '🛡', caso: '📁', fiscal: '⚖'};
 
-async function vistaDirecto(jid) {
+async function vistaDirecto(jid, prellenar = '') {
   const est = await api('estado');
   $('#vista').innerHTML = `<h2>Analizar en directo</h2>
-    <p class="sub">Pega alertas nuevas (JSON o JSONL, el mismo formato que <span class="mono">alertas.jsonl</span>) y mira cómo VIGÍA las cierra o las investiga paso a paso.
-      ${est.modo_demo ? '<b class="warn">Ahora está en MODO DEMO (agentes simulados).</b>' : `Agentes con <b class="ok">${esc(est.modelo)}</b>.`}</p>
+    <p class="sub">Pega IDs del índice, un objeto JSON o un lote JSONL. Vigía contrasta los registros y aplica la política del turno.
+      ${est.openai_disponible ? `Contraste opcional con <b class="ok">${esc(est.modelo || 'OpenAI')}</b>.` : '<b>Análisis local disponible sin clave.</b>'}</p>
     <div class="dos directo">
       <div class="tarjeta"><h3>1 · Alertas</h3>
-        <textarea id="entrada" spellcheck="false" placeholder='{"alert_id": "ALR-...", "created_at": "2026-10-31T02:40:00Z", "rule_id": "UC-EDR-009", "entities": {...}, "evidence": {...}}'></textarea>
-        <div class="botones"><button class="sec" id="ej">Cargar ejemplos del directo</button>
+        <textarea id="entrada" aria-label="Alertas para analizar" spellcheck="false" placeholder="ALR-20261010-011795"></textarea>
+        <div class="botones"><label>Turno <select id="modo-d"><option value="diurno">Horario atendido</option><option value="guardia">Guardia</option></select></label>
+          <label><input type="checkbox" id="remoto-d" ${est.openai_disponible ? 'checked' : 'disabled'}> Contrastar con OpenAI</label></div>
+        <div class="botones"><button class="sec" id="ej">Lote de ensayo</button>
+          <button class="sec" id="ej-nueva">Alerta nueva de ensayo</button>
           <label class="sec boton-f">Subir fichero<input type="file" id="fich" accept=".json,.jsonl,.txt" hidden></label>
-          <button id="go">▶ Analizar con IA</button></div>
-        <p class="sub" style="margin:8px 0 0"><small>Basta con alert_id, created_at y rule_id: el resto lo completa con el catálogo de reglas.</small></p></div>
+          <button id="go">▶ Analizar alertas</button></div>
+        <p class="sub" style="margin:8px 0 0"><small>${est.openai_disponible ? 'Con OpenAI activado, Analizar envía la alerta y una selección de evidencias para propuesta y contraste.' : 'Para una alerta nueva, carga el objeto completo con sus entidades y referencias a eventos.'}</small></p></div>
       <div class="tarjeta"><h3>2 · VIGÍA trabajando <span id="reloj-d" class="mono suave"></span></h3>
-        <div id="estado-d" class="sub">Esperando alertas…</div><div id="feed" class="feed"></div><div id="res-d"></div></div>
+        <div id="estado-d" class="sub" role="status">Esperando alertas…</div><div id="feed" class="feed"></div><div id="res-d"></div></div>
     </div>`;
-  $('#ej').onclick = async () => { $('#entrada').value = (await api('ejemplos_directo')).map(a => JSON.stringify(a)).join('\n'); };
-  $('#fich').onchange = async e => { const f = e.target.files[0]; if (f) $('#entrada').value = await f.text(); };
-  $('#go').onclick = async () => {
-    const r = await post('analizar', {texto: $('#entrada').value}); const j = await r.json();
-    if (!r.ok) { $('#estado-d').innerHTML = `<span class="warn">✗ ${esc(j.detail)}</span>`; return; }
-    seguir(j.trabajo);
+  const entrada = $('#entrada'), go = $('#go'), estado = $('#estado-d');
+  entrada.value = prellenar;
+  const error = texto => { estado.textContent = texto; estado.classList.add('warn'); };
+  $('#ej').onclick = async () => {
+    try { entrada.value = (await api('lote_ensayo')).texto; }
+    catch { error('No se pudo cargar el lote de ensayo.'); }
+  };
+  $('#ej-nueva').onclick = async () => {
+    try { entrada.value = (await api('lote_ensayo?una=true')).texto; }
+    catch { error('No se pudo cargar la alerta de ensayo.'); }
+  };
+  $('#fich').onchange = async e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    try { entrada.value = await f.text(); }
+    catch { error('No se pudo leer el archivo.'); }
+  };
+  go.onclick = async () => {
+    const texto = entrada.value.trim(), remoto = $('#remoto-d').checked;
+    if (!texto) { error('Pega o carga al menos una alerta.'); entrada.focus(); return; }
+    go.disabled = true;
+    estado.classList.remove('warn');
+    estado.textContent = 'Preparando el lote…';
+    try {
+      const r = await post('analizar', {texto, modo: $('#modo-d').value, remoto});
+      const j = await r.json();
+      if (!r.ok || !j.trabajo) throw new Error(mensajeError(j));
+      if (go.isConnected) seguir(j.trabajo);
+    } catch (e) { error(e.message); go.disabled = false; }
   };
   if (jid) seguir(jid);
 }
 
 function seguir(jid) {
-  let desde = 0; $('#feed').innerHTML = ''; $('#res-d').innerHTML = ''; $('#go') && ($('#go').disabled = true);
+  let desde = 0;
+  const feed = $('#feed'), resultados = $('#res-d'), estado = $('#estado-d'), reloj = $('#reloj-d'), go = $('#go');
+  feed.replaceChildren(); resultados.replaceChildren(); go.disabled = true;
   const tic = async () => {
-    if (!document.getElementById('feed')) return;                      // el usuario cambió de pantalla
-    const j = await api(`trabajo/${jid}?desde=${desde}`);
-    desde = j.total_pasos;
-    j.pasos.forEach(p => { const d = document.createElement('div'); d.className = 'fp ' + p.tipo;
-      d.innerHTML = `<span>${PASO_ICONO[p.tipo] || '•'}</span><div>${esc(pasoTxt(p))}${p.tipo === 'herramienta' && p.resultado ? `<small>${esc(String(p.resultado).slice(0, 140))}</small>` : ''}</div>`;
-      $('#feed').appendChild(d); $('#feed').scrollTop = 1e9; });
-    $('#reloj-d').textContent = `${j.segundos} s`;
-    $('#estado-d').innerHTML = j.estado === 'terminado' ? `<span class="ok">✓ Terminado: ${j.alertas} alerta(s) en ${j.segundos} s</span>`
-      : j.estado === 'error' ? `<span class="warn">✗ ${esc(j.error)}</span>` : `<span class="pulso"></span> ${esc(j.estado)}…`;
-    if (j.estado === 'terminado' || j.estado === 'error') {
-      $('#go') && ($('#go').disabled = false);
-      $('#res-d').innerHTML = (j.cerradas.length ? `<h4 class="dec-tit">Cerradas por el motor</h4>${j.cerradas.map(c => `<div class="paso"><span class="mono">${esc(c.alert_id)}</span> · ${esc(c.reason)}</div>`).join('')}` : '') +
-        (j.tickets.length ? `<h4 class="dec-tit">Casos investigados</h4><div class="casos3">${j.tickets.map(t => `<div class="caso" onclick="location.hash='caso/${t.ticket_id}'">
-          <div class="meta">${sev(t.severity)} <span>${Math.round(t.confidence * 100)}% confianza</span><span>· ${t.triage_seconds} s</span></div><div class="t">${esc(t.title)}</div>
-          <p>${esc(VERDICTO[t.verdict])} · abrir el caso →</p></div>`).join('')}</div>` : '');
-      return;
+    if (!feed.isConnected) return;
+    try {
+      const j = await api(`trabajo/${encodeURIComponent(jid)}?desde=${desde}`);
+      if (!feed.isConnected) return;
+      desde = Number(j.total_pasos) || desde;
+      for (const p of j.pasos || []) {
+        const d = document.createElement('div');
+        d.className = 'fp ' + p.tipo;
+        d.innerHTML = `<span>${esc(PASO_ICONO[p.tipo] || '•')}</span><div>${esc(pasoTxt(p))}${p.tipo === 'herramienta' && p.resultado ? `<small>${esc(String(p.resultado).slice(0, 140))}</small>` : ''}</div>`;
+        feed.appendChild(d);
+      }
+      feed.scrollTop = feed.scrollHeight;
+      reloj.textContent = `${j.segundos} s`;
+      if (j.estado === 'terminado') {
+        estado.innerHTML = `<span class="ok">✓ ${j.tickets.length} de ${esc(j.alertas)} alerta(s) investigadas en ${esc(j.segundos)} s</span>`;
+        resultados.innerHTML = (j.cerradas?.length ? `<h4 class="dec-tit">Cierres registrados</h4>${j.cerradas.map(c => `<div class="paso"><span class="mono">${esc(c.alert_id)}</span> · ${esc(c.reason)}</div>`).join('')}` : '') +
+          (j.tickets?.length ? `<h4 class="dec-tit">Alertas investigadas</h4><div class="casos3">${j.tickets.map(tarjetaCaso).join('')}</div>` : '');
+        go.disabled = false;
+      } else if (j.estado === 'error') {
+        throw new Error(j.error || 'El análisis se interrumpió.');
+      } else {
+        estado.innerHTML = `<span class="pulso"></span> ${esc(j.estado)}…`;
+        setTimeout(tic, 800);
+      }
+    } catch (e) {
+      estado.innerHTML = `<span class="warn">${esc(e.message)}</span>`;
+      go.disabled = false;
     }
-    setTimeout(tic, 800);
   };
   tic();
 }

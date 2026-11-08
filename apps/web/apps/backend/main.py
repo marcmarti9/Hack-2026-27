@@ -1,17 +1,38 @@
-"""Backend de VIGÍA para la web. Uso: uvicorn apps.backend.main:app --port 8100"""
-import csv, hashlib, ipaddress, json, threading, time, uuid
+"""Backend y frontend de Vigía. Arranque desde la raíz con servir.sh."""
+import csv
+import hashlib
+import ipaddress
+import json
 from datetime import datetime, timedelta
-import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-from apps.backend.config import DATA, OUT, ROOT, SOC_API, MOCK
-from apps.backend.tools import db
+from apps.backend.config import DATA
 from apps.backend.rules.engine import madrid, fuera_de_horario
-from apps.backend.rules.approvals import aprobacion
-from apps.backend import timeline as tl, explain, playbooks as pb
+from apps.backend.tools import db
+
+from .config import OUT, ROOT
+from . import defensa, timeline as tl, playbooks as pb
 
 app = FastAPI(title="VIGÍA")
+app.include_router(defensa.router)
+
+
+@app.middleware("http")
+async def browser_boundary(request: Request, call_next):
+    if request.method in {"POST", "PUT", "DELETE"}:
+        origin = request.headers.get("origin")
+        if origin and origin != f"{request.url.scheme}://{request.url.netloc}":
+            return JSONResponse({"detail": "Origen de la solicitud no permitido."}, status_code=403)
+        if request.headers.get("sec-fetch-site") == "cross-site":
+            return JSONResponse({"detail": "Origen de la solicitud no permitido."}, status_code=403)
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
 ALERTAS = {}
 for _l in open(DATA / "03_alertas/alertas.jsonl", encoding="utf-8"):
     if _l.strip():
@@ -21,7 +42,6 @@ ZONAS = [(z["zona"], ipaddress.ip_network(z["cidr"]), z["descripcion"])
 POR_FUENTE = {"WAF": "DMZ", "ECOM": "DMZ", "AI_GATEWAY": "DMZ", "CLOUD": "AWS-PROD", "CICD": "AWS-PROD", "VPN": "VPN-POOL",
               "IDP": "IDENTIDAD", "EMAIL_GW": "CORREO", "DLP": "HQ-USERS", "AD": "DC-SERVERS"}
 DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
-CONTENCIONES = {"isolate_host", "disable_user", "revoke_sessions", "reset_password", "block_ioc", "purge_email", "disable_access_key"}
 
 def leer(nombre, defecto):
     p = OUT / nombre
@@ -57,35 +77,55 @@ def siguiente_apertura(ts: str) -> datetime:
 
 @app.get("/api/estado")
 def estado():
-    from apps.backend.config import MODEL_AGENT
-    return {"modo_demo": MOCK, "modelo": MODEL_AGENT, "tickets": len(tickets()), "incidentes": len(incidentes_todos())}
+    model = defensa.model()
+    return {"modo_demo": not bool(model), "modelo": model or "Motor local",
+            "openai_disponible": bool(model), "tickets": len(defensa.reviews.all()),
+            "incidentes": len(incidentes_todos())}
+
 
 @app.get("/api/resumen")
 def resumen():
-    return leer("resumen.json", {})
+    result = defensa.overview(len(ALERTAS), AFTER_HOURS)
+    return {**result, "manipulaciones": None, "hallazgos_caza": len(leer("caza.json", []))}
+
 
 @app.get("/api/tickets")
-def lista_tickets():
-    orden = ["critical", "high", "medium", "low", "informational"]
-    ts = [{k: t.get(k) for k in ("ticket_id", "title", "verdict", "severity", "confidence", "alert_ids", "out_of_hours",
-                                 "human_review", "escalation", "manipulation_detected", "summary")} for t in tickets()]
-    for t in ts:
-        t["primera"] = min((ALERTAS[a]["created_at"] for a in t["alert_ids"] if a in ALERTAS), default="")
-    return sorted(ts, key=lambda t: (orden.index(t["severity"]), t["primera"]))
+def lista_tickets(q: str = Query("", max_length=80), offset: int = Query(0, ge=0), limit: int = Query(60, ge=1, le=120)):
+    with db.read_session():
+        return defensa.cards(q.strip(), offset, limit)
+
 
 @app.get("/api/tickets/{tid}")
 def ticket(tid: str):
-    t = next((t for t in tickets() if t["ticket_id"] == tid), None)
-    if not t:
-        raise HTTPException(404)
-    t["alertas"] = [ALERTAS[a] for a in t["alert_ids"] if a in ALERTAS]
-    t["incidente"] = next((i for i in incidentes_todos() if set(i.get("alert_ids", [])) & set(t["alert_ids"])), None)
-    t["linea"] = tl.construir(t, t["alertas"], t["incidente"])
-    rbs = sorted({a["runbook"] for a in t["alertas"]}, key=lambda r: -sum(a["runbook"] == r for a in t["alertas"]))
-    t["playbooks"] = [pb.aplicar(next(p for p in PLAYBOOKS if p["id"] == r), t, t["linea"]) for r in rbs if any(p["id"] == r for p in PLAYBOOKS)]
-    return t
+    with db.read_session():
+        aid = defensa.alert_from_ticket(tid)
+        t = defensa.ticket_view(aid) if aid else None
+        if t:
+            t["incidente"] = t.get("incident")
+            known = set(x["event_id"] for x in t.get("evidence", []))
+            alerts = []
+            for key in t["alert_ids"]:
+                row = t["alertas"][0] if key == aid else ALERTAS.get(key)
+                if row is None:
+                    continue
+                entities = row.get("entities", {}) if not row.get("external") else t["expediente"]["affected"]
+                alerts.append({**row, "entities": entities, "related_events": [ev for ev in row.get("related_events", []) if ev in known]})
+            t["alertas"] = alerts
+        else:
+            t = next((row for row in tickets() if row["ticket_id"] == tid), None)
+            if not t:
+                raise HTTPException(404, "No hay expediente para esa alerta. Analízala desde el directo.")
+            t["alertas"] = [ALERTAS[key] for key in t["alert_ids"] if key in ALERTAS]
+            t["incidente"] = next((row for row in incidentes_todos()
+                                    if set(row.get("alert_ids", [])) & set(t["alert_ids"])), None)
+        t["linea"] = tl.construir(t, t["alertas"], t["incidente"], database=db)
+        runbooks = {a["runbook"] for a in t["alertas"]}
+        t["playbooks"] = [pb.aplicar(p, t, t["linea"]) for p in PLAYBOOKS if p["id"] in runbooks]
+        return t
 
-PLAYBOOKS = pb.cargar()
+
+PLAYBOOKS = pb.cargar(DATA)
+AFTER_HOURS = sum(fuera_de_horario(a["created_at"]) for a in ALERTAS.values())
 
 @app.get("/api/playbooks")
 def lista_playbooks():
@@ -93,22 +133,24 @@ def lista_playbooks():
     for a in ALERTAS.values():
         por_rb[a["runbook"]] = por_rb.get(a["runbook"], 0) + 1
     casos = {}
-    for t in tickets():
+    with db.read_session():
+        cards = defensa.cards(limit=120)
+    for t in cards:
         for r in {ALERTAS[x]["runbook"] for x in t["alert_ids"] if x in ALERTAS}:
             casos.setdefault(r, []).append({"ticket_id": t["ticket_id"], "title": t["title"], "severity": t["severity"]})
     return [{**p, "alertas": por_rb.get(p["id"], 0), "casos": casos.get(p["id"], [])} for p in PLAYBOOKS]
 
 @app.get("/api/descartado")
 def descartado():
-    return explain.descartado(leer("cerradas.json", []), ALERTAS, len(ALERTAS))
+    return defensa.closure_groups(ALERTAS)
 
 @app.get("/api/incidentes")
 def incidentes():
     return incidentes_todos()
 
 @app.get("/api/cerradas")
-def cerradas(rule: str = "", limit: int = 200):
-    return [c for c in leer("cerradas.json", []) if not rule or c["rule"] == rule][:limit]
+def cerradas(rule: str = "", limit: int = Query(200, ge=1, le=500)):
+    return [c for c in defensa._catalog()[1] if not rule or c["rule"] == rule][:limit]
 
 @app.get("/api/caza")
 def caza():
@@ -125,7 +167,9 @@ def evento(event_id: str):
 def rgpd():
     """Reloj de 72 h para cada posible brecha de datos personales (RGPD art. 33)."""
     out = []
-    for t in tickets():
+    with db.read_session():
+        cards = defensa.cards(limit=120)
+    for t in cards:
         als = [ALERTAS[a] for a in t["alert_ids"] if a in ALERTAS]
         fugas = [a for a in als if a["rule_id"] in ("UC-DLP-001", "UC-CLD-004")
                  or (a["rule_id"] == "UC-DLP-002" and "gestoria-pons" not in json.dumps(a))
@@ -151,10 +195,14 @@ def _pos(clave: str) -> tuple[float, float]:
 @app.get("/api/mapa")
 def mapa():
     """Zonas, puntos de alerta en el tiempo (posición fija por equipo) y saltos entre equipos de cada ticket."""
-    estado_a = {c["alert_id"]: "cerrada" for c in leer("cerradas.json", [])}
-    for t in tickets():
-        for a in t["alert_ids"]:
-            estado_a[a] = "escalada" if t["verdict"] == "true_positive" else "cerrada"
+    index, closes, _ = defensa._catalog()
+    estado_a = {c["alert_id"]: "cerrada" for c in closes}
+    estado_a.update({aid: "escalada" for aid, (_, route, _) in index.items() if route == "escalate"})
+    with db.read_session():
+        cards = defensa.cards(limit=120)
+    for t in cards:
+        if t["escalation"]["escalate"]:
+            estado_a[t["alert_id"]] = "escalada"
     puntos = []
     for a in ALERTAS.values():
         hosts = a.get("entities", {}).get("hosts", [])
@@ -163,7 +211,7 @@ def mapa():
         puntos.append({"alert_id": a["alert_id"], "ts": a["created_at"], "zona": zona_de(a), "px": px, "py": py,
                        "severidad": a["severity"], "estado": estado_a.get(a["alert_id"], "pendiente")})
     saltos = []
-    for t in tickets():
+    for t in cards:
         camino = []
         for a in sorted((ALERTAS[x] for x in t["alert_ids"] if x in ALERTAS), key=lambda a: a["created_at"]):
             for h in a.get("entities", {}).get("hosts", []):
@@ -177,158 +225,19 @@ def mapa():
              (("IDENTIDAD", "Inicios de sesión y cuentas"), ("CORREO", "Correo y colaboración"), ("OTROS", "Sin zona"))]
     return {"zonas": zonas, "puntos": puntos, "saltos": saltos}
 
-class Aprobar(BaseModel):
-    ticket_id: str
-    action: str
-    target: str
-    approver: str
-    rol: str = "N2"
-    reason: str = ""
-
-@app.post("/api/aprobar")
-def aprobar(p: Aprobar):
-    if p.action not in CONTENCIONES:
-        raise HTTPException(400, f"'{p.action}' no es una contención: es un escalado y lo gestiona una persona")
-    regla = aprobacion(p.action, p.target, db.asset(p.target))
-    if not regla["permitido"]:
-        raise HTTPException(403, regla["nota"])
-    if regla["requiere"] and p.rol == "N1":
-        raise HTTPException(403, f"El N1 no puede aprobarlo: requiere {' + '.join(regla['requiere'])}")
-    body = {"target": p.target, "justification": p.reason or f"Ticket {p.ticket_id}", "ticket_id": p.ticket_id}
-    try:
-        if regla["requiere"]:
-            tok = requests.post(f"{SOC_API}/approvals", json={"action": p.action, "target": p.target,
-                                "approver": p.approver, "reason": p.reason}, timeout=10).json()["approval_token"]
-            body["approval_token"] = tok
-        r = requests.post(f"{SOC_API}/containment/{p.action}", json=body, timeout=10)
-    except requests.ConnectionError:
-        raise HTTPException(503, "La API simulada de Deloitte no está arrancada (puerto 8000)")
-    if r.status_code != 200:
-        raise HTTPException(r.status_code, r.text)
-    ruta = OUT / "tickets" / f"{p.ticket_id}.json"
-    if ruta.exists():
-        t = json.loads(ruta.read_text(encoding="utf-8"))
-        t.setdefault("executed_actions", []).append({**r.json(), "approver": p.approver, "rol": p.rol, "requiere": regla["requiere"]})
-        ruta.write_text(json.dumps(t, ensure_ascii=False, indent=1), encoding="utf-8")
-    return {"ok": True, "requiere": regla["requiere"], "resultado": r.json()}
-
-# ---------- Análisis en directo: pegar alertas nuevas (las del jurado) y ver al agente trabajar paso a paso ----------
-CATALOGO = {r["rule_id"]: r for r in csv.DictReader(open(DATA / "01_contexto/catalogo_casos_de_uso.csv", encoding="utf-8"))}
-VIVO = OUT / "alertas_vivo.jsonl"
-if VIVO.exists():
-    for _l in open(VIVO, encoding="utf-8"):
-        if _l.strip():
-            _a = json.loads(_l); ALERTAS[_a["alert_id"]] = _a
-TRABAJOS = {}
-
-def _normalizar(a: dict) -> dict:
-    """Completa una alerta mínima con los datos del catálogo de reglas."""
-    for k in ("alert_id", "created_at", "rule_id"):
-        if not a.get(k):
-            raise ValueError(f"A una alerta le falta '{k}'")
-    c = CATALOGO.get(a["rule_id"], {})
-    a.setdefault("severity", c.get("severidad_base", "medium")); a.setdefault("status", "new")
-    a.setdefault("rule_name", c.get("nombre", a["rule_id"])); a.setdefault("runbook", c.get("runbook", "RB-02"))
-    a.setdefault("source_product", c.get("fuente", "")); a.setdefault("description", c.get("logica", ""))
-    a.setdefault("mitre", {"tactic": c.get("tactica", ""), "technique_id": c.get("tecnica_id", ""), "technique": c.get("tecnica", "")})
-    a.setdefault("entities", {}); a.setdefault("evidence", {}); a.setdefault("related_events", [])
-    return a
-
-def _leer_alertas(texto: str) -> list[dict]:
-    texto = texto.strip()
-    if not texto:
-        raise ValueError("No has pegado ninguna alerta")
-    try:
-        d = json.loads(texto)
-        lista = d if isinstance(d, list) else d.get("items", [d]) if isinstance(d, dict) else []
-    except json.JSONDecodeError:
-        lista = [json.loads(l) for l in texto.splitlines() if l.strip()]
-    return [_normalizar(a) for a in lista]
-
-def _trabajo(jid: str, alertas: list[dict], saltar_motor: bool = False):
-    from apps.backend.agents import n1, fiscal
-    from apps.backend.hunt import shield, group
-    from apps.backend.rules.engine import decidir, LEVELS
-    J = TRABAJOS[jid]
-    try:
-        cambios = {c["id"] for c in csv.DictReader(open(DATA / "02_inventario/calendario_cambios.csv", encoding="utf-8"))}
-        resto = []
-        for a in alertas:
-            d = None if saltar_motor else decidir(n1.CTX, a)
-            if d:
-                J["cerradas"].append({"alert_id": a["alert_id"], "rule_id": a["rule_id"], **d})
-                J["pasos"].append({"tipo": "motor", "texto": f"{a['alert_id']}: cerrada por el motor de reglas · {d['reason']}"})
-            else:
-                a["_escudo_vigia"] = shield.analizar(a, cambios)
-                if a["_escudo_vigia"]:
-                    J["pasos"].append({"tipo": "escudo", "texto": f"{a['alert_id']}: el escudo detecta un intento de manipulación ({a['_escudo_vigia'][0]['tipo']})"})
-                resto.append(a)
-        grupos = group.agrupar(resto, list(ALERTAS.values())) if resto else []
-        for i, g in enumerate(grupos, 1):
-            J["estado"] = f"Investigando el caso {i} de {len(grupos)} ({len(g)} alerta(s))"
-            J["pasos"].append({"tipo": "caso", "texto": J["estado"]})
-            t = n1.investigar(g, on_step=lambda p: J["pasos"].append(p))
-            if LEVELS.index(t["severity"]) >= 2:
-                J["estado"] = "La IA revisora (fiscal) intenta tumbar el veredicto"
-                J["pasos"].append({"tipo": "fiscal", "texto": J["estado"]})
-                t = fiscal.aplicar(t, fiscal.revisar(t, g))
-            (OUT / "tickets").mkdir(parents=True, exist_ok=True)
-            (OUT / "tickets" / f"{t['ticket_id']}.json").write_text(json.dumps(t, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
-            J["tickets"].append({"ticket_id": t["ticket_id"], "title": t["title"], "verdict": t["verdict"], "severity": t["severity"],
-                                 "confidence": t["confidence"], "triage_seconds": t["triage_seconds"]})
-        J["estado"] = "terminado"
-    except Exception as e:
-        J["estado"], J["error"] = "error", f"{type(e).__name__}: {e}"
-    J["fin"] = time.time()
-
-def _lanzar(alertas, saltar_motor=False):
-    jid = uuid.uuid4().hex[:10]
-    TRABAJOS[jid] = {"id": jid, "estado": "en cola", "pasos": [], "cerradas": [], "tickets": [], "error": "", "inicio": time.time(), "fin": None,
-                     "alertas": len(alertas), "modo_demo": MOCK}
-    threading.Thread(target=_trabajo, args=(jid, alertas, saltar_motor), daemon=True).start()
-    return {"trabajo": jid}
-
-class Entrada(BaseModel):
-    texto: str
-
-@app.post("/api/analizar")
-def analizar(e: Entrada):
-    try:
-        alertas = _leer_alertas(e.texto)
-    except (ValueError, json.JSONDecodeError) as err:
-        raise HTTPException(400, f"No entiendo las alertas: {err}")
-    with open(VIVO, "a", encoding="utf-8") as f:
-        for a in alertas:
-            ALERTAS[a["alert_id"]] = a
-            f.write(json.dumps({k: v for k, v in a.items() if not k.startswith("_")}, ensure_ascii=False) + "\n")
-    return _lanzar(alertas)
-
 @app.post("/api/reinvestigar/{tid}")
 def reinvestigar(tid: str):
-    t = next((t for t in tickets() if t["ticket_id"] == tid), None)
-    if not t:
-        raise HTTPException(404)
-    return _lanzar([dict(ALERTAS[a]) for a in t["alert_ids"] if a in ALERTAS], saltar_motor=True)
+    aid = defensa.alert_from_ticket(tid)
+    ids = [aid] if aid else next((t["alert_ids"] for t in tickets() if t["ticket_id"] == tid), [])
+    if not ids:
+        raise HTTPException(404, "No se encontró el expediente.")
+    return defensa.launch(defensa._input(json.dumps(ids)), "guardia", False)
 
-@app.get("/api/trabajo/{jid}")
-def trabajo(jid: str, desde: int = 0):
-    J = TRABAJOS.get(jid)
-    if not J:
-        raise HTTPException(404)
-    return {**{k: v for k, v in J.items() if k != "pasos"}, "pasos": J["pasos"][desde:], "total_pasos": len(J["pasos"]),
-            "segundos": round((J["fin"] or time.time()) - J["inicio"], 1)}
 
 @app.get("/api/ejemplos_directo")
 def ejemplos_directo():
-    from scripts.alertas_directo import ALERTAS as EJ
-    return EJ
+    return [json.loads(line) for line in defensa.sample_path.read_text(encoding="utf-8").splitlines()
+            if line.startswith("{")]
 
-class Pregunta(BaseModel):
-    pregunta: str
 
-@app.post("/api/chat")
-def chat(p: Pregunta):
-    from apps.backend.agents import chat as ch
-    return ch.responder(p.pregunta)
-
-app.mount("/", StaticFiles(directory=str(ROOT / "apps" / "frontend"), html=True), name="web")
+app.mount("/", StaticFiles(directory=ROOT / "apps" / "frontend", html=True), name="web")

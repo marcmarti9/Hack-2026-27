@@ -1,7 +1,6 @@
 """Línea de tiempo enriquecida de un caso: alertas, eventos relacionados, informe N2 y caza, en lenguaje claro."""
 import json, re
-from apps.backend.tools import db
-from apps.backend.rules.engine import madrid, fuera_de_horario
+from .rules.engine import madrid, fuera_de_horario
 
 # Fases de la cadena de ataque (MITRE ATT&CK) en el orden en que se cuentan
 FASES = ["Acceso inicial", "Ejecución", "Persistencia", "Robo de credenciales", "Descubrimiento",
@@ -70,10 +69,10 @@ def _titulo(ev: dict) -> str:
     if s == "cicd_builds": return f"CI {g('pipeline')} · {g('step')} ({g('status')})"
     return ev.get("event_id", "")
 
-def _ip_info(ip: str) -> dict | None:
+def _ip_info(ip: str, database) -> dict | None:
     if not ip or ip.startswith(("10.", "172.16.", "192.168.")):
         return None
-    i = db.intel(ip)
+    i = database.intel(ip)
     geo, tip = i.get("geo") or {}, i.get("tip") or {}
     tipo = "Tor" if geo.get("is_tor") == "True" else "VPN comercial" if geo.get("is_vpn_provider") == "True" else \
            "Hosting" if geo.get("is_hosting") == "True" else "Proxy residencial" if geo.get("is_residential_proxy") == "True" else ""
@@ -82,14 +81,14 @@ def _ip_info(ip: str) -> dict | None:
     return {"ip": ip, "pais": geo.get("country", ""), "org": geo.get("as_org", ""), "tipo": tipo,
             "reputacion": tip.get("reputation", ""), "familia": tip.get("malware_family", ""), "confianza": tip.get("confidence")}
 
-def _entidades(ev: dict) -> list[dict]:
+def _entidades(ev: dict, database) -> list[dict]:
     out = []
     for k, tipo in (("user", "usuario"), ("user_upn", "usuario"), ("actor_upn", "usuario"), ("hostname", "equipo"), ("customer_id", "cliente")):
         v = ev.get(k)
         if v:
             out.append({"tipo": tipo, "valor": str(v).split("\\")[-1].split("@")[0]})
     for k in ("src_ip", "dst_ip", "sourceIPAddress", "sender_ip"):
-        info = _ip_info(ev.get(k, ""))
+        info = _ip_info(ev.get(k, ""), database)
         if info:
             out.append({"tipo": "ip", "valor": info["ip"], "info": info})
     return out
@@ -112,7 +111,9 @@ def _agrupar(pasos: list[dict]) -> list[dict]:
                 p["titulo"] = re.sub(r" → [\d.]+:\d+ \((\w+)\)", r" → varios equipos y puertos (escaneo)", p["titulo"])
     return out
 
-def construir(ticket: dict, alertas: list[dict], incidente: dict | None, max_pasos: int = 60) -> dict:
+def construir(ticket: dict, alertas: list[dict], incidente: dict | None, max_pasos: int = 60, *, database=None) -> dict:
+    if database is None:
+        from .tools import db as database
     pasos = {}
     for a in alertas:      # cada alerta es un hito
         fase = TACTICA.get(a.get("mitre", {}).get("tactic", ""), "Ejecución")
@@ -128,11 +129,11 @@ def construir(ticket: dict, alertas: list[dict], incidente: dict | None, max_pas
     for eid in list(pasos):
         if eid.startswith("A:"):
             continue
-        ev = db.get_event(eid)
+        ev = database.get_event(eid)
         if not ev:
             del pasos[eid]; continue
         pasos[eid] = {"ts": ev["timestamp"], "id": eid, "fuente": ev["source"], "fase": pasos[eid].get("_fase") or _fase_evento(ev),
-                      "hito": False, "titulo": _titulo(ev), "detalle": "", "mitre": pasos[eid].get("_mitre", ""), "entidades": _entidades(ev)}
+                      "hito": False, "titulo": _titulo(ev), "detalle": "", "mitre": pasos[eid].get("_mitre", ""), "entidades": _entidades(ev, database)}
     lista = _agrupar(sorted(pasos.values(), key=lambda p: p["ts"]))[:max_pasos]
     for p in lista:
         l = madrid(p["ts"])
