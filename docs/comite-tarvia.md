@@ -13,7 +13,7 @@
 ## Antes de presentar
 
 - Instala Vigía en la máquina que se usará ante el jurado. Abre **Vigía · Práctica**, entra con el botón de práctica y carga la carpeta raíz del dataset oficial. Espera a que la cola muestre las 11.061 alertas y deja abierto el índice.
-- Prepara un lote de ensayo JSONL y deja abierto el selector **Guardia**. El importador visual admite hasta diez IDs que existan en el índice o alertas nuevas completas. El comando de corpus admite lotes mayores y genera un expediente por entrada.
+- Descarga el lote de presentación y deja abierto el selector **Guardia**. El importador visual admite hasta diez IDs que existan en el índice o alertas nuevas completas. El comando de corpus admite lotes mayores y genera un expediente por entrada. [Cinco alertas oficiales y cuatro sintéticas](../eval/lote-presentacion-091.jsonl)
 - Si vas a enseñar contención, arranca el simulador oficial local antes de la exposición y comprueba que el puesto de práctica tiene el botón de aprobación disponible. El flujo registra quién aprobó y el resultado de la acción. [Configuración y ejecución](../README.md#respuesta-en-el-simulador-oficial)
 
 ## Recorrido de cuatro minutos

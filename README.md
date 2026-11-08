@@ -10,7 +10,7 @@ Tarvia es una empresa ficticia. Su SOC necesita investigar alertas y mantener co
 
 ## Instalar Vigía
 
-[Instaladores de Vigía](https://github.com/marcmarti9/Hack-2026-27/actions/workflows/desktop-installers.yml)
+[Descargar los instaladores verificados de Vigía 0.9.1](https://github.com/marcmarti9/Hack-2026-27/actions/runs/42433308471)
 
 | Sistema | Paquete |
 | --- | --- |
@@ -39,7 +39,7 @@ El inicio de sesión protege la mesa dentro del perfil del usuario del sistema. 
 - El motor local verifica patrones de EDR y ransomware, WAF, DNS y red, correo e identidad, AWS, CI/CD, DLP, fraude, Vela y OT. Los cierres rutinarios requieren evidencia de autorización, una detección errónea comprobada o, en casos acotados, prevención verificada. Si faltan hechos, muestra **Sin veredicto**. Las críticas se escalan en ambos turnos a N2 de guardia, responsable SOC y CISO con un plazo de 15 minutos. El expediente prepara el aviso.
 - Las alertas de la cadena de preransomware que citan evidencias compartidas se vinculan con un identificador de incidente estable. Su informe N2 muestra origen probable, fases con citas, alcance, propuestas de contención y preguntas abiertas. Los informes de cada alerta conservan su ID de entrada y comparten la lista de miembros acreditados en el lote. Las relaciones por entidad y tiempo aparecen como candidatas.
 
-Para ensayar la presentación, abre **Vigía · Práctica**, selecciona **Guardia** y carga el [lote de ensayo](eval/lote-ensayo.jsonl). Abre el cierre de SCCM para enseñar el cambio y el evento que lo respaldan. Luego abre el caso crítico de LSASS para enseñar los hechos, las dudas y la decisión que queda en manos de N2. **Relevo de guardia** reúne los escalados y plazos guardados. Cuando el jurado entregue sus alertas, carga su archivo como un lote nuevo. [Guion de defensa de cuatro minutos](docs/comite-tarvia.md#recorrido-de-cuatro-minutos)
+Para ensayar la presentación, abre **Vigía · Práctica**, selecciona **Guardia** y carga el [lote de presentación de 0.9.1](eval/lote-presentacion-091.jsonl). Incluye cinco alertas oficiales y cuatro sintéticas. Abre SCCM para enseñar el cambio que justifica el cierre y LSASS para enseñar la cadena de preransomware y la decisión que queda en manos de N2. **Relevo de guardia** reúne los escalados y plazos guardados. Cada expediente muestra la decisión vigente, las referencias y el historial en pantalla. **Exportar expediente** descarga el archivo para compartirlo. Cuando el jurado entregue sus alertas, carga su archivo como un lote nuevo. [Guion de defensa de cuatro minutos](docs/comite-tarvia.md#recorrido-de-cuatro-minutos)
 
 Para ensayar desde terminal con el índice configurado en `VIGIA_OUT_DIR`, ejecuta `python -m apps.desktop.defense lote.jsonl --mode guardia`. El expediente exportado contiene un indicador de evidencia local. Vale 0 si el motor se abstiene, 0,80 para un veredicto comprobado que requiere revisión y 0,95 para un cierre elegible. Esta escala describe el estado del análisis y carece de calibración estadística. Si se ejecuta y valida el contraste con OpenAI, se conserva la estimación declarada por el modelo.
 

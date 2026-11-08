@@ -123,3 +123,13 @@ El barrido tardó 300,41 s con cuatro trabajadores. La mediana de triaje fue 79 
 Las abstenciones se concentraron en DNS hacia destinos de titularidad sin verificar, correo e identidad. Al repetir las 15 etiquetas de la revisión previa, hubo 14 coincidencias y una abstención por identidad sin autorización demostrada. El motor señaló los cinco escalados esperados y añadió el caso de autorización incierta. Siete cierres se guardaron en el perfil de ensayo y coincidieron con la etiqueta de cierre. Parte de esta muestra orientó ajustes anteriores, por lo que se usa como regresión.
 
 El recorrido Qt completo pasó en una ejecución separada del barrido. Los cuatro instaladores de `ff5dc2a` pasaron en GitHub Actions y Vigía 0.9.0 se instaló y abrió en Fedora con el índice oficial. [Instaladores](https://github.com/marcmarti9/Hack-2026-27/actions/runs/42427079044)
+
+## Entrega de presentación 0.9.1
+
+Siete rondas con cinco revisores por ronda reunieron 244 comprobaciones. Las correcciones afectaron a los autocierres con evidencia incompleta, el enlace entre eventos y activos, los incidentes que reciben alertas en varios lotes y la preservación de decisiones humanas. El equipo cerró las rondas para centrar la entrega en el lote de defensa y el panel.
+
+El lote mixto pasó nueve casos en horario atendido y nueve en guardia. Incluye un cierre SCCM, un falso positivo de correo, la cadena de preransomware, fraude en comercio y posible salida de datos. Las variantes prueban un aviso externo vinculable a la cadena, uno con una referencia antigua, un destino incompatible y un correo sin evidencia. El contraste Luna/Sol y un HTTP 429 se comprobaron con el transporte simulado. En ambos recorridos se mantuvo el escalado crítico. [Lote de presentación](../eval/lote-presentacion-091.jsonl)
+
+El barrido de 0.9.1 generó 11.061 expedientes para 41 reglas con alertas en el dataset, con cero errores de procesamiento. El motor propuso 8.806 cierres elegibles y 221 escalados, y dejó 1.237 alertas sin veredicto por falta de evidencia. La validación comprobó un expediente por alerta, las referencias y la ruta de escalado de los 111 casos clasificados como críticos. Nueve alertas quedaron vinculadas al incidente de preransomware. En este barrido con cuatro trabajadores, la mediana fue 81 ms por alerta y el percentil 95 fue 274 ms. [Dataset oficial](https://github.com/dttdfr/DTT-UAB-The-Hack)
+
+El visor de evento y el historial muestran campos, etiquetas y texto legible. Los informes del mismo incidente comparten la membresía acreditada y la ficha separa una decisión humana vigente del ensayo anterior. [Instaladores de 0.9.1](https://github.com/marcmarti9/Hack-2026-27/actions/runs/42433308471) · [Guion](comite-tarvia.md)
