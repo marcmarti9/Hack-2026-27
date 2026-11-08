@@ -75,6 +75,10 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
+class ProviderUnavailable(ValueError):
+    """El proveedor remoto falló por transporte, acceso o capacidad."""
+
+
 DEFAULT_MODEL = "gpt-6-luna"
 DEFAULT_REVIEW_MODEL = "gpt-6.1-sol"
 
@@ -111,9 +115,10 @@ def openai_message(instructions: str, content: dict, *, schema: dict | None = No
         with build_opener(NoRedirect()).open(request, timeout=25) as response:
             data = json.loads(response.read(512_000).decode("utf-8"))
     except HTTPError as exc:
-        raise ValueError(f"OpenAI respondió HTTP {exc.code}.") from None
+        error_type = ProviderUnavailable if exc.code in {401, 403, 404, 429} or 500 <= exc.code < 600 else ValueError
+        raise error_type(f"OpenAI respondió HTTP {exc.code}.") from None
     except (OSError, HTTPException):
-        raise ValueError("OpenAI no está disponible. Prueba la consulta local.") from None
+        raise ProviderUnavailable("OpenAI no está disponible. Prueba la consulta local.") from None
     except (ValueError, RecursionError):
         raise ValueError("OpenAI devolvió una respuesta ilegible.") from None
     invalid = "OpenAI devolvió una respuesta ilegible."

@@ -3,13 +3,13 @@ import csv
 import hashlib
 import ipaddress
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from apps.backend.config import DATA
 from apps.backend.rules.engine import madrid, fuera_de_horario
-from apps.backend.tools import db
+from apps.backend.tools import db, threat_intel
 
 from .config import OUT, ROOT
 from . import defensa, timeline as tl, playbooks as pb
@@ -89,6 +89,21 @@ def resumen():
     return {**result, "manipulaciones": None, "hallazgos_caza": len(leer("caza.json", []))}
 
 
+@app.get("/api/inteligencia")
+def inteligencia():
+    snapshot = threat_intel.current_snapshot()
+    now = datetime.now(timezone.utc)
+    return {"fuentes": [
+        {"id": name, "url": source["url"], "registros": len(source["records"]),
+         "consultada": source["checked_at"], "actualizada": source["fetched_at"],
+         "publicada": source["published_at"],
+         "estado": "sin datos" if not source["fetched_at"] else
+         "copia anterior" if source["error"] or now - datetime.fromisoformat(source["fetched_at"]) >
+         timedelta(seconds=2 * threat_intel.INTERVAL) else "actualizada"}
+        for name, source in snapshot.get("sources", {}).items()
+    ]}
+
+
 @app.get("/api/tickets")
 def lista_tickets(q: str = Query("", max_length=80), offset: int = Query(0, ge=0), limit: int = Query(60, ge=1, le=120)):
     with db.read_session():
@@ -103,13 +118,13 @@ def ticket(tid: str):
         if t:
             t["incidente"] = t.get("incident")
             known = set(x["event_id"] for x in t.get("evidence", []))
+            analysed = {alert["alert_id"]: alert for alert in t["alertas"]}
             alerts = []
             for key in t["alert_ids"]:
-                row = t["alertas"][0] if key == aid else ALERTAS.get(key)
-                if row is None:
-                    continue
-                entities = row.get("entities", {}) if not row.get("external") else t["expediente"]["affected"]
-                alerts.append({**row, "entities": entities, "related_events": [ev for ev in row.get("related_events", []) if ev in known]})
+                if key in analysed:
+                    alerts.append(analysed[key])
+                elif row := ALERTAS.get(key):
+                    alerts.append({**row, "related_events": [ev for ev in row.get("related_events", []) if ev in known]})
             t["alertas"] = alerts
         else:
             t = next((row for row in tickets() if row["ticket_id"] == tid), None)

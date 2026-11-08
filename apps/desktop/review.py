@@ -2,15 +2,15 @@
 import json
 import sqlite3
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from time import perf_counter
 
 from apps.backend.rules.engine import madrid, severidad
 from apps.backend.rules.triage import effective_priority, local_finding, missing_references, route
-from apps.backend.tools import db
+from apps.backend.tools import db, threat_intel
 from apps.desktop.assistant import (
-    alert_references, available_model, documented_tickets, event_references, openai_message, review_model,
+    ProviderUnavailable, alert_references, available_model, documented_tickets, event_references, openai_message, review_model,
     ticket_references,
 )
 from apps.desktop.defense import report_ticket_id
@@ -341,6 +341,24 @@ def _ask(instructions: str, evidence: dict, allowed: set[str], model: str = "") 
     return classify_response(raw, allowed, sent_alerts, sent_tickets)
 
 
+def _intel_for_assets(alert, assets, events):
+    if not assets or not (snapshot := threat_intel.current_snapshot()):
+        return []
+    if alert.get("external"):
+        stamp = madrid(alert["created_at"]).astimezone(timezone.utc)
+        # Only original events in the alert's window can tie an external notice
+        # to an asset in the inventory. Correlation candidates do not count.
+        hosts = {str(event.get(field) or "").casefold() for event in events
+                 if stamp - timedelta(hours=24) <= madrid(event["timestamp"]).astimezone(timezone.utc) <= stamp
+                 for field in ("hostname", "src_host")}
+        assets = [asset for asset in assets if asset["hostname"].casefold() in hosts]
+    return [
+        {**match, "asset": asset["hostname"], "basis": "CVE registrada en el inventario de Tarvia."}
+        for asset in assets
+        for match in threat_intel.match_snapshot(snapshot, (entry["id"] for entry in asset["vulnerabilities"]))
+    ][:18]
+
+
 def _collect(alert: dict, *, correlate: bool = True) -> dict:
     related = list(dict.fromkeys(alert.get("related_events", [])))
     events = db.get_events(related)
@@ -386,6 +404,8 @@ def _collect(alert: dict, *, correlate: bool = True) -> dict:
         "cambios": changes,
         "alertas_relacionadas": linked,
     }
+    if intel := _intel_for_assets(alert, context["activos"], events):
+        context["inteligencia_vulnerabilidades"] = intel
     priority = severidad(alert, "needs_more_info")
     trace = []
     if correlate:
@@ -405,6 +425,9 @@ def _collect(alert: dict, *, correlate: bool = True) -> dict:
     if pivot_checked:
         trace.append({"tool": "Pivote de identidad", "query": "Cuenta e IP del POST en el IdP",
                       "count": len(pivot), "note": "Se consultaron inicios de sesión en ±1 h."})
+    if intel:
+        trace.append({"tool": "Inteligencia de vulnerabilidades", "query": "Cruce por CVE con el inventario",
+                      "count": len(intel), "note": "Señales públicas de exposición para contrastar con los registros."})
     return {
         "created_at": now(), "events": list(by_id.values()), "requested": related, "context": context,
         "trace": trace,
@@ -423,7 +446,7 @@ def _compact_events(events: list[dict]) -> list[dict]:
 
 
 def investigate(alert: dict, remote: bool = False, guidance: dict | None = None, *,
-                triage: bool = False, mode: str = "diurno", on_stage=None) -> dict:
+                triage: bool = False, mode: str = "diurno", on_stage=None, remote_skip_reason: str = "") -> dict:
     if mode not in {"diurno", "guardia"}:
         raise ValueError("Modo de triaje desconocido.")
     started = perf_counter()
@@ -445,8 +468,9 @@ def investigate(alert: dict, remote: bool = False, guidance: dict | None = None,
                          and analysis["severity"] != "critical" and alert["severity"] != "critical"
                          and not missing_references(analysis)
                          and (finding.get("auto_close") or finding.get("resolved")))
-    if remote and (analysis["events"] or (alert.get("external") and alert.get("declared_evidence"))) and not local_closure:
-        _analyze(alert, analysis, guidance or {}, finding, on_stage)
+    has_remote_context = analysis["events"] or (alert.get("external") and alert.get("declared_evidence"))
+    if remote and not local_closure and (has_remote_context or remote_skip_reason):
+        _analyze(alert, analysis, guidance or {}, finding, on_stage, remote_skip_reason=remote_skip_reason)
     elif triage or remote:
         analysis["provider"] = "Reglas locales"
         analysis["proposal"] = finding
@@ -515,12 +539,17 @@ def replay_demo(alert: dict, ticket: dict) -> dict:
     return analysis
 
 
-def _analyze(alert: dict, analysis: dict, guidance: dict, finding: dict | None, on_stage=None) -> None:
+def _analyze(alert: dict, analysis: dict, guidance: dict, finding: dict | None, on_stage=None, *,
+             remote_skip_reason: str = "") -> None:
     analysis["provider"] = available_model()
     verified = bool(finding and (finding.get("citations") or finding.get("sandbox_refs")))
     if verified:
         analysis["verdict"] = finding["verdict"]
         analysis["decision_basis"] = finding
+    if remote_skip_reason:
+        analysis["proposal_error"] = remote_skip_reason
+        analysis["proposal_skipped"] = True
+        return
     priority = effective_priority(alert, analysis, finding, analysis["verdict"]).level
     by_id = {event["event_id"]: event for event in analysis["events"]}
     proof_ids = [key for key in (finding or {}).get("citations", []) if key in by_id]
@@ -539,6 +568,8 @@ def _analyze(alert: dict, analysis: dict, guidance: dict, finding: dict | None, 
         proposal = _ask("Actúa como analista N1 de Tarvia y propón un veredicto.", evidence, allowed)
     except ValueError as error:
         analysis["proposal_error"] = str(error)
+        if isinstance(error, ProviderUnavailable):
+            analysis["proposal_unavailable"] = True
         return
     finally:
         analysis["timing"]["proposal_ms"] = round((perf_counter() - start) * 1000)

@@ -14,7 +14,9 @@ En la mesa, pulsa **Cerradas por Vigía** para enseñar qué trabajo se ha resue
 
 Si aún no tenéis el JSONL del jurado, pulsa **Alerta nueva de ensayo**. Es una entrada sintética vinculada a un registro verificable de Tarvia. En el informe, señala qué datos venían declarados por el sensor y qué registros recuperó Vigía. Si falta una prueba, muestra qué dato queda por confirmar. Si falla el servicio remoto, el expediente registra el fallo y conserva el análisis local.
 
-En el barrido offline de Vigía 0.9.1 se generaron 11.061 expedientes sin errores de procesamiento. Hubo 8.806 cierres elegibles, 221 escalados y 1.237 alertas sin veredicto por falta de evidencia. El barrido mide cobertura de procesamiento y tiempos del motor local. Las cifras de rendimiento de OpenAI se miden en el ensayo en directo. [Resultados y metodología](revision-adversarial.md#entrega-de-presentación-091)
+En el barrido de esta entrega se generaron 11.061 expedientes sin errores de procesamiento. Hubo 8.806 cierres elegibles, 281 escalados y 1.237 abstenciones por falta de evidencia. La mediana fue de 35 ms por expediente y el p95 de 103 ms con cuatro trabajadores en Docker. El barrido mide cobertura de procesamiento y tiempos del motor local. [Arquitectura y verificación](arquitectura-vigia.md#verificación-y-defensa)
+
+Si preguntan cómo se actualiza Vigía, señala **Inteligencia** en el Panel y abre el expediente de Jenkins `ALR-20261006-011825` después de analizarlo. El informe separa la prueba local de la coincidencia `CVE-2024-23897` en el catálogo de CISA. El recolector actualiza las fuentes cada hora y la política SOC sigue gobernando el escalado.
 
 Si preguntan qué aporta Vigía, abre una cita y enseña el vínculo entre dato, hallazgo y decisión. En un caso sin respaldo suficiente, muestra la pregunta abierta. En un crítico, enseña el escalado y el responsable. Los tres comportamientos se pueden comprobar en la misma web.
 

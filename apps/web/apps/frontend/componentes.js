@@ -1,7 +1,9 @@
 // VIGÍA · componentes visuales: historia del ataque, playbooks guiados y lo descartado
-const FASE_COLOR = {'Acceso inicial': '#86BC25', 'Ejecución': '#a78bfa', 'Persistencia': '#f472b6', 'Robo de credenciales': '#ff5c5c',
-  'Descubrimiento': '#ffa62b', 'Movimiento lateral': '#ff7a45', 'Recogida de datos': '#e6cf4a', 'Mando y control': '#5eead4',
-  'Exfiltración': '#ff3d71', 'Impacto': '#ff2d2d'};
+const FASE_COLOR = {'Acceso inicial': 'var(--marca)', 'Ejecución': 'var(--marca)', 'Persistencia': 'var(--naranja)',
+  'Robo de credenciales': 'var(--rojo)', 'Descubrimiento': 'var(--suave)', 'Movimiento lateral': 'var(--naranja)',
+  'Recogida de datos': 'var(--suave)', 'Mando y control': 'var(--naranja)', 'Exfiltración': 'var(--rojo)',
+  'Deterioro de defensas': 'var(--rojo)', 'Impacto': 'var(--rojo)'};
+const colorFase = fase => FASE_COLOR[fase] || 'var(--suave)';
 const guardar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
 const cargar = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch (e) { return d; } };
 
@@ -9,9 +11,9 @@ function chipEntidad(e) {
   if (e.tipo === 'ip') {
     const i = e.info || {}, mala = i.reputacion === 'malicious', sosp = i.reputacion === 'suspicious';
     const tip = [i.pais, i.org, i.tipo, i.reputacion && `TIP: ${i.reputacion}${i.familia ? ' · ' + i.familia : ''}`].filter(Boolean).join(' · ');
-    return `<span class="ent ip ${mala ? 'mala' : sosp ? 'sosp' : ''}" title="${esc(tip)}">🌍 ${esc(e.valor)}${i.pais ? ' · ' + esc(i.pais) : ''}${i.tipo ? ' · ' + esc(i.tipo) : ''}${mala ? ' · ' + esc(i.familia || 'maliciosa') : ''}</span>`;
+    return `<span class="ent ip ${mala ? 'mala' : sosp ? 'sosp' : ''}" title="${esc(tip)}">${esc(e.valor)}${i.pais ? ' · ' + esc(i.pais) : ''}${i.tipo ? ' · ' + esc(i.tipo) : ''}${mala ? ' · ' + esc(i.familia || 'maliciosa') : ''}</span>`;
   }
-  return `<span class="ent ${esc(e.tipo)}">${e.tipo === 'usuario' ? '👤' : e.tipo === 'equipo' ? '💻' : '🛒'} ${esc(e.valor)}</span>`;
+  return `<span class="ent ${esc(e.tipo)}">${esc(e.valor)}</span>`;
 }
 
 function historiaHTML(L) {
@@ -19,27 +21,29 @@ function historiaHTML(L) {
   const alcanzadas = L.fases.filter(f => f.n).length;
   const hitos = L.pasos.filter(p => p.hito).length;
   return `<div class="tarjeta historia" id="historia">
-    <div class="hist-cab"><div><h3>Historia del ataque</h3><p class="sub" style="margin:0">Pasa el ratón para ver detalles · pulsa un paso para ver el evento original · filtra por fase o por fuente</p></div>
+    <div class="hist-cab"><div><h3>Cronología</h3><p class="sub" style="margin:0">Abre un registro para ver sus datos originales. Filtra por fase o fuente.</p></div>
       <div class="hist-kpis">
         <div><b>${esc(L.duracion || '—')}</b><small>de principio a fin</small></div>
-        <div><b>${alcanzadas}/10</b><small>fases del ataque</small></div>
+        <div><b>${alcanzadas}</b><small>fases en el informe N2</small></div>
         <div><b>${L.pasos.length}</b><small>pasos · ${hitos} alertas</small></div>
         <div><b class="${L.fuera_de_horario ? 'rojo' : ''}">${fmt(L.fuera_de_horario)}</b><small>con el SOC cerrado</small></div>
       </div></div>
-    <div class="cadena">${L.fases.map(f => `<button class="fase ${f.n ? 'on' : ''}" data-fase="${esc(f.fase)}" style="--c:${FASE_COLOR[f.fase]}" ${f.n ? '' : 'disabled'}
-        title="${f.n ? fmt(f.n) + ' pasos · desde ' + esc(f.primera) : 'No alcanzada'}"><span>${esc(f.fase)}</span>${f.n ? `<b>${fmt(f.n)}</b>` : ''}</button>`).join('<i class="flecha">›</i>')}</div>
+    ${alcanzadas ? `<div class="cadena">${L.fases.filter(f => f.n).map(f => `<button class="fase on" data-fase="${esc(f.fase)}" style="--c:${colorFase(f.fase)}"
+        title="${fmt(f.n)} pasos · desde ${esc(f.primera)}"><span>${esc(f.fase)}</span><b>${fmt(f.n)}</b></button>`).join('')}</div>` : ''}
     <div class="filtros"><button class="vista-btn" id="ver-todo">Ver los ${L.pasos.length} pasos</button><span class="sep"></span>
       <button class="filtro activo" data-fuente="">Todas las fuentes</button>${L.fuentes.map(f => `<button class="filtro" data-fuente="${esc(f)}">${esc(f)}</button>`).join('')}</div>
     <div class="tl2 resumen">${L.pasos.map((p, i) => {
       const prev = L.pasos[i - 1], salto = prev ? (Date.parse(p.ts) - Date.parse(prev.hasta || prev.ts)) / 36e5 : 0;
       return `${salto >= 3 ? `<div class="hueco">··· ${salto >= 48 ? Math.round(salto / 24) + ' días' : Math.round(salto) + ' h'} después ···</div>` : ''}
-      <div class="paso2 ${p.hito ? 'hito' : ''} ${p.hito || !L.pasos.slice(0, i).some(q => q.fase === p.fase) ? 'clave' : ''}" data-f="${esc(p.fase)}" data-src="${esc(p.fuente_nombre)}" data-evr="${p.hito ? '' : esc(p.id)}" style="--c:${FASE_COLOR[p.fase]}">
-        <div class="cuando">${esc(p.hora_local.slice(0, 5))}<b>${esc(p.hora_local.slice(6))}</b>${p.fuera_de_horario ? '<span title="SOC cerrado">🌙</span>' : ''}</div>
+      <div class="paso2 ${p.hito ? 'hito' : ''} ${p.hito || !L.pasos.slice(0, i).some(q => q.fase === p.fase) ? 'clave' : ''}" data-f="${esc(p.fase)}" data-src="${esc(p.fuente_nombre)}" data-evr="${p.hito ? '' : esc(p.id)}" style="--c:${colorFase(p.fase)}">
+        <div class="cuando">${esc(p.hora_local.slice(0, 5))}<b>${esc(p.hora_local.slice(6))}</b>${p.fuera_de_horario ? '<span>Guardia</span>' : ''}</div>
         <div class="nodo"></div>
         <div class="cuerpo">
-          <div class="meta2"><span class="fuente">${esc(p.icono)} ${esc(p.fuente_nombre)}</span><span class="tag-fase">${esc(p.fase)}</span>
+          <div class="meta2"><span class="fuente">${esc(p.fuente_nombre)}</span><span class="tag-fase">${esc(p.fase)}</span>
+            ${p.tactica_declarada ? `<span class="suave">Táctica de la regla · ${esc(p.tactica_declarada)}</span>` : ''}
             ${p.mitre ? `<span class="mono suave">${esc(p.mitre)}</span>` : ''}${p.hito ? sev(p.severidad) : ''}
-            ${p.repeticiones > 1 ? `<span class="rep">×${fmt(p.repeticiones)}</span>` : ''}<span class="mono suave id">${esc(p.id)}</span></div>
+            ${p.repeticiones > 1 ? `<span class="rep">×${fmt(p.repeticiones)}</span>` : ''}
+            ${p.hito ? `<span class="mono suave id">${esc(p.id)}</span>` : `<button type="button" class="sec prueba mono id" aria-expanded="false" aria-label="Ver registro ${esc(p.id)}">${esc(p.id)}</button>`}</div>
           <div class="tit2">${esc(p.titulo)}</div>${p.detalle ? `<div class="det2">${esc(p.detalle)}</div>` : ''}
           ${p.entidades.length ? `<div class="ents">${p.entidades.slice(0, 4).map(chipEntidad).join('')}</div>` : ''}
           <div class="raw" hidden></div></div></div>`; }).join('')}</div></div>`;
@@ -55,9 +59,17 @@ function activarHistoria() {
     box.querySelectorAll('.fase').forEach(x => x.classList.toggle('sel', x.dataset.fase === fase)); aplica(); });
   box.querySelectorAll('.filtro').forEach(b => b.onclick = () => { fuente = b.dataset.fuente;
     box.querySelectorAll('.filtro').forEach(x => x.classList.toggle('activo', x === b)); aplica(); });
-  box.querySelectorAll('.paso2[data-evr]').forEach(p => { if (!p.dataset.evr) return; p.onclick = async () => {
-    const destino = p.querySelector('.raw'); if (!destino.hidden) { destino.hidden = true; return; }
-    await mostrarEvento(p.dataset.evr, destino); }; });
+  box.querySelectorAll('.paso2[data-evr]').forEach(p => {
+    if (!p.dataset.evr) return;
+    p.onclick = async event => {
+      if (event.target.closest('.raw')) return;
+      const destino = p.querySelector('.raw'), button = p.querySelector('button.id');
+      const opening = destino.hidden;
+      button.setAttribute('aria-expanded', String(opening));
+      if (opening) await mostrarEvento(p.dataset.evr, destino);
+      else destino.hidden = true;
+    };
+  });
 }
 
 const NOMBRES_CAMPO = {event_id: 'Evento', alert_id: 'Alerta', alert_ids: 'Alertas vinculadas', timestamp: 'Fecha', source: 'Fuente',
@@ -83,6 +95,34 @@ async function mostrarEvento(id, destino) {
   destino.textContent = 'Consultando el evento…';
   try { destino.innerHTML = registroHTML(await api('evento/' + encodeURIComponent(id))); }
   catch { destino.textContent = 'No se pudo recuperar el evento del índice.'; }
+}
+
+function origenEvidencia(event, report) {
+  if (event.verified ?? report.criterio_verificado?.citations?.includes(event.event_id)) return 'Verificada por regla';
+  const citations = (event.cited_by || []).map(role => ({proposal: 'propuesta', review: 'contraste'})[role]).filter(Boolean);
+  if (citations.length) return 'Citada en ' + citations.join(' y ');
+  return event.cited ? 'Citada en el expediente' : 'Registro de contexto';
+}
+
+const nombresInteligencia = {kev: 'CISA KEV', cve: 'Lista CVE'};
+
+function inteligenciaHTML(matches) {
+  if (!matches?.length) return '';
+  return `<section class="vigia-report-section">
+    <h3>Inteligencia de vulnerabilidades</h3>
+    <p class="vigia-report-muted">Cruce del inventario con avisos públicos consultados al investigar.</p>
+    <ul class="vigia-report-queries">${matches.map(match => {
+      const kev = match.source === 'kev';
+      const url = kev ? 'https://www.cisa.gov/known-exploited-vulnerabilities-catalog'
+        : 'https://www.cve.org/CVERecord?id=' + encodeURIComponent(match.cve);
+      const signal = kev ? 'Explotación observada' + (match.ransomware === 'known' ? ' · vinculada a ransomware' : '')
+        : match.state === 'REJECTED' ? 'Registro rechazado' : 'Aviso actualizado';
+      return `<li><div><a class="prueba mono" href="${url}" target="_blank" rel="noreferrer">${esc(match.cve)}</a>
+        <p>${esc(match.asset)} · ${signal}</p>
+        <p>${esc(nombresInteligencia[match.source])} · ${esc(match.error ? 'Copia anterior del ' : 'Consultada el ')}${esc(hora(match.fetched_at))}</p>
+      </div></li>`;
+    }).join('')}</ul>
+  </section>`;
 }
 
 function expedienteHTML(t) {
@@ -184,6 +224,7 @@ function expedienteHTML(t) {
         ${!tienePropuesta && !tieneContraste ? '<p class="vigia-report-muted">Este expediente se limita a las consultas y evidencias registradas.</p>' : ''}
       </section>
     </div>
+    ${inteligenciaHTML(informe.threat_intel)}
     <section class="vigia-report-section">
       <h3>Consultas al índice <span class="vigia-report-count">${fmt(consultas.length)}</span> ${ayudaHTML('las consultas al índice', 'Cada consulta muestra dónde buscó Vigía, qué datos usó, cuántos registros encontró y qué límites tuvo la búsqueda.')}</h3>
       ${consultas.length ? `<ul class="vigia-report-queries">${consultas.map(c => `<li>
@@ -501,7 +542,7 @@ async function vistaDescartado() {
         <div class="leyenda">${d.tipos.map(([t, n]) => `<span><i style="background:${color[t]}"></i>${esc(t)} · ${fmt(n)}</span>`).join('')}</div></div>
     </div>
     <div class="motivos">${d.grupos.map((g, i) => `<div class="motivo">
-      <div class="m-cab"><span class="m-icono">${g.icono}</span><div class="m-t"><b>${esc(g.titulo)}</b><span class="m-tipo" style="--c:${color[g.tipo] || '#5e5e5e'}">${esc(g.tipo)}</span></div>
+      <div class="m-cab"><div class="m-t"><b>${esc(g.titulo)}</b><span class="m-tipo" style="--c:${color[g.tipo] || '#5e5e5e'}">${esc(g.tipo)}</span></div>
         <div class="m-num"><b>${fmt(g.n)}</b><small>${g.pct}% · ${fmt(g.horas)} h</small></div></div>
       <div class="m-barra"><i style="width:${Math.max(1.5, 100 * g.n / d.grupos[0].n)}%;background:${color[g.tipo] || '#5e5e5e'}"></i></div>
       <p class="m-por">${esc(g.por_que)}</p>

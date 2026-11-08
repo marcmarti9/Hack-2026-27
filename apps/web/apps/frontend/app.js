@@ -11,7 +11,8 @@ const hora = iso => iso ? new Date(iso).toLocaleString('es-ES', {timeZone: 'Euro
 const VERDICTO = {true_positive: 'Ataque real', benign_true_positive: 'Actividad autorizada', false_positive: 'Falso positivo',
   false_negative: 'Falso negativo', true_negative: 'Verdadero negativo', needs_more_info: 'Falta información'};
 const veredicto = v => VERDICTO[v] || v || 'Sin veredicto';
-const confianza = n => typeof n === 'number' && Number.isFinite(n) ? `${Math.round(n * 100)} % de confianza` : 'Sin estimación de confianza';
+const confianza = n => Number.isFinite(n) && n > 0 ? `${Math.round(n * 100)} % de confianza` : 'Sin estimación de confianza';
+const cuentaAlertas = n => `${fmt(n)} ${n === 1 ? 'alerta' : 'alertas'}`;
 const disposicion = d => ({close: 'Cierre recomendado', review: 'Revisión humana', escalate: 'Escalar a N2',
   automatic: 'Cierre automático registrado', accepted: 'Aceptada por el analista', corrected: 'Corregida por el analista'})[d] || d;
 const mensajeError = j => typeof j.detail === 'string' ? textoVigia(j.detail) : 'Revisa los datos y vuelve a intentarlo.';
@@ -37,7 +38,7 @@ menuToggle.onclick = () => {
 
 const tarjetaCaso = t => `<a class="caso caso-fila" href="${enlace('caso', t.ticket_id)}">
   <div class="caso-identidad"><div class="t">${esc(t.title)}</div><p>${esc(veredicto(t.verdict))}${t.alert_id ? ` · <span class="mono">${esc(t.alert_id)}</span>` : ''}
-    ${t.alert_ids?.length ? ` · ${t.alert_ids.length} alerta(s)` : ''}${t.primera ? ` · desde ${esc(hora(t.primera))}` : ''}</p></div>
+    ${t.alert_ids?.length ? ` · ${cuentaAlertas(t.alert_ids.length)}` : ''}${t.primera ? ` · desde ${esc(hora(t.primera))}` : ''}</p></div>
   <div class="caso-estado"><div class="meta">${sev(t.severity)} <span>${confianza(t.confidence)}</span>
     ${t.out_of_hours ? '<span>· fuera de horario</span>' : ''} ${t.manipulation_detected?.detected ? '<span class="warn">· ⚠ intento de engaño</span>' : ''}
     ${t.human_review ? '<span class="warn">· revisar</span>' : ''}</div>
@@ -47,7 +48,9 @@ const tarjetaCaso = t => `<a class="caso caso-fila" href="${enlace('caso', t.tic
 const vistas = {
   async panel() {
     const hash = location.hash;
-    const [r, ts, rg] = await Promise.all([api('resumen'), api('tickets'), api('rgpd')]);
+    const [r, ts, rg, intel] = await Promise.all([
+      api('resumen'), api('tickets'), api('rgpd'), api('inteligencia').catch(() => null),
+    ]);
     if (location.hash !== hash) return;
     const graves = ts.filter(t => t.escalation?.escalate && ['critical', 'high'].includes(t.severity));
     $('#vista').innerHTML = `<section aria-labelledby="guardia-titulo">
@@ -83,6 +86,14 @@ const vistas = {
           ${r.benchmark?.p50_ms != null ? `<p>Barrido local · mediana ${esc(r.benchmark.p50_ms)} ms y p95 ${esc(r.benchmark.p95_ms)} ms por alerta.</p>` : ''}
           <a class="prueba" href="#descartado">Ver alertas descartadas</a></div>
       </div>
+      <section class="tarjeta guardia-inteligencia">
+        <h3>Inteligencia</h3>
+        ${intel?.fuentes?.length ? `<dl>${intel.fuentes.map(source => `<div>
+          <dt>${esc(nombresInteligencia[source.id])}</dt>
+          <dd>${esc(source.estado)}${source.actualizada ? ` · ${esc(hora(source.actualizada))} · ${fmt(source.registros)} registros` : ''}</dd>
+        </div>`).join('')}</dl>`
+        : `<p class="sub">${intel ? 'El monitor aún no ha guardado ninguna consulta.' : 'No se pudo consultar el estado de las fuentes.'}</p>`}
+      </section>
     </section>`;
   },
 
@@ -90,7 +101,7 @@ const vistas = {
     const hash = location.hash;
     const ts = await api('tickets');
     if (location.hash !== hash) return;
-    $('#vista').innerHTML = `<div class="editor-encabezado"><h2>Casos</h2><p class="sub">Ya investigados por VIGÍA, de más a menos grave. Tú decides.</p></div>
+    $('#vista').innerHTML = `<div class="editor-encabezado"><h2>Casos</h2><p class="sub">Incidentes investigados, por prioridad.</p></div>
       <form class="editor-busqueda" id="buscar-caso"><label for="id-buscar-caso">ID de alerta</label>
         <div><input id="id-buscar-caso" name="consulta" type="text" maxlength="80"><button type="submit">Buscar</button></div>
       </form>
@@ -114,15 +125,18 @@ const vistas = {
     const t = await api('tickets/' + encodeURIComponent(id)), inc = t.incidente;
     if (location.hash !== hash) return;
     const informe = t.expediente, evidencias = informe?.evidence || t.evidence || [];
+    const otrasAlertas = (t.alertas || []).filter(alert => alert.external && alert.alert_id !== t.alert_id);
     const n2 = rol() !== 'N1';
     $('#vista').innerHTML = `<div class="editor-encabezado"><p class="editor-ruta sub"><a class="prueba" href="${informe && t.alert_id ? '#directo' : '#bandeja'}">← ${informe && t.alert_id ? 'Triaje' : 'Casos'}</a></p>
       <h2>${esc(t.title)}</h2>
       <div class="meta editor-meta-caso">${sev(t.severity)} <span>${esc(veredicto(t.verdict))}</span> <span>· ${confianza(t.confidence)}</span>
-        <span>· ${t.alert_ids?.length || 1} alerta(s)</span> ${t.alert_id ? `<span class="mono">· ${esc(t.alert_id)}</span>` : ''} ${t.out_of_hours ? '<span>· empezó con el SOC cerrado</span>' : ''}
+        <span>· ${cuentaAlertas(t.alert_ids?.length || 1)}</span> ${t.alert_id ? `<span class="mono">· ${esc(t.alert_id)}</span>` : ''} ${t.out_of_hours ? '<span>· empezó con el SOC cerrado</span>' : ''}
         <span>· escalado: ${esc(t.escalation?.escalate ? t.escalation.to : 'no')}</span></div></div>
       ${t.manipulation_detected?.detected ? `<div class="aviso"><b>El atacante intentó engañar a la IA.</b> ${esc(t.manipulation_detected.where)}<br>
         <small>VIGÍA lo trata como una prueba más contra el atacante.</small></div>` : ''}
       ${expedienteHTML(t)}
+      ${otrasAlertas.length ? `<div class="tarjeta"><h3>Alertas del mismo incidente</h3>
+        <ul>${otrasAlertas.map(alert => `<li><a class="prueba mono" href="${enlace('caso', 'VIG-' + alert.alert_id)}">${esc(alert.alert_id)}</a> · ${esc(alert.rule_name)}</li>`).join('')}</ul></div>` : ''}
       <div class="dos editor-expediente-resumen">
         <div class="tarjeta"><h3>Qué ha pasado</h3><p>${esc(t.summary)}</p>
           <p class="sub" style="margin:0"><small>Severidad: ${esc(t.severity_rationale)}</small></p></div>
@@ -138,7 +152,7 @@ const vistas = {
           ? `<div class="paso tool"><b>${esc(pasoTxt(p))}</b> <span class="mono suave">${esc(p.nombre)}</span></div>`
           : `<div class="paso">${esc(p.texto)}</div>`).join('')}`}
           <h3>Pruebas</h3>${evidencias.map(e => `<div class="paso"><button class="sec prueba mono" data-ev="${esc(e.event_id)}">${esc(e.event_id)}</button>
-            · ${esc(e.source)}${e.relation ? ` · ${esc(e.relation)}${e.cited ? ' · citada' : ' · sin citar'}` : ''}<br><small>${esc(e.finding)}</small></div>`).join('') || '<p class="sub">Sin pruebas recuperadas.</p>'}
+            · ${esc(e.source)}${e.relation ? ` · ${esc(e.relation)} · ${esc(origenEvidencia(e, informe || t))}` : ''}<br><small>${esc(e.finding)}</small></div>`).join('') || '<p class="sub">Sin pruebas recuperadas.</p>'}
           <div id="evento" class="raw" hidden></div>
           ${informe?.declared_evidence && Object.keys(informe.declared_evidence).length ? `<details><summary>Evidencia declarada por el sensor</summary>${registroHTML(informe.declared_evidence)}</details>` : ''}</div>
         <div>

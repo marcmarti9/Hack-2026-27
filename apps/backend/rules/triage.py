@@ -312,9 +312,11 @@ def route(alert, analysis, mode, finding):
     if critical:
         result.update(recommendation="escalate", recipients=["N2 de guardia (teléfono)", "Responsable SOC", "CISO"],
                       reason="Crítica. Preparar el aviso y el expediente para revisión humana inmediata. SLA de 15 min.")
-    elif severity == "high" and verdict == "true_positive":
+    elif severity == "high":
         result.update(recommendation="escalate", recipients=["N2", "Responsable SOC"],
-                      reason="Verdadero positivo de severidad alta. Revisar con N2 en la misma jornada.")
+                      reason=("Verdadero positivo de severidad alta. Revisar con N2 en la misma jornada."
+                              if verdict == "true_positive" else
+                              "Severidad alta. N2 debe revisar el expediente en la misma jornada."))
     elif finding and finding["verdict"] == "true_positive" and alert["rule_id"] == "UC-EDR-004":
         result.update(recommendation="escalate", recipients=["N2"],
                       reason="Señal de acceso a credenciales. Confirmar alcance y decidir la respuesta con N2.")

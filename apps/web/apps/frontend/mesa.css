@@ -224,13 +224,13 @@
 }
 
 .mesa .mesa-primary {
-  background: var(--mesa-accent);
-  border-color: var(--mesa-accent);
-  color: #14251c;
-  padding-inline: 15px;
+  background: var(--texto);
+  border-color: var(--texto);
+  color: var(--ink-on-accent);
+  padding-inline: 16px;
 }
 
-.mesa .mesa-primary:hover:not(:disabled) { background: #bedecb; border-color: #bedecb; }
+.mesa .mesa-primary:hover:not(:disabled) { background: var(--mesa-accent); border-color: var(--mesa-accent); }
 .mesa .mesa-arrow { transition: transform 165ms var(--mesa-ease); }
 .mesa :is(.mesa-button, .mesa-action):hover:not(:disabled) .mesa-arrow { transform: translateX(3px); }
 

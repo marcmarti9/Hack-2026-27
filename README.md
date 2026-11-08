@@ -4,7 +4,7 @@
 
 [Revisión adversarial y matriz de requisitos](docs/revision-adversarial.md) · [Una página para el comité de Tarvia](docs/comite-tarvia.md)
 
-La entrega de presentación de Vigía es una web. El panel reúne el parte de guardia, los casos, la cronología, los playbooks y el análisis en directo con OpenAI. El escritorio comparte el motor de triaje. [Arranque web y Docker](apps/web/README.md) · [Guion del jurado](docs/defensa-web.md)
+La entrega de Vigía es una web. El Panel reúne las cifras del SIEM y de la guardia. Triaje recibe alertas nuevas, muestra el análisis en directo y genera un expediente por alerta. Casos agrupa incidentes con un vínculo acreditado. El escritorio comparte el motor de investigación. [Arranque web y Docker](apps/web/README.md) · [Guía de la web](docs/guia-web.md) · [Arquitectura](docs/arquitectura-vigia.md) · [Guion del jurado](docs/defensa-web.md)
 
 Tarvia es una empresa ficticia. Su SOC necesita investigar alertas y mantener cobertura fuera de horario. Vigía prepara evidencias, un veredicto, una prioridad y una recomendación para el analista. [Enunciado, datos y presentación de Deloitte](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/5d7569232756eaf0a8723b22c428b70e8f67824f)
 
@@ -144,10 +144,10 @@ docker run --rm --network none --read-only -v "$PWD/out:/vigia/out:ro" \
 | Referencias | Recuperación de `EDR-0123412` por ID. Los IDs inexistentes no devuelven eventos. |
 | Severidad | `ALR-20261005-000172` da `low` en el escenario de prueba con bloqueo sin efecto. La prueba comprueba la denegación 403 en WAF e introduce la premisa de ausencia de efecto para probar el ajuste. |
 | Aprobaciones | OT bloqueada por hostname o subred, doble aprobación según el activo y revisión N2 para servicios de uso dual. La función devuelve requisitos; la autenticación y la ejecución quedan pendientes. |
-| Barrido offline 0.9.0 | 11.061 expedientes sin errores. 9.820 veredictos y 1.241 abstenciones. 8.802 cierres elegibles, 2.029 revisiones y 230 escalados. Las 116 críticas finales escalaron sin autocierre. |
-| Tiempo del barrido | 300,41 s con cuatro trabajadores en Docker. Mediana 79 ms y p95 239 ms por expediente durante el barrido. |
+| Barrido offline web | 11.061 expedientes sin errores. 9.824 veredictos y 1.237 abstenciones. 8.806 cierres elegibles, 1.969 revisiones, 281 escalados y 5 recomendaciones de cierre. |
+| Tiempo del barrido | 121,39 s con cuatro trabajadores en Docker. Mediana de 35 ms y p95 de 103 ms por expediente. |
 
-El corpus contiene ejemplos de 41 de las 44 reglas del catálogo. Tres reglas adicionales tienen pruebas sintéticas. Los cierres elegibles se calcularon sin escribir decisiones en el perfil de escritorio. Los resultados describen el comportamiento observado del motor offline. La exactitud general y la latencia con OpenAI siguen sin medir. [Pruebas adversariales y límites](docs/revision-adversarial.md)
+El corpus contiene ejemplos de 41 de las 44 reglas del catálogo. Tres reglas adicionales tienen pruebas sintéticas. Los cierres elegibles se calcularon sin escribir decisiones. El barrido mide cobertura y latencia local. El guion recoge también ensayos remotos de versiones anteriores con alertas sintéticas. [Pruebas adversariales y límites](docs/revision-adversarial.md) · [Ensayos de defensa](docs/defensa-web.md)
 
 ## Contraste de las guías con el reto
 

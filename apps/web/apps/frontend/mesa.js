@@ -278,7 +278,7 @@ async function vistaMesaDirecto(jid, prellenar = '') {
       ${expedienteHTML(ticket)}
       <div class="mesa-report-grid">
         <section class="mesa-evidence"><h4>Evidencia recuperada <span class="mesa-evidence-count">${events.length}</span> ${ayudaHTML('la evidencia recuperada', 'Son registros encontrados en el índice. Pulsa el identificador de un evento para consultar el registro original.')}</h4>
-          ${events.length ? `<ul>${events.map(event => `<li><button type="button" class="mesa-name prueba" data-event="${esc(event.event_id)}">${esc(event.event_id)}</button> · ${esc(event.finding || event.source)}</li>`).join('')}</ul>` : '<p>El índice no devolvió registros para verificar esta alerta.</p>'}
+          ${events.length ? `<ul>${events.map(event => `<li><button type="button" class="mesa-name prueba" data-event="${esc(event.event_id)}">${esc(event.event_id)}</button> · ${esc(origenEvidencia(event, report))}<br><small>${esc(event.finding || event.source)}</small></li>`).join('')}</ul>` : '<p>El índice no devolvió registros para verificar esta alerta.</p>'}
           <div data-event-output role="status" hidden></div>
         </section>
         <section class="mesa-evidence"><h4>Declarada por el sensor ${ayudaHTML('la evidencia declarada', 'Son datos que venían en el archivo del SIEM. Las citas del expediente indican cuáles se pudieron comprobar.')}</h4>

@@ -1,12 +1,14 @@
 """Línea de tiempo enriquecida de un caso: alertas, eventos relacionados, informe N2 y caza, en lenguaje claro."""
-import json, re
+import re
+from datetime import datetime, timezone
 from .rules.engine import madrid, fuera_de_horario
 
 # Fases de la cadena de ataque (MITRE ATT&CK) en el orden en que se cuentan
 FASES = ["Acceso inicial", "Ejecución", "Persistencia", "Robo de credenciales", "Descubrimiento",
-         "Movimiento lateral", "Recogida de datos", "Mando y control", "Exfiltración", "Impacto"]
+         "Movimiento lateral", "Recogida de datos", "Mando y control", "Exfiltración", "Deterioro de defensas", "Impacto"]
 TACTICA = {"Initial Access": "Acceso inicial", "Execution": "Ejecución", "Persistence": "Persistencia",
-           "Privilege Escalation": "Persistencia", "Defense Evasion": "Persistencia", "Credential Access": "Robo de credenciales",
+           "Privilege Escalation": "Escalada de privilegios", "Defense Evasion": "Evasión de defensas",
+           "Defense Impairment": "Deterioro de defensas", "Credential Access": "Robo de credenciales",
            "Discovery": "Descubrimiento", "Lateral Movement": "Movimiento lateral", "Collection": "Recogida de datos",
            "Command and Control": "Mando y control", "Exfiltration": "Exfiltración", "Impact": "Impacto"}
 FUENTE = {"email": ("Correo", "✉"), "email_clicks": ("Clic en correo", "🖱"), "idp_signins": ("Inicio de sesión", "🔑"),
@@ -16,28 +18,13 @@ FUENTE = {"email": ("Correo", "✉"), "email_clicks": ("Clic en correo", "🖱")
           "dlp": ("Fuga de datos (DLP)", "📤"), "sql_audit": ("Base de datos", "🗄"), "ai_gateway": ("Asistente Vela", "🤖"),
           "ad_events": ("Directorio activo", "🏢"), "cicd_builds": ("Pipeline CI", "⚙"), "alerta": ("Alerta del SIEM", "🚨")}
 
-def _fase_evento(ev: dict) -> str:
-    s, t = ev["source"], json.dumps(ev, ensure_ascii=False).lower()
-    if s in ("email", "email_clicks"): return "Acceso inicial"
-    if s == "vpn": return "Acceso inicial"
-    if s == "idp_signins": return "Acceso inicial"
-    if s == "idp_audit": return "Persistencia" if any(k in t for k in ("rule", "consent", "mfa")) else "Recogida de datos"
-    if s == "edr_events":
-        if "lsass" in t or "comsvcs" in t: return "Robo de credenciales"
-        if "vssadmin" in t or "wbadmin" in t: return "Impacto"
-        if "psexe" in t: return "Movimiento lateral"
-        if any(k in t for k in ("registry_set", "service_install", "crontab")): return "Persistencia"
-        if any(k in t for k in ("nltest", "adfind", "net group", "whoami")): return "Descubrimiento"
-        if "sqlcmd" in t: return "Recogida de datos"
-        return "Ejecución"
-    if s in ("dlp", "dns"): return "Exfiltración"
-    if s == "cloudtrail": return "Exfiltración" if "getobject" in t else "Persistencia" if any(k in t for k in ("createuser", "attach", "createaccesskey")) else "Descubrimiento"
-    if s == "sql_audit": return "Recogida de datos"
-    if s == "ad_events": return "Persistencia"
-    if s in ("proxy", "firewall"): return "Mando y control"
-    if s == "ecom_account": return "Impacto"
-    if s == "cicd_builds": return "Acceso inicial"
-    return "Ejecución"
+FASES_N2 = {
+    "Correo de entrada": "Acceso inicial", "Comunicación periódica": "Mando y control",
+    "Reconocimiento": "Descubrimiento",
+    "Acceso a credenciales": "Robo de credenciales", "Inhibición de recuperación": "Impacto",
+    "Privilegios persistentes": "Persistencia", "Defensa desactivada": "Deterioro de defensas",
+}
+
 
 def _titulo(ev: dict) -> str:
     """Una frase que se entiende sin saber leer logs."""
@@ -97,7 +84,7 @@ def _agrupar(pasos: list[dict]) -> list[dict]:
     """Junta eventos seguidos casi iguales (beacon cada minuto, escaneo de puertos) en un solo paso con contador."""
     out = []
     for p in pasos:
-        clave = (p["fuente"], p["fase"], re.sub(r"[\d.:]+", "#", p["titulo"])) if not p["hito"] else None
+        clave = (p["fuente"], p["fase"], re.sub(r"[\d.:]+", "#", p["titulo"])) if p["fase"] == "Contexto" else None
         if out and clave and out[-1].get("_clave") == clave:
             out[-1]["repeticiones"] += 1; out[-1]["hasta"] = p["ts"]
             continue
@@ -107,34 +94,68 @@ def _agrupar(pasos: list[dict]) -> list[dict]:
         p.pop("_clave", None)
         if p["repeticiones"] > 1:
             p["detalle"] = f"Se repite {p['repeticiones']} veces hasta las {madrid(p['hasta']).strftime('%H:%M')}"
-            if p["fuente"] == "firewall":
-                p["titulo"] = re.sub(r" → [\d.]+:\d+ \((\w+)\)", r" → varios equipos y puertos (escaneo)", p["titulo"])
     return out
+
+
+def _instant(value: str) -> datetime:
+    stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return stamp if stamp.utcoffset() is not None else stamp.replace(tzinfo=timezone.utc)
+
 
 def construir(ticket: dict, alertas: list[dict], incidente: dict | None, max_pasos: int = 60, *, database=None) -> dict:
     if database is None:
         from .tools import db as database
     pasos = {}
-    for a in alertas:      # cada alerta es un hito
-        fase = TACTICA.get(a.get("mitre", {}).get("tactic", ""), "Ejecución")
-        ents = [{"tipo": "equipo", "valor": h["hostname"]} for h in a.get("entities", {}).get("hosts", [])] + \
-               [{"tipo": "usuario", "valor": u["upn"].split("@")[0]} for u in a.get("entities", {}).get("users", []) if "@" in u.get("upn", "")]
-        pasos["A:" + a["alert_id"]] = {"ts": a["created_at"], "id": a["alert_id"], "fuente": "alerta", "fase": fase, "hito": True,
-                                      "titulo": f"{a['rule_name']} ({a['rule_id']})", "detalle": a.get("description", ""),
-                                      "mitre": a.get("mitre", {}).get("technique_id", ""), "severidad": a["severity"], "entidades": ents}
-        for eid in a.get("related_events", []):
-            pasos.setdefault(eid, {"_fase": fase})
-    for e in (incidente or {}).get("timeline", []) + [{"event_id": x["event_id"]} for x in ticket.get("evidence", [])]:
-        pasos.setdefault(e["event_id"], {"_mitre": e.get("mitre", "")})
-    for eid in list(pasos):
-        if eid.startswith("A:"):
+    evidence = {row["event_id"]: row for row in ticket.get("evidence", [])}
+    local = set((ticket.get("criterio_verificado") or {}).get("citations", []))
+    n2 = {}
+    for finding in (incidente or {}).get("timeline", []):
+        ids = [finding["event_id"], *finding.get("evidence_ids", [])]
+        for event_id in dict.fromkeys(ids):
+            n2.setdefault(event_id, finding)
+
+    event_ids = dict.fromkeys((*evidence, *n2))
+    for alert in alertas:
+        technique = alert.get("mitre") or {}
+        entities = alert.get("entities") or {}
+        ents = [{"tipo": "equipo", "valor": host["hostname"]} for host in entities.get("hosts", []) if host.get("hostname")]
+        ents += [{"tipo": "usuario", "valor": user["upn"].split("@")[0]}
+                 for user in entities.get("users", []) if user.get("upn")]
+        pasos["A:" + alert["alert_id"]] = {
+            "ts": alert["created_at"], "id": alert["alert_id"], "fuente": "alerta",
+            "fase": "Alerta SIEM", "hito": True, "tactica_declarada": TACTICA.get(technique.get("tactic", ""), ""),
+            "titulo": f"{alert['rule_name']} ({alert['rule_id']})", "detalle": alert.get("description", ""),
+            "mitre": technique.get("technique_id", ""), "severidad": alert["severity"], "entidades": ents,
+        }
+        event_ids.update(dict.fromkeys(alert.get("related_events", [])))
+
+    # A data source or a model citation alone cannot establish an attack phase.
+    for event_id in event_ids:
+        event = database.get_event(event_id)
+        if not event:
             continue
-        ev = database.get_event(eid)
-        if not ev:
-            del pasos[eid]; continue
-        pasos[eid] = {"ts": ev["timestamp"], "id": eid, "fuente": ev["source"], "fase": pasos[eid].get("_fase") or _fase_evento(ev),
-                      "hito": False, "titulo": _titulo(ev), "detalle": "", "mitre": pasos[eid].get("_mitre", ""), "entidades": _entidades(ev, database)}
-    lista = _agrupar(sorted(pasos.values(), key=lambda p: p["ts"]))[:max_pasos]
+        finding = n2.get(event_id, {})
+        stage = finding.get("stage", "")
+        if stage in FASES or stage in FASES_N2:
+            phase = FASES_N2.get(stage, stage)
+        elif finding or event_id in local or evidence.get(event_id, {}).get("verified"):
+            phase = "Hallazgo"
+        else:
+            phase = "Contexto"
+        main_event = finding.get("event_id") == event_id
+        pasos[event_id] = {
+            "ts": event["timestamp"], "id": event_id, "fuente": event["source"], "fase": phase,
+            "hito": False, "titulo": _titulo(event),
+            "detalle": (finding.get("finding") or finding.get("description", "")) if main_event else "",
+            "mitre": finding.get("mitre", "") if main_event else "", "entidades": _entidades(event, database),
+        }
+    def by_time(step):
+        return _instant(step["ts"])
+
+    ordered = _agrupar(sorted(pasos.values(), key=by_time))
+    highlights = [step for step in ordered if step["fase"] != "Contexto"][:max_pasos]
+    context = [step for step in ordered if step["fase"] == "Contexto"][:max_pasos - len(highlights)]
+    lista = sorted(highlights + context, key=by_time)
     for p in lista:
         l = madrid(p["ts"])
         p["hora_local"] = l.strftime("%d/%m %H:%M"); p["fuera_de_horario"] = fuera_de_horario(p["ts"])
@@ -143,8 +164,7 @@ def construir(ticket: dict, alertas: list[dict], incidente: dict | None, max_pas
               "primera": next((p["hora_local"] for p in lista if p["fase"] == f), "")} for f in FASES]
     dur = ""
     if len(lista) > 1:
-        from datetime import datetime
-        d = datetime.fromisoformat(lista[-1]["ts"].replace("Z", "+00:00")) - datetime.fromisoformat(lista[0]["ts"].replace("Z", "+00:00"))
+        d = _instant(lista[-1]["ts"]) - _instant(lista[0]["ts"])
         h = d.total_seconds() / 3600
         dur = f"{int(h * 60)} min" if h < 2 else f"{h:.0f} h" if h < 48 else f"{h / 24:.1f} días"
     return {"pasos": lista, "fases": fases, "duracion": dur,

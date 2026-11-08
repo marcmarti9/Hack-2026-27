@@ -1,4 +1,5 @@
 """Servicio web para el triaje canónico, los expedientes y las decisiones."""
+from bisect import insort
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
@@ -16,7 +17,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from apps.backend.config import ROOT as REPO
-from apps.backend.rules.engine import fuera_de_horario, madrid
+from apps.backend.rules.engine import LEVELS, fuera_de_horario, madrid
 from apps.backend.tools import db
 from apps.desktop import assistant, sim_response
 from apps.desktop.defense import ALERT_ID, MAX_BYTES, _object, parse_alerts
@@ -190,25 +191,65 @@ def _summary(alert, report, stored):
     }
 
 
+def _incident_id(report):
+    incident_id = (report.get("incident") or {}).get("incident_id")
+    return incident_id if incident_id == report.get("ticket_id") else None
+
+
+def _incident_members(rows):
+    groups = {}
+    for row in rows.values():
+        report = (row.get("analysis") or {}).get("report") or {}
+        if incident_id := _incident_id(report):
+            groups.setdefault(incident_id, set()).update(report["alert_ids"])
+    return groups
+
+
+def _with_incident_members(report, groups):
+    members = groups.get(_incident_id(report))
+    if not members:
+        return report
+    ids = sorted(members.union(report["alert_ids"]))
+    return {**report, "alert_ids": ids, "incident": {**report["incident"], "alert_ids": ids}}
+
+
+def _case_rank(case):
+    ranks = {"critical": 0, "high": 1, "medium": 2, "low": 3, "informational": 4}
+    return ranks.get(case["severity"], 5)
+
+
+def _representatives(cases):
+    seen = set()
+    result = []
+    for incident_id, case in cases:
+        if incident_id and incident_id in seen:
+            continue
+        seen.add(incident_id)
+        result.append(case)
+    return result
+
+
 def cards(query="", offset=0, limit=60):
     rows = reviews.all()
+    groups = _incident_members(rows)
     index, _, _ = _catalog()
     keys = dict.fromkeys((*rows, *showcase, *(aid for aid, (_, route, _) in index.items() if route == "escalate")))
     if query:
         query = query.casefold()
         keys = dict.fromkeys(aid for aid in (*keys, *index) if query in aid.casefold())
-    results = []
-    incidents = set()
+    cases = []
     for aid in keys:
         if data := record(aid, rows):
             alert, _, report, stored = data
-            incident = report.get("ticket_id")
-            if not query and incident and incident in incidents and aid not in rows:
-                continue
-            incidents.add(incident)
-            results.append(_summary(alert, report, stored))
-    ranks = {"critical": 0, "high": 1, "medium": 2, "low": 3, "informational": 4}
-    return sorted(results, key=lambda row: (ranks.get(row["severity"], 5), row["primera"]))[offset:offset + limit]
+            report = _with_incident_members(report, groups)
+            cases.append((_incident_id(report), _summary(alert, report, stored)))
+    if query:
+        results = [case for _, case in cases]
+    else:
+        cases.sort(key=lambda pair: (_case_rank(pair[1]), not pair[1]["human_review"],
+                                     pair[1]["alert_id"] not in rows, pair[1]["primera"]))
+        results = _representatives(cases)
+    return sorted(results, key=lambda row: (_case_rank(row), row["primera"]))[offset:offset + limit]
 
 
 def overview(total, after_hours):
@@ -265,10 +306,30 @@ def _history(aid):
             for row in reviews.history(aid, limit=80)]
 
 
+def _timeline_alert(alert, report):
+    external = alert.get("external")
+    known = {event["event_id"] for event in report.get("evidence", [])
+             if not external or (event.get("relation") == "directa" and event.get("cited"))}
+    return {**alert, "entities": report.get("affected", {}) if external else alert.get("entities", {}),
+            "related_events": [event_id for event_id in alert.get("related_events", []) if event_id in known]}
+
+
 def ticket_view(aid):
-    if not (data := record(aid)):
+    rows = reviews.all()
+    if not (data := record(aid, rows)):
         return None
     alert, analysis, report, stored = data
+    incident_id = _incident_id(report)
+    report = _with_incident_members(report, _incident_members(rows))
+    timeline_alerts = [_timeline_alert(alert, report)]
+    if incident_id:
+        for member in report["alert_ids"]:
+            if member == aid:
+                continue
+            sibling = (rows.get(member) or {}).get("analysis") or {}
+            sibling_report = sibling.get("report") or {}
+            if sibling.get("input_alert") and _incident_id(sibling_report) == incident_id:
+                timeline_alerts.append(_timeline_alert(sibling["input_alert"], sibling_report))
     decision = _decision(stored)
     report = {**report, "decision_actual": decision, "review_provider": analysis.get("review_provider"),
               "review_reason": analysis.get("review_reason"), "tiempos_ms": analysis.get("timing", {}),
@@ -286,7 +347,7 @@ def ticket_view(aid):
     trace = [{"tipo": "evidencia", "texto": line} if isinstance(line, str) else line
              for line in report.get("consultas", [])]
     return {
-        **report, **_summary(alert, report, stored), "expediente": report, "alertas": [alert],
+        **report, **_summary(alert, report, stored), "expediente": report, "alertas": timeline_alerts,
         "fiscal": {"agrees": challenge["verdict"] == (report.get("propuesta") or {}).get("verdict"),
                    "comment": challenge.get("summary", ""), "objections": challenge.get("questions", [])}
         if challenge else None,
@@ -328,19 +389,30 @@ def _save_live_analysis(aid, analysis):
 def _run(job, alerts, mode, remote):
     try:
         errors = {}
-        for alert in alerts:
+        remote_skip_reason = ""
+        input_order = {alert["alert_id"]: index for index, alert in enumerate(alerts)}
+
+        def record_ticket(alert, report, stored):
+            ticket = _summary(alert, report, stored)
+            with lock:
+                insort(job["tickets"], ticket, key=lambda row: input_order[row["alert_id"]])
+
+        for alert in sorted(alerts, key=lambda item: LEVELS.index(item["severity"]), reverse=True):
             aid = alert["alert_id"]
             if previous := live_queue.reuse(aid, corpus_report):
                 _stage(job, "guardado", f"{aid} · se reutilizó el expediente con decisión vigente.")
-                with lock:
-                    job["tickets"].append(_summary(alert, *previous))
+                record_ticket(alert, *previous)
                 continue
             live_queue.running(aid)
             _stage(job, "caso", f"{aid} · recuperando registros, inventario y contexto.")
             try:
-                guidance = reviews.guidance(alert["runbook"]) if remote else None
+                guidance = reviews.guidance(alert["runbook"]) if remote and not remote_skip_reason else None
                 analysis = investigate(alert, remote, guidance, triage=True, mode=mode,
-                                       on_stage=lambda kind, text: _stage(job, kind, f"{aid} · {text}"))
+                                       on_stage=lambda kind, text: _stage(job, kind, f"{aid} · {text}"),
+                                       remote_skip_reason=remote_skip_reason)
+                if analysis.get("proposal_unavailable"):
+                    remote_skip_reason = ("Se omitió el contraste remoto tras un fallo del proveedor en este lote. "
+                                          + analysis["proposal_error"])
                 report, stored = _save_live_analysis(aid, analysis)
             except ValueError as error:
                 errors[aid] = str(error)
@@ -354,8 +426,7 @@ def _run(job, alerts, mode, remote):
             if report.get("provider_errors"):
                 _stage(job, "aviso", f"{aid} · {next(iter(report['provider_errors'].values()))}")
             _stage(job, "guardado", f"{aid} · expediente guardado.")
-            with lock:
-                job["tickets"].append(_summary(alert, report, stored))
+            record_ticket(alert, report, stored)
         with lock:
             job.update(estado="terminado" if job["tickets"] else "error", fin=time(),
                        error="; ".join(f"{aid}: {value}" for aid, value in errors.items()))
@@ -510,6 +581,7 @@ def save_document(name: str, entry: Document):
 @router.get("/relevo")
 def handover():
     rows = reviews.all()
+    groups = _incident_members(rows)
     cases = []
     count = closes = pending = 0
     for aid, row in rows.items():
@@ -521,11 +593,13 @@ def handover():
         if analysis["routing"]["recommendation"] == "escalate":
             if data := record(aid, rows):
                 alert, _, report, stored = data
-                cases.append(_summary(alert, report, stored))
+                report = _with_incident_members(report, groups)
+                cases.append((_incident_id(report), _summary(alert, report, stored)))
         elif not row.get("decision"):
             pending += 1
-    cases.sort(key=lambda case: (case["severity"] != "critical", case["plazo"] or ""))
-    return {"modo": "guardia", "casos": cases, "investigadas": count, "cierres": closes, "pendientes": pending}
+    cases.sort(key=lambda pair: (_case_rank(pair[1]), not pair[1]["human_review"], pair[1]["plazo"] or ""))
+    return {"modo": "guardia", "casos": _representatives(cases), "investigadas": count, "cierres": closes,
+            "pendientes": pending}
 
 
 class Question(BaseModel):

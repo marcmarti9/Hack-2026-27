@@ -12,6 +12,54 @@ from apps.backend.config import DATA, ROOT
 from apps.backend.tools import db
 
 
+def check_incident_projection(client, corroborated, unrelated):
+    recovery = db.get_alert("ALR-20261010-011798")
+    external = {"ALR-20261010-999991": "EDR-0123415", "ALR-20261010-999992": "EDR-0123416"}
+    variants = [{**recovery, "alert_id": aid, "related_events": [event]} for aid, event in external.items()]
+    submitted = client.post("/api/analizar", json={"texto": json.dumps([recovery["alert_id"], *variants]),
+                                                 "modo": "guardia"})
+    assert submitted.status_code == 200, submitted.json()
+    until = monotonic() + 25
+    while monotonic() < until:
+        job = client.get(f"/api/trabajo/{submitted.json()['trabajo']}").json()
+        if job["fin"]:
+            break
+        sleep(0.08)
+    assert job["estado"] == "terminado" and len(job["tickets"]) == 3, job["error"]
+
+    group = "VIG-INC-FW-0025321"
+    identifiers = {recovery["alert_id"], corroborated["alert_id"], *external}
+    queue = {case["alert_id"] for case in client.get("/api/directo").json()["alertas"]}
+    assert identifiers | {unrelated["alert_id"]} <= queue
+    for cases in (client.get("/api/tickets").json(), client.get("/api/relevo").json()["casos"]):
+        matches = [case for case in cases if case["incident_id"] == group]
+        assert len(matches) == 1 and identifiers <= set(matches[0]["alert_ids"])
+        assert matches[0]["human_review"], "El representante debe conservar la revisión pendiente."
+        assert any(case["alert_id"] == unrelated["alert_id"] for case in cases)
+
+    for aid in identifiers:
+        matches = client.get("/api/tickets", params={"q": aid}).json()
+        assert [case["alert_id"] for case in matches] == [aid]
+        detail = client.get(f"/api/tickets/VIG-{aid}").json()
+        report = detail["expediente"]
+        assert detail["alert_id"] == aid and report["incident"]["incident_id"] == group
+        assert identifiers <= set(report["alert_ids"])
+        assert unrelated["alert_id"] not in report["alert_ids"]
+        assert identifiers <= {step["id"] for step in detail["linea"]["pasos"] if step["hito"]}
+        members = {alert["alert_id"]: alert for alert in detail["alertas"]}
+        for member, event in external.items():
+            assert members[member]["external"] and members[member]["related_events"] == [event]
+            if member == aid:
+                assert members[member]["entities"] == report["affected"]
+        exported = client.get(f"/api/expediente/{aid}").json()
+        assert exported["alerta"] == aid and exported["informe"]["alert_ids"] == report["alert_ids"]
+        if aid == corroborated["alert_id"]:
+            assert detail["decision_actual"]["decision"] == "accepted"
+            assert exported["informe"]["decision_actual"]["verdict"] == "true_positive"
+        else:
+            assert not detail["decision_actual"]
+
+
 def main():
     with TemporaryDirectory(prefix="vigia-web-test-") as directory, patch.dict(
         os.environ, {"VIGIA_WEB_OUT": directory, "VIGIA_WEB_CORPUS": str(Path(directory) / "no-corpus"),
@@ -90,6 +138,7 @@ def main():
                 investigator.assert_not_called()
             changed = {**corroborated, "rule_name": "Otro contenido"}
             assert client.post("/api/analizar", json={"texto": json.dumps(changed)}).status_code == 409
+            check_incident_projection(client, corroborated, unknown)
 
         from apps.desktop.defense import _external
         from apps.desktop.review import investigate
@@ -115,7 +164,7 @@ def main():
             analysis = investigate(_external(routine), remote=True, triage=True)
             assert analysis["review_error"] and not analysis["routing"]["automatic"]
 
-    print("Mesa web: lote nuevo, autocierre auditado, escalado, asignación, persistencia y contraste sin red.")
+    print("Mesa web: lote nuevo, autocierre auditado, escalado, asignación, incidentes y contraste sin red.")
 
 
 if __name__ == "__main__":

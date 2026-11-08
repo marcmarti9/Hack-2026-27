@@ -128,7 +128,12 @@ def build_report(alert, analysis):
     events = analysis.get("events", [])
     context = analysis.get("context", {})
     direct = set(analysis.get("requested", []))
-    cited = set(proposal.get("citations", [])) | set(contrast.get("citations", [])) | set(basis.get("citations", []))
+    citations = {
+        "proposal": set(proposal.get("citations", [])) if analysis.get("provider") != "Reglas locales" else set(),
+        "review": set(contrast.get("citations", [])) if analysis.get("provider") != "Reglas locales" else set(),
+        "local": set((analysis.get("verified_finding") or {}).get("citations", [])),
+    }
+    cited = set.union(set(basis.get("citations", [])), *citations.values())
     followup = set(analysis.get("followup_event_ids", []))
     context_only = set(basis.get("context_citations", [])) | set(analysis.get("context_event_ids", []))
     selected = direct | cited | followup | context_only
@@ -156,7 +161,9 @@ def build_report(alert, analysis):
         elif key in direct:
             relation = "directa"
         evidence.append({"event_id": key, "source": event["source"], "timestamp": event.get("timestamp"),
-                         "finding": _observed(event), "relation": relation, "cited": key in cited})
+                         "finding": _observed(event), "relation": relation, "cited": key in cited,
+                         "verified": key in citations["local"] and key not in context_only,
+                         "cited_by": [name for name, refs in citations.items() if key in refs]})
     incident = analysis.get("incident") or basis.get("incident")
     if incident:
         incident = _incident_report(identifier, incident, analysis)
@@ -216,7 +223,8 @@ def build_report(alert, analysis):
                         "requires_approval": False, "justification": route["reason"]})
     provider_errors = {phase: analysis[f"{phase}_error"]
                        for phase, timing in (("proposal", "proposal_ms"), ("review", "challenge_ms"))
-                       if timing in analysis["timing"] and analysis.get(f"{phase}_error")}
+                       if analysis.get(f"{phase}_error") and
+                       (timing in analysis["timing"] or phase == "proposal" and analysis.get("proposal_skipped"))}
     return {
         "ticket_id": incident["incident_id"] if incident else f"VIG-{identifier}",
         "alert_ids": incident["alert_ids"] if incident else [identifier],
@@ -233,6 +241,8 @@ def build_report(alert, analysis):
                                                   if row.get("business_service") and
                                                   (not alert.get("external") or row["hostname"] in affected_hostnames)})},
         "evidence": evidence, "enrichment": _enrichment(context), "timeline": timeline,
+        **({"threat_intel": context["inteligencia_vulnerabilidades"]}
+           if context.get("inteligencia_vulnerabilidades") else {}),
         "vulnerabilities": vulnerabilities, "mitre": [alert["mitre"]["technique_id"]]
         if isinstance(alert.get("mitre"), dict) and alert["mitre"].get("technique_id") else [],
         "related_alerts": context.get("alertas_relacionadas", []),

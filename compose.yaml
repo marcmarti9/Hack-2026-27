@@ -1,6 +1,6 @@
 services:
   vigia:
-    build:
+    build: &vigia-build
       context: .
       dockerfile: apps/web/Dockerfile
     ports:
@@ -12,6 +12,7 @@ services:
       VIGIA_DATA_DIR: /dataset
       VIGIA_OUT_DIR: /index
       VIGIA_WEB_OUT: /state
+      VIGIA_THREAT_INTEL_PATH: /intel/snapshot.json
     volumes:
       - type: bind
         source: ${VIGIA_DATASET_PATH:-./data/dataset}
@@ -21,6 +22,7 @@ services:
           create_host_path: false
       - vigia-index:/index
       - vigia-state:/state
+      - vigia-intel:/intel:ro
     healthcheck:
       test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8100/api/estado', timeout=3).close()"]
       interval: 5s
@@ -28,6 +30,21 @@ services:
       retries: 24
       start_period: 45s
 
+  inteligencia:
+    profiles: [inteligencia]
+    build: *vigia-build
+    command: [python, -m, apps.backend.tools.threat_intel]
+    environment:
+      VIGIA_THREAT_INTEL_PATH: /intel/snapshot.json
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - vigia-intel:/intel
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
 volumes:
   vigia-index:
   vigia-state:
+  vigia-intel:
