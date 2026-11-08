@@ -1,16 +1,20 @@
 """Comprueba que la clave de la IA funciona antes de lanzar la pasada completa.
 Uso:  python -m scripts.probar_ia            (una llamada mínima a cada modelo: agentes, fiscal y chat)
-      python -m scripts.probar_ia --caso     (además investiga de verdad el caso del fraude de IBAN)"""
+      python -m scripts.probar_ia --caso     (además investiga de verdad el caso del fraude de IBAN)
+      python -m scripts.probar_ia --solo-config  (comprueba configuración sin llamadas de red)"""
 import json, sys, time
 from apps.backend import config
-from apps.backend.config import DATA, MOCK, PROVEEDOR, ROOT
+from apps.backend.config import DATA, MOCK, PROVEEDOR
 
 def main():
     if MOCK:
         sys.exit("Estás en modo demo (VIGIA_MOCK=1). Pon VIGIA_MOCK=0 en .env para probar la IA de verdad.")
-    clave = "OPENAI_API_KEY=sk-..." if PROVEEDOR == "openai" else "ANTHROPIC_API_KEY=sk-ant-..."
-    if not (config._clave("OPENAI_API_KEY", "sk-") if PROVEEDOR == "openai" else config._clave("ANTHROPIC_API_KEY", "sk-ant-")):
-        sys.exit(f"No hay una clave válida en {ROOT / '.env'} ({clave}).")
+    nombre, prefijo = ("OPENAI_API_KEY", "sk-") if PROVEEDOR == "openai" else ("ANTHROPIC_API_KEY", "sk-ant-")
+    if not config._clave(nombre, prefijo):
+        sys.exit(f"Falta configurar {nombre} en el entorno o en {config.USER_CONFIG}.")
+    if "--solo-config" in sys.argv:
+        print(f"Proveedor {PROVEEDOR}. Se ha cargado {nombre}. Comprobación local, sin llamar a la API.")
+        return
     from apps.backend.agents import llm
     c = config.llm_client()
     print(f"Proveedor: {PROVEEDOR}")

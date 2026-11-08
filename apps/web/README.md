@@ -19,21 +19,25 @@ En Windows puedes ejecutar `powershell -File apps/web/scripts/arrancar.ps1` desd
 
 ## Docker
 
-Desde la raíz:
+Desde la raíz, con la clave en `~/.config/vigia/.env`:
 
 ```bash
 docker build -f apps/web/Dockerfile -t vigia-web .
 docker run --rm -p 127.0.0.1:8100:8100 \
   -v "$PWD/data/dataset:/dataset:ro" \
+  -v "${XDG_CONFIG_HOME:-$HOME/.config}/vigia/.env:/run/vigia-config/vigia/.env:ro" \
+  -e XDG_CONFIG_HOME=/run/vigia-config \
   -v vigia-web-index:/index -v vigia-web-state:/state \
   vigia-web
 ```
 
-Para cargar OpenAI en Docker, añade `--env-file` con el archivo local de configuración al comando `docker run`. El archivo de configuración se queda fuera del repositorio y de la imagen. Esta mesa está preparada para ejecutarse en el equipo de la demo con los datos ficticios de Tarvia. El selector de rol reproduce los perfiles del ejercicio.
+El archivo se monta en modo lectura en el equipo de la demo. Para un ensayo local sin clave, omite el montaje de la configuración y la variable `XDG_CONFIG_HOME`. Si el dataset está en otra carpeta, sustituye `$PWD/data/dataset` por su ruta en el montaje. El selector de rol reproduce los perfiles del ejercicio.
 
 ## OpenAI en directo
 
 Configura `OPENAI_API_KEY` en `~/.config/vigia/.env` o en el `.env` de la raíz y reinicia el servidor. La clave la usa el backend. **Analizar en directo → Alerta nueva de ensayo** prepara una alerta sintética con un registro de Tarvia que el índice puede recuperar. Elige **Guardia**, deja activado **Contrastar con OpenAI** y pulsa **Analizar alertas**.
+
+Para comprobar la carga sin gastar créditos, ejecuta `python -m scripts.probar_ia --solo-config` desde `apps/web` con el entorno virtual activo. El script y la web aceptan la variable de entorno y los archivos de configuración de Vigía, en este orden: configuración de usuario, `.env` de la raíz y `apps/web/.env`. La clave se configura por equipo. Cuando el servidor arranca con la clave, `/api/estado` devuelve `"openai_disponible": true`.
 
 Vigía usa Luna para proponer y Sol para el contraste cuando hay severidad alta, dudas o discrepancias. El veredicto se coteja con las citas y la evidencia local. Un fallo del proveedor queda en el expediente y el escalado de seguridad sigue la política del SOC. Los cierres elegibles por regla se resuelven localmente. [Modelos en OpenAI Docs](https://developers.openai.com/api/docs/guides/latest-model)
 
