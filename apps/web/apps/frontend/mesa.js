@@ -63,6 +63,7 @@ async function vistaMesaDirecto(jid, prellenar = '') {
         <p class="mesa-progress-copy" data-progress>Al iniciar un lote verás aquí la actividad de Vigía.</p>
         <div class="mesa-track" aria-hidden="true"><span data-progress-bar></span></div>
         <p class="mesa-latest" data-latest hidden></p>
+        <button type="button" class="mesa-button mesa-secondary" data-job-results hidden>Ver resultados del lote</button>
         <details data-progress-details hidden><summary>Ver actividad ${chevron}</summary>
           <ol class="mesa-steps" aria-label="Actividad del análisis"></ol>
         </details>
@@ -70,10 +71,11 @@ async function vistaMesaDirecto(jid, prellenar = '') {
     </div>
     <section class="mesa-queue" aria-labelledby="mesa-cola">
       <div class="mesa-queue-heading">
-        <div><h3><span id="mesa-cola">Cola de alertas</span> ${ayudaHTML('los filtros de la cola', 'Escaladas muestra los casos que requieren revisión. Cerradas por Vigía muestra los autocierres, con el informe disponible para consulta.')}</h3><p data-count class="mesa-count"></p></div>
+        <div><h3 tabindex="-1" id="mesa-cola">Cola de alertas ${ayudaHTML('los filtros de la cola', 'Aquí se guardan las alertas que envías a analizar. La hora de la tabla es la del aviso original. Puedes buscar por ID, nombre o archivo.')}</h3><p data-count class="mesa-count"></p></div>
         <div class="mesa-filter">
           <div class="mesa-filters" role="group" aria-label="Filtrar por resolución">
             <button type="button" data-filter="all" aria-pressed="true">Todas</button>
+            <button type="button" data-filter="latest" aria-pressed="false" hidden>Último lote</button>
             <button type="button" data-filter="escalated" aria-pressed="false">Escaladas</button>
             <button type="button" data-filter="automatic" aria-pressed="false">Cerradas por Vigía</button>
           </div>
@@ -88,7 +90,7 @@ async function vistaMesaDirecto(jid, prellenar = '') {
       </section>
       <div class="mesa-mobile-sort">
         <label>Ordenar por <select data-sort-field>
-          <option value="primera">Hora</option><option value="title">Nombre</option>
+          <option value="recibida">Última importación</option><option value="primera">Hora de la alerta</option><option value="title">Nombre</option>
           <option value="severity">Severidad</option><option value="estado">Estado</option>
           <option value="verdict">Veredicto</option><option value="asignado">Asignado</option>
         </select></label>
@@ -100,7 +102,7 @@ async function vistaMesaDirecto(jid, prellenar = '') {
     <div class="mesa-scroll" tabindex="0" aria-label="Cola de alertas del triaje">
       <table class="mesa-table"><caption class="mesa-sr-only">Alertas del triaje</caption>
         <thead><tr>
-          <th scope="col" data-column="primera"><button type="button">Hora</button></th>
+          <th scope="col" data-column="primera"><button type="button">Hora de la alerta</button></th>
           <th scope="col" data-column="title"><button type="button">Nombre</button></th>
           <th scope="col" data-column="severity"><button type="button">Severidad</button></th>
           <th scope="col" data-column="estado"><button type="button">Estado</button></th>
@@ -128,6 +130,7 @@ async function vistaMesaDirecto(jid, prellenar = '') {
   const totalLabel = find('[data-total]');
   const progressBar = find('[data-progress-bar]');
   const latest = find('[data-latest]');
+  const jobResults = find('[data-job-results]');
   const progressDetails = find('[data-progress-details]');
   const steps = find('.mesa-steps');
   const rows = find('tbody');
@@ -153,11 +156,12 @@ async function vistaMesaDirecto(jid, prellenar = '') {
   let alerts = [];
   let snapshot = '';
   let fileName = '';
-  let sort = {field: 'primera', direction: -1};
+  let sort = {field: 'recibida', direction: -1};
   let filter = 'all';
   let expanded = null;
   let reportRequest = 0;
   let jobId = jid || null;
+  let completedBatch = null;
   let cursor = 0;
   let busy = false;
   let polling = false;
@@ -182,11 +186,16 @@ async function vistaMesaDirecto(jid, prellenar = '') {
 
   function renderRows() {
     const term = search.value.trim().toLocaleLowerCase('es');
+    const recentBatch = alerts[0]?.recibida ? alerts[0].job_id : null;
+    find('[data-filter="latest"]').hidden = !recentBatch;
+    jobResults.hidden = !completedBatch || completedBatch !== recentBatch;
     const visible = alerts.filter(row => (filter === 'all' || (filter === 'escalated' && row.estado === 'escalada') ||
-      (filter === 'automatic' && automatic(row))) && [row.alert_id, row.title, severidades[row.severity],
+      (filter === 'latest' && row.job_id === recentBatch) || (filter === 'automatic' && automatic(row))) &&
+      [row.alert_id, row.title, row.origin, severidades[row.severity],
       label(row), veredicto(row.verdict), assignee(row)]
       .some(value => String(value || '').toLocaleLowerCase('es').includes(term)));
     visible.sort((a, b) => {
+      if (sort.field === 'recibida') return sort.direction * (a.recibida || '').localeCompare(b.recibida || '');
       const first = fieldValue(a, sort.field);
       const second = fieldValue(b, sort.field);
       const difference = typeof first === 'number' ? first - second : first.localeCompare(second, 'es');
@@ -405,12 +414,14 @@ async function vistaMesaDirecto(jid, prellenar = '') {
 
   function follow(id) {
     jobId = id;
+    completedBatch = null;
     cursor = 0;
     steps.replaceChildren();
     progressDetails.open = false;
     progressDetails.hidden = true;
     tally.hidden = true;
     latest.hidden = true;
+    jobResults.hidden = true;
     progressBar.style.setProperty('--mesa-completion', 0);
     progress.textContent = 'Recuperando las primeras pruebas.';
     setPhase('running', 'En curso');
@@ -459,6 +470,8 @@ async function vistaMesaDirecto(jid, prellenar = '') {
     progress.textContent = job.fin == null ? `${job.segundos} s en curso` : `Tiempo total · ${job.segundos} s`;
     if (job.fin != null) {
       jobId = null;
+      completedBatch = id;
+      jobResults.hidden = !alerts[0]?.recibida || alerts[0].job_id !== completedBatch;
       if (job.error) {
         setPhase('error', job.estado === 'error' ? 'Con errores' : 'Terminado con incidencias');
         formError(textoVigia(job.error));
@@ -469,6 +482,14 @@ async function vistaMesaDirecto(jid, prellenar = '') {
       setPhase('running', 'En curso');
     }
   }
+
+  jobResults.addEventListener('click', () => {
+    search.value = '';
+    setFilter('latest');
+    renderRows();
+    find('#mesa-cola').focus();
+    find('#mesa-cola').scrollIntoView({block: 'start'});
+  });
 
   async function poll() {
     if (!root.isConnected || polling) return;

@@ -2,6 +2,7 @@
 import json
 import sqlite3
 from contextlib import closing
+from datetime import datetime, timezone
 from hashlib import sha256
 
 from apps.backend.rules.engine import fuera_de_horario
@@ -11,6 +12,7 @@ class LiveQueue:
     def __init__(self, path):
         self.path = path
         with closing(sqlite3.connect(path)) as db, db:
+            db.execute("BEGIN IMMEDIATE")
             db.execute("""
                 CREATE TABLE IF NOT EXISTS web_live_alerts (
                     alert_id TEXT PRIMARY KEY,
@@ -31,6 +33,8 @@ class LiveQueue:
                     has_report INTEGER NOT NULL DEFAULT 0
                 )
             """)
+            if "recibida" not in {row[1] for row in db.execute("PRAGMA table_info(web_live_alerts)")}:
+                db.execute("ALTER TABLE web_live_alerts ADD COLUMN recibida TEXT")
             db.execute("""
                 UPDATE web_live_alerts SET estado='interrumpida', error='El servidor se reinició durante el análisis.'
                 WHERE estado IN ('pendiente', 'en_curso')
@@ -39,6 +43,7 @@ class LiveQueue:
     def add(self, job_id, alerts, origin):
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("BEGIN IMMEDIATE")
+            received_at = datetime.now(timezone.utc).isoformat()
             for alert in alerts:
                 aid = alert["alert_id"]
                 fingerprint = sha256(json.dumps(alert, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
@@ -47,11 +52,11 @@ class LiveQueue:
                     raise ValueError(f"Conflicto de identidad en {aid}. El ID ya corresponde a otra alerta.")
                 db.execute("""
                     INSERT INTO web_live_alerts
-                        (alert_id, job_id, title, primera, severity, fingerprint, origin, estado)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'pendiente')
+                        (alert_id, job_id, title, primera, severity, fingerprint, origin, recibida, estado)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendiente')
                     ON CONFLICT(alert_id) DO UPDATE SET job_id=excluded.job_id, origin=excluded.origin,
-                        estado='pendiente', error=''
-                """, (aid, job_id, alert["rule_name"], alert["created_at"], alert["severity"], fingerprint, origin))
+                        recibida=excluded.recibida, estado='pendiente', error=''
+                """, (aid, job_id, alert["rule_name"], alert["created_at"], alert["severity"], fingerprint, origin, received_at))
 
     def running(self, aid):
         with closing(sqlite3.connect(self.path)) as db, db:
@@ -110,12 +115,12 @@ class LiveQueue:
         with closing(sqlite3.connect(self.path)) as db:
             db.row_factory = sqlite3.Row
             records = db.execute("""
-                SELECT live.alert_id, live.job_id, live.title, live.primera, live.severity, live.origin,
+                SELECT live.alert_id, live.job_id, live.title, live.primera, live.recibida, live.severity, live.origin,
                     live.estado, live.asignado, live.error, live.recommendation, live.summary,
                     live.has_report, live.fiscal, live.motivo_cierre, coalesce(reviews.verdict, live.verdict) AS verdict,
                     reviews.decision, reviews.reviewer
                 FROM web_live_alerts AS live LEFT JOIN reviews ON reviews.alert_id=live.alert_id
-                ORDER BY live.primera DESC, live.alert_id DESC
+                ORDER BY live.recibida DESC, live.primera DESC, live.alert_id DESC
             """).fetchall()
         rows = []
         for record in records:

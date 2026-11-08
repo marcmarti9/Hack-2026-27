@@ -5,7 +5,7 @@ Abre [Vigía](http://127.0.0.1:8100/#panel). El menú lateral se puede plegar. L
 | Sección | Qué puedes ver o hacer |
 | --- | --- |
 | **Panel** | Cifras del SIEM y de la mesa, casos graves escalados, escenarios para el DPO y alertas fuera de horario. **Inteligencia** muestra cuándo se consultó con éxito cada fuente pública. También enlaza al relevo y al recorrido del jurado. |
-| **Triaje** | Carga un JSON o JSONL del SIEM, pega IDs del índice o usa el lote de ensayo. Elige el turno y, si está disponible, el contraste de Vigía. Sigue el progreso y filtra las escaladas y los autocierres. Cada alerta conserva su propia fila e informe. |
+| **Triaje** | Carga un JSON o JSONL, pega IDs o usa el lote de ensayo. Elige el turno y, si está disponible, el contraste de Vigía. Al terminar, pulsa **Ver resultados del lote**. La cola guarda cada informe, permite buscar por ID, nombre o archivo y filtrar por escalado o autocierre. Las nuevas entradas aparecen primero por orden de importación. **Hora de la alerta** muestra el momento del aviso original. |
 | **Casos** | Expedientes con prioridad, veredicto, decisión e historial. Una intrusión acreditada aparece como un caso. Puedes buscar por ID para recuperar el expediente individual de una alerta. |
 | **Descartes** | Alertas del barrido local elegibles para cierre, agrupadas por motivo. Los ejemplos llevan a expedientes con sus citas. Los cierres registrados en la mesa se consultan en Triaje. |
 | **Playbooks** | Los diez runbooks del SOC, con reglas, comprobaciones, decisiones y ejemplos. Abre el texto operativo completo y su revisión, o selecciona **Guía general** para consultar la SKILL. N1 lee y N2 o Responsable pueden guardar una revisión en esta mesa. |

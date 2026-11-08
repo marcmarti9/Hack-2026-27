@@ -104,6 +104,9 @@ def main():
             assert overview["barrido"] == {"investigadas": 0, "abstenciones": 0, "escaladas": 0}
             assert overview["cierres_ejecutados"] == 2
             rows = {row["alert_id"]: row for row in client.get("/api/directo").json()["alertas"]}
+            assert {row["job_id"] for row in rows.values()} == {job_id}
+            received = {row["recibida"] for row in rows.values()}
+            assert len(received) == 1 and None not in received
             first, second = rows[corroborated["alert_id"]], rows[unknown["alert_id"]]
             assert first["verdict"] == "true_positive" and first["estado"] == "escalada"
             assert second["verdict"] == "needs_more_info" and second["provisional"] and second["estado"] == "escalada"
