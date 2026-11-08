@@ -1,22 +1,22 @@
-/* Live desk. Dark graphite surfaces, with jade reserved for action and resolution. */
+/* Mesa de triaje. La cola conserva la prioridad visual sobre la carga. */
 #vista:has(> .mesa) {
-  max-width: 1504px;
-  padding-inline: clamp(16px, 4vw, 56px);
+  container-type: inline-size;
+  padding-inline: clamp(16px, 3vw, 48px);
 }
 
 .mesa {
-  --mesa-card: #171c1d;
-  --mesa-surface: #111616;
-  --mesa-row: #1d2524;
-  --mesa-border: #303a37;
+  --mesa-card: var(--panel);
+  --mesa-surface: var(--fondo);
+  --mesa-row: var(--panel2);
+  --mesa-border: var(--borde);
   --mesa-control-border: #53615a;
-  --mesa-text: #eef2ee;
-  --mesa-muted: #a8b4ad;
-  --mesa-accent: #a4cdb6;
-  --mesa-warn: #ebc58b;
-  --mesa-danger: #f0a29a;
-  --mesa-active: #263c32;
-  --mesa-ease: cubic-bezier(.2, .65, .25, 1);
+  --mesa-text: var(--texto);
+  --mesa-muted: var(--suave);
+  --mesa-accent: var(--marca);
+  --mesa-warn: var(--naranja);
+  --mesa-danger: var(--rojo);
+  --mesa-active: var(--shell-active);
+  --mesa-ease: var(--ease-ui);
   color: var(--mesa-text);
   color-scheme: dark;
 }
@@ -36,9 +36,9 @@
 }
 
 .mesa .mesa-heading h2 {
-  font-size: clamp(29px, 4vw, 43px);
-  line-height: 1.14;
-  letter-spacing: -.043em;
+  font-size: clamp(28px, 3vw, 40px);
+  line-height: 1.15;
+  letter-spacing: -.04em;
   margin: 0 0 9px;
 }
 
@@ -48,32 +48,23 @@
   margin: 0;
 }
 
-.mesa .mesa-context {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--mesa-muted);
-  font-size: 13px;
-}
-
-.mesa .mesa-context svg,
 .mesa .mesa-progress h3 svg { color: var(--mesa-accent); }
 
 .mesa .mesa-intake {
   display: grid;
   grid-template-columns: minmax(0, 1.8fr) minmax(280px, 1fr);
-  gap: 16px;
   margin-bottom: 34px;
+  border: 1px solid var(--mesa-border);
+  border-radius: var(--radius-card);
+  background: var(--mesa-card);
 }
 
 .mesa .mesa-import,
 .mesa .mesa-progress {
-  border: 1px solid var(--mesa-border);
-  border-radius: 13px;
-  background: var(--mesa-card);
   min-width: 0;
   padding: clamp(16px, 2.1vw, 24px);
 }
+.mesa .mesa-progress { border-inline-start: 1px solid var(--mesa-border); }
 
 .mesa .mesa-panel-heading,
 .mesa .mesa-source-row,
@@ -417,7 +408,7 @@
   overflow-x: auto;
   overscroll-behavior-inline: contain;
   border: 1px solid var(--mesa-border);
-  border-radius: 12px;
+  border-radius: var(--radius-card);
   container-type: inline-size;
 }
 
@@ -465,7 +456,7 @@
 }
 .mesa .mesa-alert-row:hover,
 .mesa .mesa-alert-row:focus-within { background: var(--mesa-row); }
-.mesa .mesa-alert-row.mesa-open { background: #1f2d27; }
+.mesa .mesa-alert-row.mesa-open { background: var(--mesa-active); }
 .mesa .mesa-alert-row.mesa-open td:first-child { box-shadow: inset 3px 0 var(--mesa-accent); }
 .mesa .mesa-alert-row time { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .mesa .mesa-alert-row small { display: block; margin-top: 3px; color: var(--mesa-muted); font-size: 12px; }
@@ -534,6 +525,47 @@
 .mesa .mesa-evidence ul { padding-left: 18px; }
 .mesa .mesa-evidence .prueba { color: var(--mesa-accent); }
 
+.mesa .mesa-mobile-sort,
+.mesa .mesa-mobile-meta { display: none; }
+
+@media (max-width: 1050px) {
+  .mesa .mesa-intake { grid-template-columns: minmax(0, 1fr); }
+  .mesa .mesa-progress { border-inline-start: 0; border-block-start: 1px solid var(--mesa-border); }
+}
+
+@container (max-width: 940px) {
+  .mesa .mesa-table { width: 100%; min-width: 0; }
+  .mesa .mesa-table tr:not(.mesa-expanded, .mesa-empty) > :nth-child(1),
+  .mesa .mesa-table tr:not(.mesa-expanded, .mesa-empty) > :nth-child(n + 3):nth-child(-n + 6) { display: none; }
+  .mesa .mesa-table th:nth-child(2) { width: auto; }
+  .mesa .mesa-table :is(th, td):last-child { text-align: end; }
+  .mesa .mesa-table .mesa-expanded td { text-align: start; }
+  .mesa .mesa-table .mesa-alert-row .mesa-actions { justify-content: end; }
+  .mesa .mesa-mobile-meta { display: block; margin-top: 5px; }
+  .mesa .mesa-mobile-meta small { overflow-wrap: anywhere; }
+  .mesa .mesa-empty td:last-child { text-align: center; }
+}
+
+@container (max-width: 940px) {
+  .mesa .mesa-mobile-sort {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 0 0 12px;
+    color: var(--mesa-muted);
+    font-size: 13px;
+  }
+  .mesa .mesa-mobile-sort select { min-height: 36px; }
+}
+
+@container (max-width: 500px) {
+  .mesa .mesa-table :is(th, td) { padding-inline: 9px; }
+  .mesa .mesa-table .mesa-expanded td { padding-inline: 0; }
+  .mesa .mesa-table .mesa-alert-row .mesa-actions { flex-direction: column-reverse; align-items: end; }
+  .mesa .mesa-alert-row .mesa-action { white-space: nowrap; }
+}
+
 @keyframes mesa-reveal {
   from { opacity: .5; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
@@ -546,7 +578,6 @@
   .mesa .mesa-intake,
   .mesa .mesa-report-grid { grid-template-columns: 1fr; }
   .mesa .mesa-heading { align-items: start; }
-  .mesa .mesa-context { display: none; }
 }
 
 @media (pointer: coarse) {

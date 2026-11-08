@@ -1,12 +1,12 @@
 .vigia-report {
-  --report-surface: var(--mesa-card, #171c1d);
-  --report-raised: var(--mesa-row, #1d2524);
-  --report-border: var(--mesa-border, #303a37);
-  --report-text: var(--mesa-text, #eef2ee);
-  --report-muted: var(--mesa-muted, #a8b4ad);
-  --report-accent: var(--mesa-accent, #a4cdb6);
-  --report-warning: #e2b48c;
-  --report-ease: cubic-bezier(.2, .75, .3, 1);
+  --report-surface: var(--panel);
+  --report-raised: var(--panel2);
+  --report-border: var(--borde);
+  --report-text: var(--texto);
+  --report-muted: var(--suave);
+  --report-accent: var(--marca);
+  --report-warning: var(--naranja);
+  --report-ease: var(--ease-ui);
   container-type: inline-size;
   min-width: 0;
   display: grid;
@@ -30,8 +30,7 @@
   padding: 24px;
   background: var(--report-surface);
   border: 1px solid var(--report-border);
-  border-inline-start: 3px solid var(--report-state);
-  border-radius: 12px;
+  border-radius: var(--radius-card);
 }
 .vigia-report-decision.cerrada { --report-state: var(--report-accent); }
 .vigia-report-decision.escalada { --report-state: var(--report-warning); }
@@ -42,7 +41,7 @@
   width: 42px;
   height: 42px;
   border: 1px solid var(--report-border);
-  border-radius: 10px;
+  border-radius: 50%;
   background: var(--report-raised);
   color: var(--report-state);
 }
@@ -82,12 +81,24 @@
 .vigia-report-meta dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; }
 .vigia-report-owners { grid-column: 1 / -1; }
 
-.vigia-report-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.vigia-report-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  border-block: 1px solid var(--report-border);
+}
+.vigia-report .vigia-report-grid > .vigia-report-section {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+.vigia-report .vigia-report-grid > .vigia-report-section + .vigia-report-section {
+  border-inline-start: 1px solid var(--report-border);
+}
 .vigia-report-section {
   min-width: 0;
   padding: 20px 24px;
   border: 1px solid var(--report-border);
-  border-radius: 12px;
+  border-radius: var(--radius-card);
   background: var(--report-surface);
 }
 .vigia-report-section h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 16px; letter-spacing: -.012em; }
@@ -198,6 +209,10 @@
 @container (max-width: 690px) {
   .vigia-report-decision, .vigia-report-grid, .vigia-report-queries { grid-template-columns: minmax(0, 1fr); }
   .vigia-report-decision, .vigia-report-section { padding: 16px; }
+  .vigia-report .vigia-report-grid > .vigia-report-section + .vigia-report-section {
+    border-inline-start: 0;
+    border-block-start: 1px solid var(--report-border);
+  }
   .vigia-report-meta { padding: 12px 0 0; border-inline-start: 0; border-block-start: 1px solid var(--report-border); }
 }
 

@@ -29,11 +29,20 @@ const rol = () => $('#rol').value;
 try { $('#rol').value = localStorage.getItem('vigia_rol') || 'N2'; } catch (e) {}
 $('#rol').onchange = () => { try { localStorage.setItem('vigia_rol', rol()); } catch (e) {} ruta(); };
 
-function contar(el, hasta) {      // números que cuentan hacia arriba
-  const t0 = performance.now(), dur = 900;
-  const paso = t => { const k = Math.min(1, (t - t0) / dur); el.textContent = fmt(Math.round(hasta * (1 - Math.pow(1 - k, 3)))); if (k < 1) requestAnimationFrame(paso); };
-  requestAnimationFrame(paso);
+const menuToggle = $('#plegar-menu');
+function setMenuCollapsed(collapsed) {
+  document.body.classList.toggle('menu-plegado', collapsed);
+  menuToggle.setAttribute('aria-expanded', String(!collapsed));
+  menuToggle.title = collapsed ? 'Desplegar menú' : 'Plegar menú';
+  menuToggle.querySelector('span').textContent = menuToggle.title;
 }
+try { setMenuCollapsed(localStorage.getItem('vigia_menu_plegado') === '1'); } catch {}
+menuToggle.onclick = () => {
+  const collapsed = menuToggle.getAttribute('aria-expanded') === 'true';
+  setMenuCollapsed(collapsed);
+  try { localStorage.setItem('vigia_menu_plegado', collapsed ? '1' : '0'); } catch {}
+};
+
 const tarjetaCaso = t => `<a class="caso" href="${enlace('caso', t.ticket_id)}" style="display:block;color:inherit;text-decoration:none">
   <div class="meta">${sev(t.severity)} <span>${confianza(t.confidence)}</span>
     ${t.out_of_hours ? '<span>· fuera de horario</span>' : ''} ${t.manipulation_detected?.detected ? '<span class="warn">· ⚠ intento de engaño</span>' : ''}
@@ -46,36 +55,40 @@ const vistas = {
   async panel() {
     const [r, ts, rg] = await Promise.all([api('resumen'), api('tickets'), api('rgpd')]);
     const graves = ts.filter(t => t.escalation?.escalate && ['critical', 'high'].includes(t.severity));
-    $('#vista').innerHTML = `<h2>Parte de guardia</h2><p class="sub">Del 5 de octubre al 1 de noviembre de 2026 · SOC de Tarvia</p>
-      <div class="tarjeta parte">El SIEM de Tarvia registró <b>${fmt(r.alertas)} alertas</b>.
-        ${r.corpus_completo ? 'El barrido local cubrió el dataset oficial.' : 'Las cifras de análisis corresponden a esta sesión.'}
-        Hay <b>${fmt(r.investigadas)} expedientes</b>, <b>${fmt(r.escaladas)} escalados</b> y
-        <b>${fmt(r.abstenciones)} alertas sin evidencia suficiente para un veredicto</b>.
-        Se han registrado ${fmt(r.cierres_ejecutados)} cierres automáticos en esta mesa.
-        <p><a class="prueba" href="#presentar">Recorrido para el jurado →</a> · <a class="prueba" href="#relevo">Relevo de guardia →</a></p></div>
-      <div class="embudo">
-        <div class="paso-e"><b data-n="${r.alertas}">0</b><small>alertas del SIEM</small></div>
-        <div class="paso-e"><b data-n="${r.cerradas_por_reglas}">0</b><small>cierres elegibles en el barrido</small></div>
-        <div class="paso-e"><b data-n="${r.investigadas}">0</b><small>expedientes generados</small></div>
-        <div class="paso-e final"><b data-n="${r.escaladas}">0</b><small>alertas con escalado propuesto</small></div>
+    $('#vista').innerHTML = `<section aria-labelledby="guardia-titulo">
+      <div class="guardia-encabezado">
+        <div><h2 id="guardia-titulo">Parte de guardia</h2><p class="sub">5 de octubre al 1 de noviembre de 2026</p></div>
+        <div class="guardia-enlaces">
+          <a class="prueba" href="#presentar">Recorrido para el jurado</a>
+          <a class="prueba" href="#relevo">Relevo de guardia</a>
+          <a class="guardia-cta" href="#directo">Analizar alertas <span aria-hidden="true">→</span></a>
+        </div>
       </div>
-      <h3>Los casos más graves</h3><div class="casos3">${graves.slice(0, 6).map(tarjetaCaso).join('') || '<p>Sin casos todavía: ejecuta el orquestador.</p>'}</div>
-      <div class="dos" style="margin-top:16px">
-        <div class="tarjeta"><h3>Reloj RGPD · escenarios de revisión por DPO</h3>${rg.map(x => `<div class="reloj">
+      <dl class="guardia-metricas">
+        <div><dt>Alertas del SIEM</dt><dd>${fmt(r.alertas)}</dd></div>
+        <div><dt>Expedientes generados</dt><dd>${fmt(r.investigadas)}</dd></div>
+        <div><dt>Cierres registrados</dt><dd>${fmt(r.cierres_ejecutados)}</dd></div>
+        <div><dt>Escalados</dt><dd class="guardia-escaladas">${fmt(r.escaladas)}</dd></div>
+      </dl>
+      <p class="guardia-alcance">${r.corpus_completo
+        ? `Barrido del dataset oficial · ${fmt(r.cerradas_por_reglas)} alertas aptas para cierre según las reglas.`
+        : 'Expedientes y escalados de esta mesa.'}
+        ${fmt(r.abstenciones)} sin evidencia suficiente para un veredicto.</p>
+      <section class="guardia-casos">
+        <h3>Casos graves escalados</h3>
+        <div class="casos3">${graves.slice(0, 6).map(tarjetaCaso).join('') || '<p class="sub">Todavía no hay casos graves escalados en esta mesa.</p>'}</div>
+      </section>
+      <div class="dos guardia-bloques">
+        <div class="tarjeta"><h3>Revisión de brechas por el DPO</h3>${rg.map(x => `<div class="reloj">
           <div><a class="prueba" href="${enlace('caso', x.ticket_id)}"><b>${esc(x.title)}</b></a><br><small>Alerta ${esc(hora(x.inicio))} · referencia +72 h ${esc(hora(x.limite))}<br>
-          El DPO confirma si hay brecha y cuándo se tuvo constancia.</small></div>
-          <div class="h">${x.horas_sin_vigia > 0 ? esc(x.horas_sin_vigia) + ' h<br><small>hasta la apertura</small>' : '<small>SOC abierto</small>'}</div></div>`).join('') || '<p>Sin escenarios registrados para revisión por el DPO.</p>'}</div>
-        <div class="tarjeta"><h3>Lo que el turno de noche no habría visto</h3>
-          <p><b class="ok">${esc(r.fuera_de_horario_total)} %</b> de las alertas del SIEM saltaron con el SOC cerrado.</p>
-          ${r.benchmark?.p50_ms != null ? `<p>Barrido offline · mediana ${esc(r.benchmark.p50_ms)} ms y p95 ${esc(r.benchmark.p95_ms)} ms por alerta.</p>` : ''}
-          <p><a class="prueba" href="#descartado">Ver todo lo que he descartado y por qué →</a></p></div>
+          El DPO confirma si hubo brecha y cuándo se tuvo constancia.</small></div>
+          <div class="h">${x.horas_sin_vigia > 0 ? esc(x.horas_sin_vigia) + ' h<br><small>hasta la apertura</small>' : '<small>SOC abierto</small>'}</div></div>`).join('') || '<p class="sub">Sin casos registrados para revisión por el DPO.</p>'}</div>
+        <div class="tarjeta"><h3>Fuera del horario del SOC</h3>
+          <p><strong class="guardia-fuera">${esc(Number(r.fuera_de_horario_total).toLocaleString('es-ES'))} %</strong> de las alertas del SIEM.</p>
+          ${r.benchmark?.p50_ms != null ? `<p>Barrido local · mediana ${esc(r.benchmark.p50_ms)} ms y p95 ${esc(r.benchmark.p95_ms)} ms por alerta.</p>` : ''}
+          <a class="prueba" href="#descartado">Ver alertas descartadas</a></div>
       </div>
-      <div class="tarjeta listo"><h3>Listo para un SOC gestionado</h3><div class="listo-g">
-        <div><b>Cualquier SIEM</b><small>Lee alertas en JSON: Splunk, Microsoft Sentinel, QRadar o Wazuh cambiando solo el conector.</small></div>
-        <div><b>Vuestros procedimientos</b><small>Los runbooks del cliente se convierten en playbooks que VIGÍA aplica y deja auditados.</small></div>
-        <div><b>El humano decide</b><small>Ninguna contención sin aprobación por rol; cada acción queda registrada con token.</small></div>
-        <div><b>Multicliente</b><small>Un VIGÍA por cliente con su CMDB, su política y su calendario de cambios.</small></div></div></div>`;
-    document.querySelectorAll('[data-n]').forEach(el => contar(el, +el.dataset.n));
+    </section>`;
   },
 
   async bandeja() {
@@ -283,5 +296,12 @@ async function ruta() {
   }
   catch (e) { $('#vista').innerHTML = `<p>No se pudo cargar (${esc(e.message)}). ¿Está arrancado el backend y has ejecutado el orquestador?</p>`; }
 }
-api('estado').then(s => { const d = $('#demo'); d.hidden = false; d.textContent = s.modo_demo ? 'MOTOR LOCAL' : 'OPENAI DISPONIBLE · ' + s.modelo; d.classList.toggle('vivo', !s.modo_demo); }).catch(() => {});
+api('estado').then(s => {
+  const status = $('#demo');
+  $('#proveedor').innerHTML = s.openai_disponible ? 'OpenAI<span class="shell-connection"> disponible</span>' : 'Motor local';
+  status.title = s.openai_disponible ? 'OpenAI disponible' : 'Motor local';
+  $('#modelo').textContent = s.openai_disponible ? s.modelo : '';
+  status.classList.toggle('vivo', s.openai_disponible);
+  status.hidden = false;
+}).catch(() => {});
 window.onhashchange = ruta; ruta();

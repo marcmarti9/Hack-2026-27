@@ -137,7 +137,7 @@ function expedienteHTML(t) {
         </div>
       </div>
       <dl class="vigia-report-meta">
-        ${etiqueta(`Confianza del triaje ${ayudaHTML('la confianza del triaje', 'En el triaje local refleja el respaldo de las pruebas. Si se valida el contraste con OpenAI, muestra la estimación de los modelos.')}`, estimada ? `${Math.round(informe.confidence * 100)} %` : 'Sin estimación')}
+        ${etiqueta(`Confianza ${ayudaHTML('la confianza del triaje', 'En el triaje local refleja el respaldo de las pruebas. Si se valida el contraste con OpenAI, muestra la estimación de los modelos.')}`, estimada ? `${Math.round(informe.confidence * 100)} %` : 'Sin estimación')}
         ${etiqueta('Duración', duracion)}
         ${etiqueta('Plazo', !automatica && hora(ruta.deadline_at))}
         ${etiqueta('Responsables', ruta.recipients?.join(' · '), 'vigia-report-owners')}

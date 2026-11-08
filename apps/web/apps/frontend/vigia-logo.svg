@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="414" viewBox="128 83 768 207" fill="none" role="img" aria-label="VIGIA — logo completo para modo dark">
+  <title>VIGIA</title>
+  <defs>
+    <linearGradient id="eye-gradient" x1="708" y1="181" x2="889" y2="181" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#88C32F"/>
+      <stop offset="0.44" stop-color="#4DAD37"/>
+      <stop offset="0.78" stop-color="#118E47"/>
+      <stop offset="1" stop-color="#006D48"/>
+    </linearGradient>
+  </defs>
+  <path fill="#F3F7FC" d="M138 93H175L238 239L303 93H338L254 278H222Z"/>
+<path fill="#F3F7FC" d="M358 93H392V278H358Z"/>
+<path fill="#F3F7FC" d="M597 119L580 140C565 125 548 118 526 118C486 118 460 145 460 185C460 225 486 253 525 253C542 253 556 248 569 237V202H522V177H600V257C580 272 552 281 524 281C466 281 425 245 425 186C425 128 466 91 525 91C555 91 580 99 597 119Z"/>
+<path fill="#87C627" d="M637 93H671V278H637Z"/>
+<path fill="url(#eye-gradient)" fill-rule="evenodd" d="M879 93L885 114C868 120 852 126 838 133C849 150 854 171 854 194C854 216 849 234 840 249L882 258L885 281C828 273 773 255 731 233C712 223 699 211 699 201C699 189 713 178 735 163C783 129 837 103 879 93ZM790 155C786 172 785 189 787 203C787 217 790 230 795 240C768 231 745 217 726 202C745 182 765 168 790 155ZM819 146C827 163 831 181 831 193C831 208 826 225 819 237C812 223 809 207 809 192C809 176 812 162 819 146Z"/>
+</svg>

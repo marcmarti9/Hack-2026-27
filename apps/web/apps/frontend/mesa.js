@@ -12,8 +12,7 @@ async function vistaMesaDirecto(jid, prellenar = '') {
   view.innerHTML = `<section class="mesa" aria-labelledby="mesa-titulo">
     <header class="mesa-heading">
       <div><h2 id="mesa-titulo">Analizar en directo</h2>
-        <p>Importa alertas y sigue la investigación de Vigía hasta su resolución.</p></div>
-      <span class="mesa-context">${activity} Mesa de operaciones</span>
+        <p>Carga alertas del SIEM y consulta el informe de cada una.</p></div>
     </header>
     <div class="mesa-intake">
       <form class="mesa-import" aria-labelledby="mesa-nuevo">
@@ -87,6 +86,16 @@ async function vistaMesaDirecto(jid, prellenar = '') {
       <section class="mesa-assigned" aria-labelledby="mesa-asignadas" hidden>
         <h4 id="mesa-asignadas">Mis alertas</h4><div data-assigned></div>
       </section>
+      <div class="mesa-mobile-sort">
+        <label>Ordenar por <select data-sort-field>
+          <option value="primera">Hora</option><option value="title">Nombre</option>
+          <option value="severity">Severidad</option><option value="estado">Estado</option>
+          <option value="verdict">Veredicto</option><option value="asignado">Asignado</option>
+        </select></label>
+        <select data-sort-direction aria-label="Dirección del orden">
+          <option value="-1">Descendente</option><option value="1">Ascendente</option>
+        </select>
+      </div>
       <p data-error class="mesa-error" role="status"></p>
     <div class="mesa-scroll" tabindex="0" aria-label="Cola de alertas del análisis en directo">
       <table class="mesa-table"><caption class="mesa-sr-only">Alertas del análisis en directo</caption>
@@ -123,6 +132,8 @@ async function vistaMesaDirecto(jid, prellenar = '') {
   const steps = find('.mesa-steps');
   const rows = find('tbody');
   const search = find('#mesa-buscar');
+  const sortField = find('[data-sort-field]');
+  const sortDirection = find('[data-sort-direction]');
   const errorBox = find('[data-error]');
   const intakeError = find('[data-intake-error]');
   const assigned = find('[data-assigned]');
@@ -194,13 +205,21 @@ async function vistaMesaDirecto(jid, prellenar = '') {
       const verdict = row.verdict ? veredicto(row.verdict) : '—';
       const assigneeLabel = assignee(row) || '—';
       const canAssign = row.estado !== 'cerrada' && (!row.asignado || sameRole(row));
+      const severity = `<span class="mesa-severity" data-level="${esc(row.severity)}">${esc(severidades[row.severity] || 'Sin evaluar')}</span>`;
+      const status = `<span class="mesa-pill" data-state="${esc(row.estado)}">${esc(label(row))}</span>`;
+      const compactDetails = [Number.isFinite(when) ? date.format(when) : '', row.verdict ? verdict : '',
+        row.provisional ? 'Sin corroborar' : '', row.fuera_de_horario ? 'Fuera de horario' : '',
+        row.asignado ? assigneeLabel : '', row.fiscal ? 'Fiscal: ' + row.fiscal : ''].filter(Boolean).join(' · ');
       return `<tr data-alert="${esc(row.alert_id)}" class="mesa-alert-row${opened ? ' mesa-open' : ''}">
         <td><time datetime="${esc(row.primera)}">${Number.isFinite(when) ? esc(date.format(when)) : '—'}</time>
           ${row.fuera_de_horario ? '<small>Fuera de horario</small>' : ''}</td>
         <td><button type="button" class="mesa-name" data-mesa-action="detail" aria-expanded="${opened}"${opened ? ' aria-controls="mesa-expediente"' : ''}>${esc(row.title)}</button>
-          <small class="mono">${esc(row.alert_id)}</small></td>
-        <td><span class="mesa-severity" data-level="${esc(row.severity)}">${esc(severidades[row.severity] || 'Sin evaluar')}</span></td>
-        <td><span class="mesa-pill" data-state="${esc(row.estado)}">${esc(label(row))}</span></td>
+          <small class="mono">${esc(row.alert_id)}</small>
+          <div class="mesa-mobile-meta">${severity} ${status}
+            <small>${esc(compactDetails)}</small>
+          </div></td>
+        <td>${severity}</td>
+        <td>${status}</td>
         <td><span class="mesa-verdict" data-verdict="${esc(row.verdict || '')}">${esc(verdict)}</span>
           ${row.provisional ? '<small>Sin corroborar</small>' : ''}
           ${row.fiscal ? `<small>Fiscal: ${esc(row.fiscal)}</small>` : ''}</td>
@@ -329,10 +348,18 @@ async function vistaMesaDirecto(jid, prellenar = '') {
     renderRows();
   }));
   search.addEventListener('input', renderRows);
+  for (const control of [sortField, sortDirection]) {
+    control.addEventListener('change', () => {
+      sort = {field: sortField.value, direction: Number(sortDirection.value)};
+      renderRows();
+    });
+  }
   root.querySelectorAll('[data-column] button').forEach(button => {
     button.addEventListener('click', () => {
       const field = button.parentElement.dataset.column;
       sort = {field, direction: sort.field === field ? -sort.direction : 1};
+      sortField.value = sort.field;
+      sortDirection.value = sort.direction;
       renderRows();
     });
   });
