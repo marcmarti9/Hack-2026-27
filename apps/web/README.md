@@ -1,43 +1,31 @@
 # Vigía web
 
-Mesa de triaje de Tarvia en el navegador. Usa el índice, las reglas y los expedientes del motor que comparte con Vigía escritorio. En **Analizar en directo** puedes pegar IDs del índice, alertas completas en JSON o un lote JSONL de hasta diez alertas. La pantalla va mostrando la recuperación de registros, las llamadas de propuesta y contraste cuando corresponden, y el guardado del expediente.
+Mesa de triaje de Tarvia en el navegador. **Analizar en directo** recibe lotes nuevos y muestra el progreso y el informe de cada alerta. **Casos** y **Parte de guardia** permiten consultar el histórico. La web comparte el motor de triaje y las reglas de escalado con Vigía escritorio.
 
-## Arranque local
+## Arranque con Docker Compose
 
-Desde la raíz del repositorio, con Python 3.11 o superior y el dataset oficial en `data/dataset`:
-
-```bash
-python -m venv .venv
-. .venv/bin/activate
-python -m pip install -r requirements.txt -r apps/web/requirements.txt
-sh apps/web/scripts/servir.sh
-```
-
-Abre [Vigía web](http://127.0.0.1:8100/). Si usas otra ubicación del dataset, exporta `VIGIA_DATA_DIR` antes de arrancar. El script crea el índice DuckDB en `out/web-index` si hace falta. Puedes reutilizar el del escritorio con `VIGIA_OUT_DIR`. La web guarda sus expedientes, decisiones y revisiones de guías en `out/web/review.sqlite`.
-
-En Windows puedes ejecutar `powershell -File apps/web/scripts/arrancar.ps1` desde la raíz. En Linux y macOS también puedes usar `bash apps/web/scripts/arrancar.sh` para crear el entorno virtual y arrancar la web.
-
-## Docker
-
-Desde la raíz, con la clave en `~/.config/vigia/.env`:
+Con Git y Docker Compose instalados, ejecuta estos comandos desde la raíz del repositorio:
 
 ```bash
-docker build -f apps/web/Dockerfile -t vigia-web .
-docker run --rm -p 127.0.0.1:8100:8100 \
-  -v "$PWD/data/dataset:/dataset:ro" \
-  -v "${XDG_CONFIG_HOME:-$HOME/.config}/vigia/.env:/run/vigia-config/vigia/.env:ro" \
-  -e XDG_CONFIG_HOME=/run/vigia-config \
-  -v vigia-web-index:/index -v vigia-web-state:/state \
-  vigia-web
+git clone https://github.com/dttdfr/DTT-UAB-The-Hack.git data/dataset
+git -C data/dataset checkout --detach 5d7569232756eaf0a8723b22c428b70e8f67824f
+docker compose up -d --build
+docker compose logs -f vigia
 ```
 
-El archivo se monta en modo lectura en el equipo de la demo. Para un ensayo local sin clave, omite el montaje de la configuración y la variable `XDG_CONFIG_HOME`. Si el dataset está en otra carpeta, sustituye `$PWD/data/dataset` por su ruta en el montaje. El selector de rol reproduce los perfiles del ejercicio.
+El primer arranque construye el índice. Con los volúmenes vacíos, la prueba local indexó 814.471 eventos y 11.061 alertas en unos 6 min 44 s. Cuando el log indique que Uvicorn ha arrancado, abre [Vigía web](http://127.0.0.1:8100/#directo). Los volúmenes conservan el índice y el estado de la mesa entre arranques. [Dataset oficial, revisión fijada](https://github.com/dttdfr/DTT-UAB-The-Hack/tree/5d7569232756eaf0a8723b22c428b70e8f67824f)
 
-## OpenAI en directo
+Si ya tienes el dataset, usa esa misma revisión y define `VIGIA_DATASET_PATH` con su ruta. Puedes ponerla en el `.env` local de la raíz junto con `VIGIA_PORT` si el puerto 8100 está ocupado. El dataset se monta en solo lectura.
 
-Configura `OPENAI_API_KEY` en `~/.config/vigia/.env` o en el `.env` de la raíz y reinicia el servidor. La clave la usa el backend. **Analizar en directo → Alerta nueva de ensayo** prepara una alerta sintética con un registro de Tarvia que el índice puede recuperar. Elige **Guardia**, deja activado **Contrastar con OpenAI** y pulsa **Analizar alertas**.
+Para activar OpenAI, añade `OPENAI_API_KEY` al `.env` local de la raíz antes de arrancar. Si ya guardas la clave en otro archivo, define `VIGIA_CONFIG_FILE` con la ruta de ese archivo. Después de cambiar la clave, ejecuta `docker compose up -d --force-recreate vigia`. Comprueba que `/api/estado` devuelve `"openai_disponible": true`. Sin clave, la mesa usa el motor local.
 
-Para comprobar la carga sin gastar créditos, ejecuta `python -m scripts.probar_ia --solo-config` desde `apps/web` con el entorno virtual activo. El script y la web aceptan la variable de entorno y los archivos de configuración de Vigía, en este orden: configuración de usuario, `.env` de la raíz y `apps/web/.env`. La clave se configura por equipo. Cuando el servidor arranca con la clave, `/api/estado` devuelve `"openai_disponible": true`.
+## Probar un lote nuevo
+
+1. En **Analizar en directo**, carga un archivo JSONL de hasta 150 alertas y 1 MB. Usa el mismo formato que `03_alertas/alertas.jsonl` del reto, con un objeto por línea y un identificador único para cada alerta nueva.
+2. Selecciona el turno y pulsa **Analizar alertas**. Si activas el contraste con OpenAI, verás cuándo se hacen la propuesta y la revisión. La mesa conserva los resultados, las asignaciones y las decisiones.
+3. Despliega una fila para consultar su informe. La evidencia declarada procede del archivo del SIEM. La evidencia recuperada se puede comprobar en el índice mediante las citas. Cuando falta corroboración suficiente, Vigía deja el resultado pendiente de verificación. Los casos críticos se escalan según la política del SOC.
+
+Para ensayar antes de recibir el archivo del jurado, carga el [lote de ensayo](../../eval/lote-presentacion-091.jsonl) o pulsa **Alerta nueva de ensayo** para usar una entrada sintética que referencia un registro de Tarvia.
 
 Vigía usa Luna para proponer y Sol para el contraste cuando hay severidad alta, dudas o discrepancias. El veredicto se coteja con las citas y la evidencia local. Un fallo del proveedor queda en el expediente y el escalado de seguridad sigue la política del SOC. Los cierres elegibles por regla se resuelven localmente. [Modelos en OpenAI Docs](https://developers.openai.com/api/docs/guides/latest-model)
 
@@ -54,4 +42,4 @@ También puedes indicar su ruta con `VIGIA_WEB_CORPUS`. La web distingue los cie
 
 Para enseñar el aislamiento, arranca el simulador oficial en el mismo entorno de red del backend, configura `VIGIA_SIM_PORT` y una clave de práctica de 10 a 128 caracteres en `VIGIA_WEB_N2_PASSWORD`. Vigía muestra la opción solo si el expediente y el puesto cumplen la política. La acción requiere confirmación, justificación y reautenticación N2.
 
-[Guion de la defensa web](../../docs/defensa-web.md) · [EPIC](../../EPIC.md). Los scripts de agentes del prototipo previo siguen disponibles para experimentos independientes desde `apps/web`. El recorrido de presentación se inicia con `servir.sh`.
+[Guion de la defensa web](../../docs/defensa-web.md) · [EPIC](../../EPIC.md)

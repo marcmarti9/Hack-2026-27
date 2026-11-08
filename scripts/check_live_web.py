@@ -57,6 +57,20 @@ def main():
             assert client.put(assign, json={"rol": "N1", "asignarme": True}).status_code == 409
             persisted = {row["alert_id"]: row for row in LiveQueue(defensa.reviews.path).rows()}
             assert persisted[first["alert_id"]]["rol"] == "N2"
+            assert client.post(f"/api/decision/{first['alert_id']}", json={
+                "decision": "accepted", "verdict": "true_positive", "rol": "N2"
+            }).status_code == 200
+            with patch("apps.web.apps.backend.defensa.investigate") as investigator:
+                retry = client.post("/api/analizar", json={"texto": json.dumps(corroborated), "remoto": True})
+                assert retry.status_code == 200
+                until = monotonic() + 5
+                while monotonic() < until:
+                    retried = client.get(f"/api/trabajo/{retry.json()['trabajo']}").json()
+                    if retried["fin"]:
+                        break
+                    sleep(0.04)
+                assert retried["estado"] == "terminado" and "reutilizó" in retried["pasos"][0]["texto"]
+                investigator.assert_not_called()
             changed = {**corroborated, "rule_name": "Otro contenido"}
             assert client.post("/api/analizar", json={"texto": json.dumps(changed)}).status_code == 409
 
@@ -67,7 +81,10 @@ def main():
         with patch("apps.desktop.review.openai_message", return_value=json.dumps(result)) as request:
             analysis = investigate(_external(unknown), remote=True, triage=True, mode="guardia")
             assert request.call_count == 2
-            assert request.call_args_list[0].args[1]["alerta"]["declared_evidence"] == unknown["evidence"]
+            first = request.call_args_list[0]
+            assert first.args[1]["alerta"]["declared_evidence"] == unknown["evidence"]
+            assert not first.args[1]["alerta"]["related_events"] and first.args[1]["referencias_sin_recuperar"] == 1
+            assert first.kwargs["schema"]["properties"]["verdict"]["enum"] == ["needs_more_info"]
             assert analysis["proposal"]["verdict"] == "needs_more_info"
             assert analysis["verdict"] == "needs_more_info" and analysis["confidence"] is None
             assert analysis["routing"]["recommendation"] == "escalate"

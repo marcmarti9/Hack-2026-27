@@ -302,33 +302,53 @@ def _stage(job, kind, text):
         job["pasos"].append({"tipo": kind, "texto": text})
 
 
+def _save_live_analysis(aid, analysis):
+    report = analysis["report"]
+    stored = {}
+
+    def finalize(connection, saved):
+        nonlocal report, stored
+        if saved:
+            if report["routing"]["automatic"]:
+                stored = {"decision": "automatic", "verdict": report["verdict"]}
+        else:
+            previous, decision, verdict = connection.execute(
+                "SELECT analysis, decision, verdict FROM reviews WHERE alert_id=?", (aid,)
+            ).fetchone()
+            report = (json.loads(previous or "null") or {}).get("report") or corpus_report(aid)
+            if report is None:
+                raise ValueError("La decisión anterior no tiene un informe disponible.")
+            stored = {"decision": decision, "verdict": verdict}
+        live_queue.finish(connection, aid, report)
+
+    reviews.save_analysis(aid, analysis, before_commit=finalize)
+    return report, stored
+
+
 def _run(job, alerts, mode, remote):
     try:
         errors = {}
         for alert in alerts:
             aid = alert["alert_id"]
+            if previous := live_queue.reuse(aid, corpus_report):
+                _stage(job, "guardado", f"{aid} · se reutilizó el expediente con decisión vigente.")
+                with lock:
+                    job["tickets"].append(_summary(alert, *previous))
+                continue
             live_queue.running(aid)
             _stage(job, "caso", f"{aid} · recuperando registros, inventario y contexto.")
             try:
                 guidance = reviews.guidance(alert["runbook"]) if remote else None
                 analysis = investigate(alert, remote, guidance, triage=True, mode=mode,
                                        on_stage=lambda kind, text: _stage(job, kind, f"{aid} · {text}"))
-                saved = reviews.save_analysis(aid, analysis)
-                stored = {}
-                if saved:
-                    report = analysis["report"]
-                    if report["routing"]["automatic"]:
-                        stored = {"decision": "automatic", "verdict": report["verdict"]}
-                else:
-                    _, analysis, report, stored = record(aid)
-                live_queue.finish(aid, report, "")
+                report, stored = _save_live_analysis(aid, analysis)
             except ValueError as error:
                 errors[aid] = str(error)
             except Exception:
                 log.exception("Falló el triaje del expediente %s", aid)
                 errors[aid] = "No se pudo guardar el expediente de esta alerta."
             if aid in errors:
-                live_queue.finish(aid, None, errors[aid])
+                live_queue.fail(aid, errors[aid])
                 _stage(job, "error", f"{aid} · {errors[aid]}")
                 continue
             if report.get("provider_errors"):

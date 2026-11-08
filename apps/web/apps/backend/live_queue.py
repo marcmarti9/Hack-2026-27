@@ -57,27 +57,42 @@ class LiveQueue:
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("UPDATE web_live_alerts SET estado='en_curso' WHERE alert_id=?", (aid,))
 
-    def finish(self, aid, report, error):
+    def fail(self, aid, error):
         with closing(sqlite3.connect(self.path)) as db, db:
-            if error:
-                db.execute("UPDATE web_live_alerts SET estado='error', error=? WHERE alert_id=?", (error, aid))
-            else:
-                proposal, challenge = report.get("propuesta") or {}, report.get("contraste") or {}
-                fiscal = None
-                if proposal and challenge and report.get("provider") != "Reglas locales":
-                    fiscal = "acuerdo" if proposal["verdict"] == challenge["verdict"] else "discrepa"
-                db.execute("""
-                    UPDATE web_live_alerts SET estado='investigada', error='', severity=?, verdict=?,
-                        recommendation=?, summary=?, fiscal=?, motivo_cierre=?, has_report=1 WHERE alert_id=?
-                """, (report["severity"], report["verdict"], report["routing"]["recommendation"],
-                      report["summary"], fiscal,
-                      report["routing"]["reason"] if report["routing"]["automatic"] else None, aid))
+            db.execute("UPDATE web_live_alerts SET estado='error', error=? WHERE alert_id=?", (error, aid))
+
+    def finish(self, db, aid, report):
+        proposal, challenge = report.get("propuesta") or {}, report.get("contraste") or {}
+        fiscal = None
+        if proposal and challenge and report.get("provider") != "Reglas locales":
+            fiscal = "acuerdo" if proposal["verdict"] == challenge["verdict"] else "discrepa"
+        route = report["routing"]
+        db.execute("""
+            UPDATE web_live_alerts SET estado='investigada', error='', severity=?, verdict=?,
+                recommendation=?, summary=?, fiscal=?, motivo_cierre=?, has_report=1 WHERE alert_id=?
+        """, (report["severity"], report["verdict"], route["recommendation"], report["summary"], fiscal,
+              route["reason"] if route["automatic"] else None, aid))
 
     def fail_pending(self, job_id, error):
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("""
                 UPDATE web_live_alerts SET estado='error', error=? WHERE job_id=? AND estado IN ('pendiente', 'en_curso')
             """, (error, job_id))
+
+    def reuse(self, aid, fallback):
+        """Proyecta un expediente decidido en el nuevo lote sin volver a analizarlo."""
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("""
+                SELECT analysis, decision, verdict FROM reviews WHERE alert_id=? AND decision IS NOT NULL
+            """, (aid,)).fetchone()
+            if row:
+                previous, decision, verdict = row
+                report = (json.loads(previous or "null") or {}).get("report") or fallback(aid)
+                if report:
+                    self.finish(db, aid, report)
+                    return report, {"decision": decision, "verdict": verdict}
+        return None
 
     def assign(self, aid, actor, assigning):
         with closing(sqlite3.connect(self.path)) as db, db:

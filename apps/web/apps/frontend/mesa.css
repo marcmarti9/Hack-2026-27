@@ -1,0 +1,254 @@
+.mesa {
+  --mesa-bg: #1b2231;
+  --mesa-card: #222b3d;
+  --mesa-row: #283345;
+  --mesa-border: #384760;
+  --mesa-text: #e7edf8;
+  --mesa-muted: #aebdd1;
+  --mesa-accent: #90aaff;
+  width: min(calc(100vw - 48px), 1560px);
+  margin-inline: calc((100% - min(calc(100vw - 48px), 1560px)) / 2);
+  color: var(--mesa-text);
+  background: var(--mesa-bg);
+  border: 1px solid var(--mesa-border);
+  border-radius: 8px;
+  padding: 24px;
+}
+
+.mesa [hidden] { display: none !important; }
+
+.mesa .mesa-heading {
+  position: static;
+  display: block;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0 0 20px;
+}
+
+.mesa .mesa-heading p { margin: 0; color: var(--mesa-muted); }
+.mesa h3 { font-weight: 650; }
+.mesa .mesa-intake {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(250px, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.mesa .mesa-import,
+.mesa .mesa-progress,
+.mesa .mesa-assigned {
+  border: 1px solid var(--mesa-border);
+  border-radius: 6px;
+  background: var(--mesa-card);
+  min-width: 0;
+  padding: 16px;
+}
+
+.mesa .mesa-label,
+.mesa .mesa-source,
+.mesa .mesa-count {
+  color: var(--mesa-muted);
+  font-size: 13px;
+}
+
+.mesa textarea,
+.mesa input[type="search"],
+.mesa select {
+  border: 1px solid var(--mesa-border);
+  background: #192130;
+  color: var(--mesa-text);
+  border-radius: 5px;
+  font: inherit;
+}
+
+.mesa textarea {
+  display: block;
+  resize: vertical;
+  width: 100%;
+  min-height: 64px;
+  margin-top: 6px;
+  padding: 8px 10px;
+}
+
+.mesa textarea::placeholder,
+.mesa input[type="search"]::placeholder { color: var(--mesa-muted); }
+
+.mesa .mesa-toolbar,
+.mesa .mesa-actions,
+.mesa .mesa-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mesa .mesa-toolbar { margin-top: 12px; }
+.mesa .mesa-toolbar label:not(.mesa-button) { font-size: 13px; }
+.mesa .mesa-toolbar input[type="checkbox"] { accent-color: var(--mesa-accent); }
+.mesa select { padding: 5px 8px; }
+.mesa .mesa-source { margin: 8px 0 0; overflow-wrap: anywhere; }
+
+.mesa .mesa-button,
+.mesa .mesa-action {
+  display: inline-block;
+  border: 1px solid var(--mesa-border);
+  border-radius: 5px;
+  padding: 5px 9px;
+  color: var(--mesa-text);
+  background: #28364b;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.mesa .mesa-button:hover,
+.mesa .mesa-action:hover { background: #344762; }
+.mesa .mesa-primary { color: #151e2f; background: var(--mesa-accent); border-color: var(--mesa-accent); }
+.mesa .mesa-primary:hover { background: #afc0ff; }
+.mesa :focus-visible,
+.mesa label:has(+ .mesa-file-input:focus-visible) { outline: 2px solid var(--mesa-accent); outline-offset: 2px; }
+
+.mesa .mesa-sr-only,
+.mesa .mesa-file-input {
+  position: absolute;
+  clip-path: inset(50%);
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.mesa .mesa-progress p,
+.mesa .mesa-progress summary { font-size: 13px; color: var(--mesa-muted); }
+.mesa .mesa-progress summary { cursor: pointer; }
+.mesa .mesa-steps {
+  max-height: 145px;
+  overflow: auto;
+  padding-left: 20px;
+  font-size: 13px;
+  color: var(--mesa-muted);
+}
+
+.mesa .mesa-assigned { margin-bottom: 20px; }
+.mesa .mesa-assigned p {
+  margin: 0;
+  color: var(--mesa-muted);
+  background: var(--mesa-row);
+  border: 1px dashed var(--mesa-border);
+  padding: 8px 11px;
+  border-radius: 4px;
+}
+
+.mesa .mesa-assigned ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.mesa .mesa-assigned li {
+  padding: 4px 9px;
+  background: var(--mesa-row);
+  border-radius: 5px;
+}
+
+.mesa .mesa-assigned span { color: var(--mesa-muted); }
+.mesa .mesa-filter { margin-bottom: 16px; }
+.mesa .mesa-filter input { width: min(100%, 260px); padding: 6px 10px; }
+.mesa .mesa-error { color: #ffb6b2; margin: 0; overflow-wrap: anywhere; }
+
+.mesa .mesa-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--mesa-border);
+  border-radius: 6px;
+}
+
+.mesa .mesa-table { min-width: 920px; font-size: 14px; }
+.mesa .mesa-table :is(th, td) { border-bottom: 0; padding: 13px 15px; vertical-align: middle; }
+.mesa .mesa-table th { background: var(--mesa-card); color: var(--mesa-text); white-space: nowrap; }
+.mesa .mesa-table th:first-child { width: 17%; }
+.mesa .mesa-table th:nth-child(2) { width: 26%; }
+.mesa .mesa-table th:nth-child(3) { width: 11%; }
+.mesa .mesa-table th:nth-child(4) { width: 13%; }
+.mesa .mesa-table th:nth-child(5) { width: 14%; }
+.mesa .mesa-table th:last-child { min-width: 154px; }
+.mesa .mesa-table .mesa-alert-row .mesa-actions { flex-wrap: nowrap; }
+.mesa .mesa-table th[aria-sort="ascending"] button,
+.mesa .mesa-table th[aria-sort="descending"] button { color: var(--mesa-accent); text-decoration: underline; text-underline-offset: 4px; }
+
+.mesa .mesa-table th button,
+.mesa .mesa-name {
+  color: inherit;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.mesa .mesa-table th button { font-weight: 650; }
+.mesa .mesa-name:hover { color: var(--mesa-accent); }
+.mesa .mesa-alert-row { background: var(--mesa-row); cursor: pointer; }
+.mesa .mesa-alert-row:nth-of-type(even) { background: var(--mesa-card); }
+.mesa .mesa-alert-row:hover,
+.mesa .mesa-alert-row.mesa-open { background: #303d55; }
+.mesa .mesa-alert-row time { white-space: nowrap; }
+.mesa .mesa-alert-row small { display: block; margin-top: 3px; color: var(--mesa-muted); font-size: 11px; }
+.mesa .mesa-empty td { color: var(--mesa-muted); background: var(--mesa-card); text-align: center; padding: 30px 16px; }
+
+.mesa .mesa-pill,
+.mesa .mesa-verdict {
+  display: inline-block;
+  font-size: 12px;
+  line-height: 1.4;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: #37465d;
+  color: var(--mesa-text);
+}
+
+.mesa [data-level="critical"],
+.mesa [data-state="error"],
+.mesa [data-verdict="false_positive"] { color: #ffb4b7; }
+.mesa [data-level="high"] { color: #ffbc84; }
+.mesa [data-level="medium"],
+.mesa [data-state="escalada"],
+.mesa [data-verdict="needs_more_info"] { color: #f3d487; }
+.mesa [data-level="low"],
+.mesa [data-state="cerrada"],
+.mesa [data-verdict="true_positive"],
+.mesa [data-verdict="benign_true_positive"] { color: #b1e4a2; }
+.mesa [data-state="cerrada"],
+.mesa [data-verdict="true_positive"],
+.mesa [data-verdict="benign_true_positive"] { background: #304b44; }
+.mesa [data-verdict="false_positive"] { background: #543743; }
+.mesa [data-state="en_curso"] { color: #c4d0ff; }
+
+.mesa .mesa-expanded > td { padding: 0; }
+.mesa #mesa-expediente { border-block: 1px solid var(--mesa-border); background: #1d2637; padding: 18px; overflow-wrap: anywhere; }
+.mesa .mesa-report-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 14px; }
+.mesa .mesa-report-heading p { margin: 0; color: var(--mesa-muted); }
+.mesa #mesa-expediente .tarjeta,
+.mesa .mesa-evidence { background: var(--mesa-card); border-color: var(--mesa-border); }
+.mesa .mesa-report-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.mesa .mesa-evidence { padding: 14px; border: 1px solid var(--mesa-border); border-radius: 6px; }
+.mesa .mesa-evidence h4 { margin: 0 0 8px; }
+.mesa .mesa-evidence p { margin: 0; color: var(--mesa-muted); }
+.mesa .mesa-evidence ul { padding-left: 18px; }
+.mesa .mesa-evidence .prueba { color: var(--mesa-accent); }
+
+@media (max-width: 800px) {
+  .mesa { width: 100%; margin-inline: 0; padding: 14px; }
+  .mesa .mesa-intake,
+  .mesa .mesa-report-grid { grid-template-columns: 1fr; }
+  .mesa .mesa-report-heading { flex-wrap: wrap; }
+  .mesa #mesa-expediente { position: sticky; left: 0; width: calc(100vw - 68px); }
+}

@@ -206,7 +206,7 @@ const vistas = {
 
   async playbooks(id) { await vistaPlaybooks(id); },
 
-  async directo(jid) { await vistaDirecto(jid); },
+  async directo(jid) { await vistaMesaDirecto(jid); },
 
   async relevo() {
     const r = await api('relevo');
@@ -265,7 +265,7 @@ async function ruta() {
   const [v, raw, prefill] = (location.hash.slice(1) || 'panel').split('/');
   document.querySelectorAll('nav a').forEach(a => a.classList.toggle('activo', a.getAttribute('href') === '#' + (v === 'caso' ? 'bandeja' : v)));
   try {
-    if (v === 'directo' && raw === 'nueva') await vistaDirecto(undefined, decodeURIComponent(prefill || ''));
+    if (v === 'directo' && raw === 'nueva') await vistaMesaDirecto(undefined, decodeURIComponent(prefill || ''));
     else await (vistas[v] || vistas.panel)(raw && decodeURIComponent(raw));
     window.scrollTo(0, 0);
   }
