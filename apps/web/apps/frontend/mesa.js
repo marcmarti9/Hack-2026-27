@@ -18,7 +18,7 @@ async function vistaMesaDirecto(jid, prellenar = '') {
     <div class="mesa-intake">
       <form class="mesa-import" aria-labelledby="mesa-nuevo">
         <div class="mesa-panel-heading">
-          <h3 id="mesa-nuevo">Nuevo lote</h3>
+          <h3><span id="mesa-nuevo">Nuevo lote</span> ${ayudaHTML('el nuevo lote', 'Carga un archivo JSON o JSONL del SIEM, pega alertas o usa un lote de ensayo para probar la mesa.')}</h3>
           <span class="mesa-format">JSON / JSONL</span>
         </div>
         <label class="mesa-sr-only" for="mesa-texto">Alertas en formato JSON o JSONL</label>
@@ -41,15 +41,23 @@ async function vistaMesaDirecto(jid, prellenar = '') {
         <p class="mesa-error" data-intake-error role="alert"></p>
         <div class="mesa-submit-row">
           <div class="mesa-toolbar">
-            <label class="mesa-control">Turno <select name="modo"><option value="guardia">Guardia</option><option value="diurno">Horario atendido</option></select></label>
-            <label class="mesa-control"><input type="checkbox" name="remoto" ${settings.openai_disponible ? '' : 'disabled'}> Contrastar con OpenAI</label>
+            <span class="mesa-control">
+              <label class="mesa-control">Turno <select name="modo"><option value="guardia">Guardia</option><option value="diurno">Horario atendido</option></select></label>
+              ${ayudaHTML('el turno', 'El turno indica si el equipo está atendiendo el SOC. Las alertas críticas se escalan en ambos modos.')}
+            </span>
+            <span class="mesa-control">
+              <label class="mesa-control"><input type="checkbox" name="remoto" ${settings.openai_disponible ? '' : 'disabled'}> Contrastar con OpenAI</label>
+              ${ayudaHTML('el contraste con OpenAI', settings.openai_disponible
+                ? 'Añade una propuesta de IA y una segunda revisión que busca contradicciones. Las citas del índice respaldan la decisión.'
+                : 'OpenAI no está disponible en esta sesión. Puedes analizar el lote con el motor local.')}
+            </span>
           </div>
           <button class="mesa-button mesa-primary" type="submit">Analizar lote ${arrow}</button>
         </div>
       </form>
       <section class="mesa-progress" aria-labelledby="mesa-progreso" data-phase="idle">
         <div class="mesa-panel-heading">
-          <h3 id="mesa-progreso">${activity} Progreso del lote</h3>
+          <h3>${activity} <span id="mesa-progreso">Progreso del lote</span> ${ayudaHTML('el progreso', 'Muestra cuántas alertas se han investigado. Abre «Ver actividad» para seguir las consultas y el guardado de informes.')}</h3>
           <span class="mesa-phase" data-phase-label role="status">En espera</span>
         </div>
         <p class="mesa-tally" data-tally hidden><strong data-completed>0</strong><span data-total></span></p>
@@ -63,7 +71,7 @@ async function vistaMesaDirecto(jid, prellenar = '') {
     </div>
     <section class="mesa-queue" aria-labelledby="mesa-cola">
       <div class="mesa-queue-heading">
-        <div><h3 id="mesa-cola">Cola de alertas</h3><p data-count class="mesa-count"></p></div>
+        <div><h3><span id="mesa-cola">Cola de alertas</span> ${ayudaHTML('los filtros de la cola', 'Escaladas muestra los casos que requieren revisión. Cerradas por Vigía muestra los autocierres, con el informe disponible para consulta.')}</h3><p data-count class="mesa-count"></p></div>
         <div class="mesa-filter">
           <div class="mesa-filters" role="group" aria-label="Filtrar por resolución">
             <button type="button" data-filter="all" aria-pressed="true">Todas</button>
@@ -250,11 +258,11 @@ async function vistaMesaDirecto(jid, prellenar = '') {
       ${!ticket.expediente ? `<p>${esc(ticket.summary || row.summary)}</p>` : ''}
       ${expedienteHTML(ticket)}
       <div class="mesa-report-grid">
-        <section class="mesa-evidence"><h4>Evidencia recuperada <span>${events.length}</span></h4>
+        <section class="mesa-evidence"><h4>Evidencia recuperada <span class="mesa-evidence-count">${events.length}</span> ${ayudaHTML('la evidencia recuperada', 'Son registros encontrados en el índice. Pulsa el identificador de un evento para consultar el registro original.')}</h4>
           ${events.length ? `<ul>${events.map(event => `<li><button type="button" class="mesa-name prueba" data-event="${esc(event.event_id)}">${esc(event.event_id)}</button> · ${esc(event.finding || event.source)}</li>`).join('')}</ul>` : '<p>El índice no devolvió registros para verificar esta alerta.</p>'}
           <div data-event-output role="status" hidden></div>
         </section>
-        <section class="mesa-evidence"><h4>Declarada por el sensor</h4>
+        <section class="mesa-evidence"><h4>Declarada por el sensor ${ayudaHTML('la evidencia declarada', 'Son datos que venían en el archivo del SIEM. Las citas del expediente indican cuáles se pudieron comprobar.')}</h4>
           ${declared && typeof declared === 'object' && Object.keys(declared).length
             ? `<p>Campos aportados por el sensor. Las citas del informe indican qué se verificó.</p>${registroHTML(declared)}`
             : '<p>La alerta no aportó evidencia declarada adicional.</p>'}

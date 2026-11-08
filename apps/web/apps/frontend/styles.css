@@ -76,6 +76,78 @@ th { color:var(--suave); font-weight:600; font-size:13px; }
 button { background:var(--marca); color:#0a0a0a; border:0; border-radius:8px; padding:7px 14px; font-weight:700; cursor:pointer; font-family:inherit; }
 button.sec { background:var(--panel2); color:var(--texto); border:1px solid var(--borde); }
 button:disabled { opacity:.4; cursor:not-allowed; }
+
+.vigia-help {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  margin-inline-start: .25em;
+  vertical-align: middle;
+}
+.vigia-help-button {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid #4b6259;
+  border-radius: 50%;
+  background: #202c28;
+  color: #badbcc;
+  font: 700 12px/1 system-ui, sans-serif;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+.vigia-help-button:hover, .vigia-help-button:focus-visible {
+  background: #30453c;
+  border-color: #98c8b0;
+}
+.vigia-help-button:focus-visible { outline: 2px solid #98c8b0; outline-offset: 2px; }
+.vigia-help-tip {
+  position: fixed;
+  inset: auto;
+  width: max-content;
+  max-width: min(275px, calc(100vw - 16px));
+  overflow: visible;
+  margin: 0;
+  padding: 9px 12px;
+  border: 1px solid #42564e;
+  border-radius: 8px;
+  background: #202c28;
+  color: #e5f1e9;
+  box-shadow: 0 8px 22px #0007;
+  font: 500 13px/1.45 system-ui, sans-serif;
+  letter-spacing: normal;
+  text-align: start;
+}
+.vigia-help-tip::before {
+  content: "";
+  position: absolute;
+  top: -5px;
+  left: clamp(8px, var(--help-arrow), calc(100% - 8px));
+  width: 8px;
+  height: 8px;
+  background: inherit;
+  border: solid #42564e;
+  border-width: 1px 0 0 1px;
+  transform: translateX(-50%) rotate(45deg);
+}
+.vigia-help-tip[data-side="above"]::before {
+  top: auto;
+  bottom: -5px;
+  transform: translateX(-50%) rotate(225deg);
+}
+.vigia-help-tip:popover-open { animation: vigia-help-in 140ms ease-out; }
+@keyframes vigia-help-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vigia-help-button { transition: none; }
+  .vigia-help-tip:popover-open { animation: none; }
+}
+@media (pointer: coarse) {
+  .vigia-help-button { width: 24px; height: 24px; }
+}
 input[type=text] { width:100%; padding:12px; border-radius:10px; border:1px solid var(--borde); background:#070707; color:var(--texto); font-size:15px; font-family:inherit; }
 .mapa-ctrl { display:flex; gap:12px; align-items:center; margin-bottom:12px; flex-wrap:wrap; }
 .mapa-ctrl input[type=range] { flex:1; min-width:220px; accent-color:var(--marca); }

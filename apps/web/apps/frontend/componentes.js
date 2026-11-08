@@ -137,7 +137,7 @@ function expedienteHTML(t) {
         </div>
       </div>
       <dl class="vigia-report-meta">
-        ${etiqueta('Confianza del triaje', estimada ? `${Math.round(informe.confidence * 100)} %` : 'Sin estimación')}
+        ${etiqueta(`Confianza del triaje ${ayudaHTML('la confianza del triaje', 'En el triaje local refleja el respaldo de las pruebas. Si se valida el contraste con OpenAI, muestra la estimación de los modelos.')}`, estimada ? `${Math.round(informe.confidence * 100)} %` : 'Sin estimación')}
         ${etiqueta('Duración', duracion)}
         ${etiqueta('Plazo', !automatica && hora(ruta.deadline_at))}
         ${etiqueta('Responsables', ruta.recipients?.join(' · '), 'vigia-report-owners')}
@@ -164,7 +164,7 @@ function expedienteHTML(t) {
         ${registro('Alcance del incidente N2', informe.incident?.scope)}
       </section>
       <section class="vigia-report-section">
-        <h3>Propuesta y revisión adversarial</h3>
+        <h3>Propuesta y revisión adversarial ${ayudaHTML('la revisión adversarial', 'La segunda revisión busca pruebas en contra y comprueba si las citas respaldan la propuesta inicial.')}</h3>
         <ol class="vigia-report-review">
           <li><strong>${fuente === 'Reglas locales' ? 'Comprobación local' : 'Primera propuesta'}</strong>
             <span>${esc(fuente || 'Sin proveedor registrado')}</span>
@@ -185,7 +185,7 @@ function expedienteHTML(t) {
       </section>
     </div>
     <section class="vigia-report-section">
-      <h3>Consultas al índice <span class="vigia-report-count">${fmt(consultas.length)}</span></h3>
+      <h3>Consultas al índice <span class="vigia-report-count">${fmt(consultas.length)}</span> ${ayudaHTML('las consultas al índice', 'Cada consulta muestra dónde buscó Vigía, qué datos usó, cuántos registros encontró y qué límites tuvo la búsqueda.')}</h3>
       ${consultas.length ? `<ul class="vigia-report-queries">${consultas.map(c => `<li>
         <div><strong>${esc(c.tool)}</strong><p>${esc(c.query)}</p>${c.note ? `<p>${esc(c.note)}</p>` : ''}</div>
         ${c.count != null ? `<span>${fmt(c.count)} ${c.count === 1 ? 'resultado' : 'resultados'}</span>` : ''}
